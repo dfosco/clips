@@ -167,10 +167,12 @@ export function importIssue(issueData) {
     fs.mkdirSync(dbDir, { recursive: true });
   }
 
-  const clippedDesc =
-    issueData.body && issueData.body.length > 200
-      ? issueData.body.slice(0, 200) + '…'
-      : issueData.body || '';
+  const config = readConfig();
+  const maxLen = config.body_max_length;
+  const desc = issueData.body || '';
+  const clippedDesc = maxLen && desc.length > maxLen
+    ? desc.slice(0, maxLen) + '…'
+    : desc;
 
   // goal_created
   appendEvent(

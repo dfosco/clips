@@ -13,6 +13,7 @@ export const DEFAULT_CONFIG = {
   username: null,               // user's GitHub username
   collaboration: true,          // if false, .clips is gitignored and sync/commit operations are disabled
   auto_commit: true,            // if false, skip git commit/push after mutations
+  body_max_length: null,        // max chars for imported issue descriptions (null = no limit)
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   view: {
     hide_goal_statuses: [],
