@@ -49,9 +49,9 @@ clips config                         # View configuration
 ## Releasing
 
 ```bash
-npm run release              # patch bump (0.1.0 → 0.1.1)
-npm version minor            # minor bump (0.1.0 → 0.2.0)
-npm version major            # major bump (0.1.0 → 1.0.0)
+npm run release              # patch (0.1.0 → 0.1.1)
+npm run release:minor        # minor (0.1.0 → 0.2.0)
+npm run release:major        # major (0.1.0 → 1.0.0)
 ```
 
 This single command will:
