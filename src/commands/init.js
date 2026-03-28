@@ -6,6 +6,77 @@ import { getClipsDbDir, commitAndPush } from '../lib/core.js';
 import { initConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 
+/**
+ * Add .dots to .git/info/exclude so it's ignored locally (not via .gitignore)
+ */
+function setupGitExclude(cwd) {
+  try {
+    const gitDir = execSync('git rev-parse --git-common-dir', {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      cwd
+    }).trim();
+    const absGitDir = path.resolve(cwd, gitDir);
+    const infoDir = path.join(absGitDir, 'info');
+    const excludePath = path.join(infoDir, 'exclude');
+
+    if (!fs.existsSync(infoDir)) {
+      fs.mkdirSync(infoDir, { recursive: true });
+    }
+
+    let content = '';
+    if (fs.existsSync(excludePath)) {
+      content = fs.readFileSync(excludePath, 'utf8');
+      const lines = content.split('\n');
+      if (lines.some(line => line.trim() === '.dots' || line.trim() === '.dots/')) {
+        return false;
+      }
+    }
+
+    const entry = content.endsWith('\n') || content === '' ? '.dots\n' : '\n.dots\n';
+    fs.appendFileSync(excludePath, entry);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Create/update .vscode/settings.json to make .git folder visible in VS Code
+ */
+function setupVSCodeSettings(cwd) {
+  try {
+    const vscodeDir = path.join(cwd, '.vscode');
+    const settingsPath = path.join(vscodeDir, 'settings.json');
+
+    if (!fs.existsSync(vscodeDir)) {
+      fs.mkdirSync(vscodeDir, { recursive: true });
+    }
+
+    let settings = {};
+    if (fs.existsSync(settingsPath)) {
+      const content = fs.readFileSync(settingsPath, 'utf8');
+      try {
+        settings = JSON.parse(content);
+      } catch (e) {
+        return false; // Don't overwrite unparseable settings
+      }
+    }
+
+    if (settings['files.exclude'] && settings['files.exclude']['**/.git'] === false) {
+      return false;
+    }
+
+    settings['files.exclude'] = settings['files.exclude'] || {};
+    settings['files.exclude']['**/.git'] = false;
+
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 export function runInitCommand(args) {
   const cwd = process.cwd();
   const clipsDir = path.join(cwd, '.clips');
@@ -33,6 +104,20 @@ export function runInitCommand(args) {
     console.log('✓ Created .clips/db/ directory');
   } else {
     console.log('• .clips/db/ directory already exists');
+  }
+
+  // Set up .git/info/exclude with .dots
+  if (setupGitExclude(cwd)) {
+    console.log('✓ Added .dots to .git/info/exclude');
+  } else {
+    console.log('• .dots already in .git/info/exclude');
+  }
+
+  // Set up .vscode/settings.json to show .git folder
+  if (setupVSCodeSettings(cwd)) {
+    console.log('✓ Configured .vscode/settings.json (show .git folder)');
+  } else {
+    console.log('• .vscode/settings.json already configured');
   }
 
   // Create default config (only if not exists)
