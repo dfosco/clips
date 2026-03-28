@@ -19,6 +19,71 @@ clips is a local-first issue tracker that mirrors GitHub Issues. Data lives in `
 - "sync with github", "pull latest issues", "push to github"
 - "set up clips", "initialize issue tracking"
 
+---
+
+## Conversational Workflows
+
+These workflows are **mandatory**. When a user triggers goal creation, task breakdown, or task implementation, you MUST follow the multi-step conversation described below. Do NOT skip steps or collapse the workflow into a single response.
+
+Use `ask_user` for every question. One question per turn. Never bundle questions.
+
+### Creating a Goal
+
+When the user wants to create a goal (gives you a title, says "let's plan this", "new goal", etc.):
+
+**Step 1 — Acknowledge and clarify.** Take the title they gave you and ask 2–3 clarifying questions, one at a time. Focus on:
+  - What problem this solves or what outcome they want
+  - What the scope is (what's in, what's out)
+  - Any constraints, dependencies, or context that matters
+
+**Step 2 — Draft the goal description.** After you have enough context, write a 3–4 paragraph description of the problem/goal. This should read like a well-written GitHub Issue body:
+  - Paragraph 1: The problem or motivation — why this work matters
+  - Paragraph 2: What the solution looks like at a high level
+  - Paragraph 3: Scope boundaries — what's included and what's explicitly not
+  - Paragraph 4 (optional): Technical considerations, constraints, or open questions
+
+Present this to the user and ask them to confirm, using `ask_user`: _"Does this capture the goal correctly, or would you like to change anything?"_
+
+**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the title and the full description. Show the user the created goal reference (e.g. `#g001`).
+
+**Step 4 — Offer task breakdown.** Ask: _"Would you like to break this down into tasks?"_ If yes, move to the Task Breakdown workflow. If no, you're done.
+
+### Breaking Down into Tasks
+
+When the user wants to add tasks (after goal creation, or "break this into tasks", "add tasks to g1"):
+
+**Step 1 — Gather tasks.** Ask the user to list the tasks they have in mind. They may give you rough ideas, single words, or partial descriptions.
+
+**Step 2 — Refine titles.** Take what they gave you and refine each into a clear, descriptive task title. Task titles should:
+  - Be long enough to be self-explanatory (someone reading just the title should know what to do)
+  - Be short enough to scan in a list (one line, no more than ~15 words)
+  - Start with a verb when possible ("Add…", "Implement…", "Update…", "Remove…")
+  - Not duplicate information already in the goal title
+
+Present the refined list and ask the user to confirm or adjust, using `ask_user`.
+
+**Step 3 — Create the tasks.** Once confirmed, run `clips task create-batch` with the final titles. Show the result.
+
+**Step 4 — Offer continuation.** Ask if they want to add more tasks or if the breakdown is complete.
+
+### Implementing a Task
+
+When the user asks to implement a task (e.g. "work on t1", "implement the next task", "let's do g1 t2"):
+
+**Step 1 — Recontextualize.** Before writing any code, gather context silently (don't narrate each step to the user, just do it):
+  1. Run `clips view` to get the current state of all goals and tasks
+  2. Run `git --no-pager log --oneline -10` to see recent commits
+  3. Check the relevant files in the repo that the task will touch
+  4. Review which tasks are already closed to understand what's been done
+
+**Step 2 — Pad out the plan.** Based on the context gathered, write a brief implementation plan for this specific task: what files to touch, what changes to make, what order to do them in. Present this to the user and confirm before proceeding.
+
+**Step 3 — Execute.** Implement the task. When done, run `clips task status <goal> <task> closed` to mark it complete.
+
+**Step 4 — Next task.** After completing the task, show the updated goal status with `clips view <goal>` and ask if they want to continue with the next task.
+
+---
+
 ## Concepts
 
 **Goals** are top-level issues (GitHub Issues). Each goal has a title, description, status, and tasks.
