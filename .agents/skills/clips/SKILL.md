@@ -1,3 +1,11 @@
+---
+name: clips
+description: Local-first issue tracker that mirrors GitHub Issues. Use when creating goals, tasks, and tracking progress.
+metadata:
+  author: Daniel Fosco
+  version: "2026.3.28"
+---
+
 # Skill: clips — Issue Tracking
 
 clips is a local-first issue tracker that mirrors GitHub Issues. Data lives in `.clips/db/` as append-only JSONL files. Every mutation syncs to GitHub and commits to git automatically.
