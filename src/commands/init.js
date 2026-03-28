@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import { getClipsDbDir } from '../lib/core.js';
+import { getClipsDbDir, appendEvent, goalExists } from '../lib/core.js';
 import { initConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 
@@ -184,6 +184,22 @@ export function runInitCommand(args) {
     } catch (e) {
       console.log(`• Could not import issues (${e.message || 'gh CLI may not be available'})`);
     }
+  }
+
+  // Create notepad goal for one-off tasks
+  if (!goalExists('notepad')) {
+    appendEvent('notepad', {
+      event: 'goal_created',
+      goal_id: 'notepad',
+      timestamp: new Date().toISOString(),
+      title: 'Notepad',
+      description: 'One-off tasks and quick notes',
+      acceptance_criteria: [],
+      status: 'open'
+    });
+    console.log('✓ Created notepad goal for one-off tasks');
+  } else {
+    console.log('• notepad goal already exists');
   }
 
   if (!alreadyInitialized) {
