@@ -1,6 +1,6 @@
 {
   "name": "clips",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "JSONL git-based issue tracker",
   "type": "module",
   "bin": {
@@ -19,8 +19,18 @@
   },
   "author": "dfosco",
   "license": "MIT",
-  "files": ["src/", "README.md", "LICENSE"],
-  "keywords": ["cli", "issue-tracker", "github-issues", "jsonl", "git"],
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "cli",
+    "issue-tracker",
+    "github-issues",
+    "jsonl",
+    "git"
+  ],
   "engines": {
     "node": ">=18"
   },
