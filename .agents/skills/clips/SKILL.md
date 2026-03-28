@@ -303,6 +303,7 @@ clips config collaboration false        # Solo mode (no git sync)
 - `collaboration` — Enable git sync (default: `true`)
 - `auto_commit` — Commit+push `.clips/` on mutations (default: `true`)
 - `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
+- `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)
 
 ---
 

@@ -1,9 +1,10 @@
 // Init command - initialize clips in a repository
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { getClipsDbDir, appendEvent, goalExists } from '../lib/core.js';
-import { initConfig } from '../lib/config.js';
+import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 
 /**
@@ -75,6 +76,89 @@ function setupVSCodeSettings(cwd) {
   } catch (e) {
     return false;
   }
+}
+
+/**
+ * Resolve the agent directory in the target repo.
+ * Priority: config agent_dir → existing skill file location → .agents → .claude → .github
+ */
+function resolveAgentDir(cwd) {
+  // 1. Check config
+  try {
+    const config = readConfig();
+    if (config.agent_dir) {
+      return path.join(cwd, config.agent_dir);
+    }
+  } catch (e) {
+    // Config may not exist yet during init
+  }
+
+  // 2. Check if skill file already exists somewhere
+  const candidates = ['.agents', '.claude', '.github'];
+  for (const dir of candidates) {
+    const skillPath = path.join(cwd, dir, 'skills', 'clips', 'SKILL.md');
+    if (fs.existsSync(skillPath)) {
+      return path.join(cwd, dir);
+    }
+  }
+
+  // 3. Check if any of these directories already exist (prefer existing)
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(cwd, dir))) {
+      return path.join(cwd, dir);
+    }
+  }
+
+  // 4. Default to .agents
+  return path.join(cwd, '.agents');
+}
+
+/**
+ * Install or update the clips SKILL.md into the target repo's agent directory.
+ * Returns { installed: bool, updated: bool, path: string }
+ */
+function installSkill(cwd) {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const sourceSkill = path.resolve(__dirname, '..', '..', '.agents', 'skills', 'clips', 'SKILL.md');
+
+  if (!fs.existsSync(sourceSkill)) {
+    return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
+  }
+
+  const agentDir = resolveAgentDir(cwd);
+  const targetDir = path.join(agentDir, 'skills', 'clips');
+  const targetPath = path.join(targetDir, 'SKILL.md');
+
+  const sourceContent = fs.readFileSync(sourceSkill, 'utf8');
+
+  // Check if already up to date
+  if (fs.existsSync(targetPath)) {
+    const existingContent = fs.readFileSync(targetPath, 'utf8');
+    if (existingContent === sourceContent) {
+      return { installed: false, updated: false, path: targetPath };
+    }
+    // Update existing
+    fs.writeFileSync(targetPath, sourceContent);
+    return { installed: false, updated: true, path: targetPath };
+  }
+
+  // Fresh install
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(targetPath, sourceContent);
+
+  // Persist the detected agent_dir in config so future runs are consistent
+  try {
+    const config = readConfig();
+    if (!config.agent_dir) {
+      const relDir = path.relative(cwd, agentDir);
+      config.agent_dir = relDir.startsWith('.') ? relDir : '.' + relDir;
+      writeConfig(config);
+    }
+  } catch (e) {
+    // Config write is best-effort during init
+  }
+
+  return { installed: true, updated: false, path: targetPath };
 }
 
 export function runInitCommand(args) {
@@ -167,6 +251,18 @@ export function runInitCommand(args) {
     console.log(`✓ Created .clips/clips.config.json (default_branch: ${defaultBranch}, username: ${username || 'not set'})`);
   } else {
     console.log('• .clips/clips.config.json already exists');
+  }
+
+  // Install or update skill file
+  const skillResult = installSkill(cwd);
+  if (skillResult.error) {
+    console.log(`• Could not install skill (${skillResult.error})`);
+  } else if (skillResult.installed) {
+    console.log(`✓ Installed clips skill → ${path.relative(cwd, skillResult.path)}`);
+  } else if (skillResult.updated) {
+    console.log(`✓ Updated clips skill → ${path.relative(cwd, skillResult.path)}`);
+  } else {
+    console.log(`• Clips skill already up to date`);
   }
 
   // Import existing GitHub Issues

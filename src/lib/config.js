@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG = {
   collaboration: true,          // if false, .clips is gitignored and sync/commit operations are disabled
   body_max_length: null,        // max chars for imported issue descriptions (null = no limit)
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
+  agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
   view: {
     hide_goal_statuses: [],
     hide_task_statuses: [],
