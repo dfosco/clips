@@ -2,14 +2,28 @@
 
 Local-first issue tracker that mirrors GitHub Issues. Goals and tasks are stored as append-only JSONL event logs in `.clips/db/`, synced bidirectionally with your repo's GitHub Issues. Every mutation pushes immediately — local and remote stay in sync.
 
-## Getting Started
+## Installation
+
+```bash
+npm install -g clips
+```
+
+Or run without installing:
+
+```bash
+npx clips --help
+```
+
+### Update
+
+```bash
+npm update -g clips
+```
+
+### Setup
 
 ```bash
 # In any git repo with a GitHub remote
-node path/to/clips/src/cli.js init
-
-# Or link globally
-cd clips && npm link
 clips init
 ```
 
@@ -37,6 +51,27 @@ clips config                         # View configuration
 - **Tasks** = Markdown checkboxes in the issue body (or sub-issues with `tasks_as_issues: true`)
 - **Events** = Append-only JSONL lines (`goal_created`, `task_created`, `status_changed`, etc.)
 - **Refs** = `#g001`, `#g001#t1`, `g1 t1` (flexible parsing)
+
+## Releasing
+
+Releases are automated via GitHub Actions. To publish a new version:
+
+```bash
+# Bump version (patch, minor, or major)
+npm version patch    # 0.1.0 → 0.1.1
+npm version minor    # 0.1.0 → 0.2.0
+npm version major    # 0.1.0 → 1.0.0
+```
+
+This will:
+1. Run tests
+2. Update `package.json` and `src/version.js`
+3. Create a git commit and tag (e.g. `v0.1.1`)
+4. Push the commit and tag to GitHub
+
+The tag push triggers the [Release workflow](.github/workflows/release.yml), which publishes to npm and creates a GitHub Release.
+
+> **Setup:** Add an `NPM_TOKEN` secret to the repository settings for npm publishing.
 
 ## License
 
