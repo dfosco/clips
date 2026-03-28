@@ -35,7 +35,7 @@ function createGoal(data) {
     goal_id: goalId,
     timestamp: new Date().toISOString(),
     title: data.title,
-    description: data.description,
+    description: data.description || '',
     acceptance_criteria: data.acceptance_criteria || [],
     status: 'draft'
   };
