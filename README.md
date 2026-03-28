@@ -5,19 +5,13 @@ Local-first issue tracker that mirrors GitHub Issues. Goals and tasks are stored
 ## Installation
 
 ```bash
-npm install -g clips
-```
-
-Or run without installing:
-
-```bash
-npx clips --help
+npm install -g github:dfosco/clips
 ```
 
 ### Update
 
 ```bash
-npm update -g clips
+npm install -g github:dfosco/clips
 ```
 
 ### Setup
@@ -54,24 +48,18 @@ clips config                         # View configuration
 
 ## Releasing
 
-Releases are automated via GitHub Actions. To publish a new version:
-
 ```bash
-# Bump version (patch, minor, or major)
-npm version patch    # 0.1.0 → 0.1.1
-npm version minor    # 0.1.0 → 0.2.0
-npm version major    # 0.1.0 → 1.0.0
+npm version patch    # 0.1.0 → 0.1.1 (also: minor, major)
 ```
 
-This will:
+This single command will:
 1. Run tests
 2. Update `package.json` and `src/version.js`
 3. Create a git commit and tag (e.g. `v0.1.1`)
-4. Push the commit and tag to GitHub
+4. Push to GitHub
+5. Create a GitHub Release with auto-generated notes
 
-The tag push triggers the [Release workflow](.github/workflows/release.yml), which publishes to npm and creates a GitHub Release.
-
-> **Setup:** Add an `NPM_TOKEN` secret to the repository settings for npm publishing.
+Requires the [GitHub CLI](https://cli.github.com/) (`gh`) to be installed and authenticated.
 
 ## License
 

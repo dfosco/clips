@@ -10,8 +10,7 @@
     "test": "node src/cli.js --version",
     "preversion": "npm test",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
-    "postversion": "git push && git push --tags",
-    "prepublishOnly": "npm test"
+    "postversion": "git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes"
   },
   "repository": {
     "type": "git",
