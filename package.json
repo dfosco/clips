@@ -1,0 +1,18 @@
+{
+  "name": "clips",
+  "version": "0.1.0",
+  "description": "JSONL git-based issue tracker",
+  "type": "module",
+  "bin": {
+    "clips": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "node src/cli.js --version"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dfosco/clips.git"
+  },
+  "author": "dfosco",
+  "license": "MIT"
+}
