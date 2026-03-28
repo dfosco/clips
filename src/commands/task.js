@@ -95,7 +95,7 @@ function updateTask(goalId, taskId, data) {
 }
 
 export function changeTaskStatus(goalId, taskId, status) {
-  const validStatuses = ['draft', 'to_do', 'in_progress', 'done', 'skipped', 'closed', 'archived'];
+  const validStatuses = ['open', 'in_progress', 'closed', 'not_planned', 'duplicate'];
   
   if (!validStatuses.includes(status)) {
     console.error(JSON.stringify({ error: `Invalid status. Valid: ${validStatuses.join(', ')}` }));
@@ -136,17 +136,17 @@ function reorderTasks(goalId, newOrder) {
     process.exit(1);
   }
   
-  // Check goal is in draft status
-  if (goal.status !== 'draft') {
+  // Check goal is in open status
+  if (goal.status !== 'open') {
     console.error(JSON.stringify({ 
-      error: `Can only reorder tasks when goal is in draft status (current: ${goal.status})` 
+      error: `Can only reorder tasks when goal is in open status (current: ${goal.status})` 
     }));
     process.exit(1);
   }
   
   // Check no tasks have been started
   const tasks = Object.values(goal.tasks);
-  const startedTask = tasks.find(t => t.status && t.status !== 'draft' && t.status !== 'to_do');
+  const startedTask = tasks.find(t => t.status && t.status !== 'open');
   if (startedTask) {
     console.error(JSON.stringify({ 
       error: `Cannot reorder: task ${startedTask.task_id} has status '${startedTask.status}'` 

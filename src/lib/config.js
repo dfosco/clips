@@ -10,15 +10,13 @@ export const CONFIG_FILE = 'clips.config.json';
 // Default configuration values
 export const DEFAULT_CONFIG = {
   default_branch: 'main',
-  merge_mode: 'merge',          // merge | pr | wait
-  auto_done_goal: false,        // auto-complete goal when all tasks done
   username: null,               // user's GitHub username
   collaboration: true,          // if false, .clips is gitignored and sync/commit operations are disabled
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   view: {
-    hide_goal_statuses: ['archived'],
-    hide_task_statuses: ['archived'],
-    hide_tasks_for_goal_statuses: ['closed']
+    hide_goal_statuses: [],
+    hide_task_statuses: [],
+    hide_tasks_for_goal_statuses: ['closed', 'not_planned', 'duplicate']
   }
 };
 

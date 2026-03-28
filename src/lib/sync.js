@@ -87,7 +87,7 @@ export function buildIssueBody(goal) {
   if (tasks.length > 0) {
     body += `## Tasks\n\n`;
     for (const task of tasks) {
-      const checked = ['done', 'closed', 'skipped'].includes(task.status) ? 'x' : ' ';
+      const checked = ['closed', 'not_planned', 'duplicate'].includes(task.status) ? 'x' : ' ';
       if (config.tasks_as_issues && task.issue_number) {
         body += `- [${checked}] #${task.issue_number} ${task.title}\n`;
       } else {
@@ -181,7 +181,7 @@ export function importIssue(issueData) {
       title: issueData.title,
       description: clippedDesc,
       acceptance_criteria: [],
-      status: issueData.state === 'closed' || issueData.state === 'CLOSED' ? 'closed' : 'to_do',
+      status: issueData.state === 'closed' || issueData.state === 'CLOSED' ? 'closed' : 'open',
     },
     { skipSync: true },
   );
@@ -212,7 +212,7 @@ export function importIssue(issueData) {
         timestamp: issueData.createdAt,
         title: task.title,
         description: '',
-        status: 'to_do',
+        status: 'open',
       },
       { skipSync: true },
     );
@@ -224,7 +224,7 @@ export function importIssue(issueData) {
           goal_id: goalId,
           task_id: taskId,
           timestamp: issueData.createdAt,
-          status: 'done',
+          status: 'closed',
         },
         { skipSync: true },
       );
@@ -268,7 +268,7 @@ export function pullAllIssues() {
       if (!goal) continue;
 
       const ghClosed = issue.state === 'CLOSED' || issue.state === 'closed';
-      const localClosed = ['done', 'closed', 'archived'].includes(goal.status);
+      const localClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
 
       if (ghClosed && !localClosed) {
         appendEvent(
@@ -289,7 +289,7 @@ export function pullAllIssues() {
             event: 'status_changed',
             goal_id: existingGoalId,
             timestamp: new Date().toISOString(),
-            status: 'to_do',
+            status: 'open',
           },
           { skipSync: true },
         );
@@ -386,7 +386,7 @@ export function pushGoal(goalId) {
       }
 
       // Close / reopen based on local status
-      const shouldBeClosed = ['done', 'closed', 'archived'].includes(goal.status);
+      const shouldBeClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
       if (shouldBeClosed) {
         spawnSync('gh', ['issue', 'close', String(num)], {
           encoding: 'utf8',
@@ -422,7 +422,7 @@ export function pushGoal(goalId) {
         const tasks = getOrderedTasks(goal);
         for (const task of tasks) {
           if (!task.issue_number) continue;
-          const taskDone = ['done', 'closed', 'skipped'].includes(task.status);
+          const taskDone = ['closed', 'not_planned', 'duplicate'].includes(task.status);
           if (taskDone) {
             spawnSync('gh', ['issue', 'close', String(task.issue_number)], {
               encoding: 'utf8',
@@ -468,7 +468,7 @@ export function syncGoal(goalId) {
     try {
       const remote = JSON.parse(viewRes.stdout);
       const ghClosed = remote.state === 'CLOSED' || remote.state === 'closed';
-      const localClosed = ['done', 'closed', 'archived'].includes(goal.status);
+      const localClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
 
       if (ghClosed && !localClosed) {
         appendEvent(
@@ -488,7 +488,7 @@ export function syncGoal(goalId) {
             event: 'status_changed',
             goal_id: goalId,
             timestamp: new Date().toISOString(),
-            status: 'to_do',
+            status: 'open',
           },
           { skipSync: true },
         );

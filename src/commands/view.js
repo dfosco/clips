@@ -5,23 +5,19 @@ import { parseRef, readGoalWithTasks, getClipsDbDir, getCurrentUsername, formatR
 import { readConfig } from '../lib/config.js';
 
 const STATUS_ICONS = {
-  draft: '⚪',
-  to_do: '🔵',
+  open: '🟢',
   in_progress: '🟠',
-  done: '🟢',
-  skipped: '🟣',
-  closed: '🔴',
-  archived: '🚫',
+  closed: '🟣',
+  not_planned: '⚪',
+  duplicate: '⚪',
 };
 
 const STATUS_COLORS = {
-  draft: '\x1b[90m',
-  to_do: '\x1b[34m',
+  open: '\x1b[32m',
   in_progress: '\x1b[33m',
-  done: '\x1b[32m',
-  skipped: '\x1b[90m',
-  closed: '\x1b[90m',
-  archived: '\x1b[90m',
+  closed: '\x1b[35m',
+  not_planned: '\x1b[90m',
+  duplicate: '\x1b[90m',
 };
 
 const RESET = '\x1b[0m';
@@ -67,7 +63,7 @@ function viewGoal(goalId, username = null) {
   const hideTaskStatuses = viewConfig.hide_task_statuses || ['archived'];
   
   const tasks = Object.values(goal.tasks);
-  const completedTasks = tasks.filter(t => ['done', 'closed', 'skipped'].includes(t.status)).length;
+  const completedTasks = tasks.filter(t => ['closed', 'not_planned', 'duplicate'].includes(t.status)).length;
   
   // Build display ref with username prefix
   const displayRef = formatRef({ username, goalId: goal.goal_id }, { includeUsername: !!username });
@@ -110,16 +106,14 @@ function viewGoal(goalId, username = null) {
       // Checkbox symbol and color per status
       let checkbox, color;
       switch (task.status) {
-        case 'done':
-          checkbox = 'x'; color = DIM; break;
         case 'closed':
+          checkbox = 'x'; color = DIM; break;
+        case 'not_planned':
           checkbox = '-'; color = DIM; break;
-        case 'skipped':
-          checkbox = '→'; color = DIM; break;
-        case 'draft':
+        case 'duplicate':
           checkbox = '~'; color = DIM; break;
-        case 'to_do':
-          checkbox = ' '; color = '\x1b[34m'; break; // blue
+        case 'open':
+          checkbox = ' '; color = '\x1b[32m'; break; // green
         case 'in_progress':
           checkbox = '·'; color = '\x1b[38;5;208m'; break; // orange
         default:
@@ -287,7 +281,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       if (hideGoalStatuses.includes(goal.status)) continue;
       
       const tasks = Object.values(goal.tasks);
-      const completedTasks = tasks.filter(t => ['done', 'closed', 'skipped'].includes(t.status)).length;
+      const completedTasks = tasks.filter(t => ['closed', 'not_planned', 'duplicate'].includes(t.status)).length;
       const taskInfo = tasks.length > 0 ? `${DIM}[${completedTasks}/${tasks.length}]${RESET}` : '';
       
       // Build display ref - show username prefix when viewing all users
@@ -310,16 +304,14 @@ function listAllGoals(showAll = false, showAllUsers = false) {
           // Checkbox symbol and color per status
           let checkbox, color;
           switch (task.status) {
-            case 'done':
-              checkbox = 'x'; color = DIM; break;
             case 'closed':
+              checkbox = 'x'; color = DIM; break;
+            case 'not_planned':
               checkbox = '-'; color = DIM; break;
-            case 'skipped':
-              checkbox = '→'; color = DIM; break;
-            case 'draft':
+            case 'duplicate':
               checkbox = '~'; color = DIM; break;
-            case 'to_do':
-              checkbox = ' '; color = '\x1b[34m'; break; // blue
+            case 'open':
+              checkbox = ' '; color = '\x1b[32m'; break; // green
             case 'in_progress':
               checkbox = '·'; color = '\x1b[38;5;208m'; break; // orange
             default:

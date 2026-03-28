@@ -37,7 +37,7 @@ function createGoal(data) {
     title: data.title,
     description: data.description || '',
     acceptance_criteria: data.acceptance_criteria || [],
-    status: 'draft'
+    status: 'open'
   };
   
   if (!fs.existsSync(clipsDbDir)) {
@@ -70,7 +70,7 @@ function updateGoal(goalId, data) {
 function changeStatus(goalId, status) {
   syncBeforeMutation();
   const normalizedId = normalizeGoalId(goalId);
-  const validStatuses = ['draft', 'to_do', 'in_progress', 'done', 'skipped', 'closed', 'archived'];
+  const validStatuses = ['open', 'in_progress', 'closed', 'not_planned', 'duplicate'];
   
   if (!validStatuses.includes(status)) {
     console.error(JSON.stringify({ error: `Invalid status. Valid: ${validStatuses.join(', ')}` }));

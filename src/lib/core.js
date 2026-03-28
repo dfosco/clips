@@ -401,7 +401,7 @@ export function readGoalWithTasks(goalId, username = null) {
           task_id: event.task_id,
           title: event.title,
           description: event.description,
-          status: 'to_do'
+          status: 'open'
         };
         goal._taskOrder = goal._taskOrder || [];
         goal._taskOrder.push(event.task_id);
@@ -468,5 +468,5 @@ export function getOrderedTasks(goal) {
 
 export function getNextPendingTask(goal) {
   const tasks = getOrderedTasks(goal);
-  return tasks.find(t => t.status === 'to_do');
+  return tasks.find(t => t.status === 'open');
 }
