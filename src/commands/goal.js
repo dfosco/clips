@@ -1,6 +1,6 @@
 // Goal management commands
 import fs from 'fs';
-import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, parseRef, commitAndPush } from '../lib/core.js';
+import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 
 // Normalize goal ID by stripping # prefix if present
@@ -45,7 +45,6 @@ function createGoal(data) {
   
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
-  try { commitAndPush(`clips: create goal ${goalId}`); } catch (e) {}
   const synced = readGoalWithTasks(goalId);
   const result = { success: true, goal_id: goalId };
   if (synced && synced.issue_number) result.issue_number = synced.issue_number;
@@ -63,7 +62,6 @@ function updateGoal(goalId, data) {
   };
   appendEvent(normalizedId, event);
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
-  try { commitAndPush(`clips: update goal ${normalizedId}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: normalizedId }));
 }
 
@@ -84,7 +82,6 @@ function changeStatus(goalId, status) {
   };
   appendEvent(normalizedId, event);
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
-  try { commitAndPush(`clips: goal ${normalizedId} → ${status}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: normalizedId, status: status }));
 }
 

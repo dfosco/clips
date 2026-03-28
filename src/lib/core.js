@@ -8,21 +8,6 @@ export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
 
 /**
- * Check if auto-commit is enabled (reads config directly to avoid circular imports)
- */
-function isAutoCommitEnabled() {
-  try {
-    const configPath = path.join(getClipsDir(), 'clips.config.json');
-    if (!fs.existsSync(configPath)) return true;
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (config.collaboration === false) return false;
-    return config.auto_commit !== false;
-  } catch (e) {
-    return true;
-  }
-}
-
-/**
  * Get the current username from config
  * Falls back to null if not configured
  * @returns {string|null}
@@ -287,44 +272,6 @@ export function goalExists(goalId, username = null) {
   }
   
   return false;
-}
-
-/**
- * Commit .clips/ changes and push to remote
- * Flow: pull --rebase → add → commit → push (with retry)
- */
-export function commitAndPush(message = 'clips update') {
-  if (!isAutoCommitEnabled()) return;
-
-  const root = getRepoRoot();
-  try {
-    // Pull first to reduce conflicts
-    execSync('git pull --rebase 2>/dev/null || true', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-
-    // Stage .clips/
-    execSync('git add .clips/', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-
-    // Check if there are staged changes
-    try {
-      execSync('git diff --cached --quiet .clips/', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-      return; // No changes to commit
-    } catch {
-      // diff --quiet exits non-zero when there ARE changes — proceed
-    }
-
-    // Commit
-    execSync(`git commit -m "${message}"`, { encoding: 'utf8', stdio: 'pipe', cwd: root });
-
-    // Push with retry
-    try {
-      execSync('git push 2>/dev/null', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-    } catch {
-      execSync('git pull --rebase 2>/dev/null || true', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-      execSync('git push 2>/dev/null', { encoding: 'utf8', stdio: 'pipe', cwd: root });
-    }
-  } catch (e) {
-    // Best-effort — don't crash on git failures
-  }
 }
 
 export function appendEvent(goalId, event, options = {}) {

@@ -9,7 +9,6 @@ import {
   goalExists,
   getOrderedTasks,
   normalizeGoalId,
-  commitAndPush,
 } from './core.js';
 import { readConfig } from './config.js';
 
@@ -492,7 +491,6 @@ export function syncGoal(goalId) {
   }
 
   pushGoal(goalId);
-  try { commitAndPush(`clips: sync goal ${goalId}`); } catch (e) {}
 }
 
 // ── Sync all ──────────────────────────────────────────────────────
@@ -520,8 +518,6 @@ export function syncAll() {
     };
     scanGoals(dbDir);
   }
-
-  try { commitAndPush('clips: sync all'); } catch (e) {}
 
   return {
     pulled: { imported: pullResult.imported, updated: pullResult.updated },
