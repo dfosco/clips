@@ -12,6 +12,7 @@ export const DEFAULT_CONFIG = {
   default_branch: 'main',
   username: null,               // user's GitHub username
   collaboration: true,          // if false, .clips is gitignored and sync/commit operations are disabled
+  auto_commit: true,            // if false, skip git commit/push after mutations
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   view: {
     hide_goal_statuses: [],
@@ -83,6 +84,7 @@ export function setConfigValue(key, value) {
       break;
     case 'auto_done_goal':
     case 'collaboration':
+    case 'auto_commit':
     case 'tasks_as_issues':
       if (typeof value !== 'boolean' && value !== 'true' && value !== 'false') {
         throw new Error(`Invalid ${key}: ${value}. Must be true or false`);

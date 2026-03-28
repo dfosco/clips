@@ -1,6 +1,6 @@
 // Task management commands
 import fs from 'fs';
-import { appendEvent, readGoalWithTasks, goalExists, parseRef, parseArgs, normalizeGoalId, normalizeTaskId } from '../lib/core.js';
+import { appendEvent, readGoalWithTasks, goalExists, parseRef, parseArgs, normalizeGoalId, normalizeTaskId, commitAndPush } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 
 function generateTaskId(goalId) {
@@ -36,6 +36,7 @@ function createTask(goalId, data) {
   
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  try { commitAndPush(`clips: create task ${goalId}#${taskId}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: goalId, task_id: taskId }));
   return taskId;
 }
@@ -73,6 +74,7 @@ function createTasks(goalId, tasksArray) {
   }
   
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  try { commitAndPush(`clips: create tasks in ${goalId}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: goalId, tasks: results }));
 }
 
@@ -91,6 +93,7 @@ function updateTask(goalId, taskId, data) {
   };
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  try { commitAndPush(`clips: update task ${goalId}#${taskId}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: goalId, task_id: taskId }));
 }
 
@@ -111,6 +114,7 @@ export function changeTaskStatus(goalId, taskId, status) {
   };
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  try { commitAndPush(`clips: task ${goalId}#${taskId} → ${status}`); } catch (e) {}
   console.log(JSON.stringify({ success: true, goal_id: goalId, task_id: taskId, status: status }));
 }
 
@@ -180,6 +184,7 @@ function reorderTasks(goalId, newOrder) {
   };
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  try { commitAndPush(`clips: reorder tasks in ${goalId}`); } catch (e) {}
   
   console.log(JSON.stringify({ 
     success: true, 

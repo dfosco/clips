@@ -8,7 +8,6 @@ import { runViewCommand } from './commands/view.js';
 import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
-import { runRefreshCommand } from './commands/refresh.js';
 import { version } from './version.js';
 import { ensureSoloMode } from './lib/config.js';
 
@@ -40,7 +39,6 @@ Commands:
   task <action> [args]    Manage tasks
   sync [ref]              Sync with GitHub Issues (bidirectional)
   config [key] [value]    View/set configuration
-  refresh [pull|push]     Sync clips data to remote (git)
 
 Options:
   --version, -v           Show version
@@ -66,7 +64,6 @@ const commands = {
   config: runConfigCommand,
   init: runInitCommand,
   sync: runSyncCommand,
-  refresh: runRefreshCommand,
 };
 
 const handler = commands[command];

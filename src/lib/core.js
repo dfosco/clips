@@ -7,20 +7,18 @@ import { readConfig } from './config.js';
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
 
-// Flag to prevent recursive sync calls
-let syncInProgress = false;
-
 /**
- * Check if collaboration mode is enabled (reads config directly to avoid circular imports)
+ * Check if auto-commit is enabled (reads config directly to avoid circular imports)
  */
-function isCollaborationEnabled() {
+function isAutoCommitEnabled() {
   try {
     const configPath = path.join(getClipsDir(), 'clips.config.json');
-    if (!fs.existsSync(configPath)) return true; // Default to enabled
+    if (!fs.existsSync(configPath)) return true;
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return config.collaboration !== false;
+    if (config.collaboration === false) return false;
+    return config.auto_commit !== false;
   } catch (e) {
-    return true; // Default to enabled on error
+    return true;
   }
 }
 
@@ -292,48 +290,40 @@ export function goalExists(goalId, username = null) {
 }
 
 /**
- * Sync .clips/db data before a mutation (pull latest)
- * Disabled when collaboration mode is off
+ * Commit .clips/ changes and push to remote
+ * Flow: pull --rebase → add → commit → push (with retry)
  */
-export function syncBeforeMutation() {
-  if (syncInProgress) return;
-  if (!isCollaborationEnabled()) return;
-  
-  syncInProgress = true;
-  try {
-    const clipsPath = process.argv[0];
-    execSync(`"${clipsPath}" refresh pull`, {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      cwd: getRepoRoot()
-    });
-  } catch (e) {
-    // Silently fail - sync is best-effort
-  } finally {
-    syncInProgress = false;
-  }
-}
+export function commitAndPush(message = 'clips update') {
+  if (!isAutoCommitEnabled()) return;
 
-/**
- * Sync .clips/db data after a mutation
- * Disabled when collaboration mode is off
- */
-export function syncAfterMutation(description = 'clips data update') {
-  if (syncInProgress) return;
-  if (!isCollaborationEnabled()) return;
-  
-  syncInProgress = true;
+  const root = getRepoRoot();
   try {
-    const clipsPath = process.argv[0];
-    execSync(`"${clipsPath}" refresh push -m "${description}"`, {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      cwd: getRepoRoot()
-    });
+    // Pull first to reduce conflicts
+    execSync('git pull --rebase 2>/dev/null || true', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+
+    // Stage .clips/
+    execSync('git add .clips/', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+
+    // Check if there are staged changes
+    try {
+      execSync('git diff --cached --quiet .clips/', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+      return; // No changes to commit
+    } catch {
+      // diff --quiet exits non-zero when there ARE changes — proceed
+    }
+
+    // Commit
+    execSync(`git commit -m "${message}"`, { encoding: 'utf8', stdio: 'pipe', cwd: root });
+
+    // Push with retry
+    try {
+      execSync('git push 2>/dev/null', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+    } catch {
+      execSync('git pull --rebase 2>/dev/null || true', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+      execSync('git push 2>/dev/null', { encoding: 'utf8', stdio: 'pipe', cwd: root });
+    }
   } catch (e) {
-    // Silently fail - sync is best-effort
-  } finally {
-    syncInProgress = false;
+    // Best-effort — don't crash on git failures
   }
 }
 
@@ -364,12 +354,6 @@ export function appendEvent(goalId, event, options = {}) {
   }
   
   fs.appendFileSync(filePath, JSON.stringify(event) + '\n');
-  
-  // Sync after mutation unless explicitly skipped
-  if (!options.skipSync) {
-    const description = event.event ? `${event.event}: ${goalId}` : `update: ${goalId}`;
-    syncAfterMutation(description);
-  }
 }
 
 export function readGoalWithTasks(goalId, username = null) {

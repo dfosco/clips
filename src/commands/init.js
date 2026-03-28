@@ -2,7 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import { getClipsDbDir } from '../lib/core.js';
+import { getClipsDbDir, commitAndPush } from '../lib/core.js';
 import { initConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 
@@ -114,4 +114,7 @@ Usage:
   clips github_sync #g001
 `);
   }
+
+  // Commit .clips/ to git
+  try { commitAndPush('clips: init'); } catch (e) {}
 }

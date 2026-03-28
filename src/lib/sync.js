@@ -9,6 +9,7 @@ import {
   goalExists,
   getOrderedTasks,
   normalizeGoalId,
+  commitAndPush,
 } from './core.js';
 import { readConfig } from './config.js';
 
@@ -183,7 +184,6 @@ export function importIssue(issueData) {
       acceptance_criteria: [],
       status: issueData.state === 'closed' || issueData.state === 'CLOSED' ? 'closed' : 'open',
     },
-    { skipSync: true },
   );
 
   // github_synced
@@ -196,7 +196,6 @@ export function importIssue(issueData) {
       issue_number: issueData.number,
       issue_url: '',
     },
-    { skipSync: true },
   );
 
   // tasks from body checkboxes
@@ -214,7 +213,6 @@ export function importIssue(issueData) {
         description: '',
         status: 'open',
       },
-      { skipSync: true },
     );
     if (task.done) {
       appendEvent(
@@ -226,7 +224,6 @@ export function importIssue(issueData) {
           timestamp: issueData.createdAt,
           status: 'closed',
         },
-        { skipSync: true },
       );
     }
   });
@@ -279,7 +276,6 @@ export function pullAllIssues() {
             timestamp: new Date().toISOString(),
             status: 'closed',
           },
-          { skipSync: true },
         );
         updated++;
       } else if (!ghClosed && localClosed) {
@@ -291,7 +287,6 @@ export function pullAllIssues() {
             timestamp: new Date().toISOString(),
             status: 'open',
           },
-          { skipSync: true },
         );
         updated++;
       }
@@ -338,7 +333,6 @@ export function pushGoal(goalId) {
           issue_number: issueNumber,
           issue_url: issueUrl,
         },
-        { skipSync: true },
       );
 
       // Create sub-issues for tasks when tasks_as_issues is enabled
@@ -368,7 +362,6 @@ export function pushGoal(goalId) {
               issue_number: taskIssueNum,
               issue_url: taskUrl,
             },
-            { skipSync: true },
           );
         }
       }
@@ -479,7 +472,6 @@ export function syncGoal(goalId) {
             timestamp: new Date().toISOString(),
             status: 'closed',
           },
-          { skipSync: true },
         );
       } else if (!ghClosed && localClosed) {
         appendEvent(
@@ -490,7 +482,6 @@ export function syncGoal(goalId) {
             timestamp: new Date().toISOString(),
             status: 'open',
           },
-          { skipSync: true },
         );
       }
     } catch {
@@ -499,6 +490,7 @@ export function syncGoal(goalId) {
   }
 
   pushGoal(goalId);
+  try { commitAndPush(`clips: sync goal ${goalId}`); } catch (e) {}
 }
 
 // ── Sync all ──────────────────────────────────────────────────────
@@ -526,6 +518,8 @@ export function syncAll() {
     };
     scanGoals(dbDir);
   }
+
+  try { commitAndPush('clips: sync all'); } catch (e) {}
 
   return {
     pulled: { imported: pullResult.imported, updated: pullResult.updated },
