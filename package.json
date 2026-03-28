@@ -1,6 +1,6 @@
 {
   "name": "clips",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "JSONL git-based issue tracker",
   "type": "module",
   "bin": {
