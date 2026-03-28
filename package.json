@@ -7,12 +7,25 @@
     "clips": "./src/cli.js"
   },
   "scripts": {
-    "test": "node src/cli.js --version"
+    "test": "node src/cli.js --version",
+    "preversion": "npm test",
+    "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
+    "postversion": "git push && git push --tags",
+    "prepublishOnly": "npm test"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dfosco/clips.git"
   },
   "author": "dfosco",
-  "license": "MIT"
+  "license": "MIT",
+  "files": ["src/", "README.md", "LICENSE"],
+  "keywords": ["cli", "issue-tracker", "github-issues", "jsonl", "git"],
+  "engines": {
+    "node": ">=18"
+  },
+  "homepage": "https://github.com/dfosco/clips#readme",
+  "bugs": {
+    "url": "https://github.com/dfosco/clips/issues"
+  }
 }
