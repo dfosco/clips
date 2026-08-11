@@ -1,12 +1,12 @@
 ---
 name: clips
-description: Local-first issue tracker that mirrors GitHub Issues. Use when creating goals, tasks, and tracking progress.
+description: Local-first planning and repository-record workflow. Use when creating goals, tasks, CRs, ADRs, FDRs, and tracking progress.
 metadata:
   author: Daniel Fosco
   version: "2026.3.28"
 ---
 
-# Skill: clips — Issue Tracking
+# Skill: clips — Planning and Records
 
 clips is a local-first planning tool that mirrors goals and tasks to GitHub Issues. The current compatibility CLI stores planning events in `.clips/db/`; the target model keeps planning state external to the source repository. Repository records (CRs, ADRs, and FDRs) are committed under `docs/records/`.
 
@@ -14,6 +14,9 @@ clips is a local-first planning tool that mirrors goals and tasks to GitHub Issu
 
 - "create an issue", "track this work", "let's plan this", "write a goal"
 - "break this down into tasks", "add tasks to the goal"
+- "create a CR", "write a change record", "update the CR", "stack this CR"
+- "write an ADR", "record this architectural decision", "update the ADR"
+- "write an FDR", "record the feature behavior", "update the FDR"
 - "what's the status?", "show me the issues", "what are we tracking?"
 - "mark it done", "close that task", "update the status"
 - "sync with github", "pull latest issues", "push to github"
@@ -81,6 +84,164 @@ When the user asks to implement a task (e.g. "work on t1", "implement the next t
 **Step 3 — Execute.** Implement the task. When done, run `clips task status <goal> <task> closed` to mark it complete.
 
 **Step 4 — Next task.** After completing the task, show the updated goal status with `clips view <goal>` and ask if they want to continue with the next task.
+
+### Creating or Updating Repository Records
+
+Use these rules whenever the user asks for a CR, ADR, FDR, or asks to document repository work:
+
+1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision; an FDR records durable current user-visible behavior and feature rationale.
+2. Do not create a new ADR or FDR merely because a task or CR exists. Update an existing record when it still describes the decision or behavior. Small bug fixes and feature iterations normally need only a CR.
+3. Every non-trivial, reviewable repository diff gets exactly one active CR. A CR may cover one task, several tasks, or a complete small goal. It is not a child item of a goal or task.
+4. Create or update records in `docs/records/` and commit them with the repository change. Do not commit goals or tasks as source-repository records.
+5. For a stacked CR, set `Parent CR` and record the exact Git basis. Do not create a separate stack record.
+
+When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Only a human may manufacture explicitly human-owned approval states such as `Testing`, `Needs Changes`, and `Ready to Merge`.
+
+Use the following canonical templates. Preserve the field names and section order unless the user asks for a variant.
+
+#### Goal template
+
+Goals are external planning artifacts and are not committed to the source repository.
+
+```md
+# Goal: Outcome title
+
+**Status:** open | in_progress | closed | not_planned | duplicate
+
+## Outcome
+
+What outcome should exist when this goal is complete?
+
+## Problem and context
+
+Why is this work needed?
+
+## Scope
+
+What is included and explicitly excluded?
+
+## Acceptance criteria
+
+- Observable condition that proves the outcome exists.
+
+## Constraints and dependencies
+
+Known limits, dependencies, or unresolved questions.
+```
+
+For the current CLI, map the goal to `clips goal create` with `title`, `description`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief.
+
+#### Task template
+
+Tasks are external planning artifacts associated with a goal.
+
+```md
+- [ ] Task title beginning with a verb
+  - Goal: #g001
+  - Outcome: What this task produces.
+  - Done when: Observable completion condition.
+  - Dependencies: Other task or external dependency, or None.
+```
+
+For the current CLI, create the task with `title` and optional `description` under the goal. Do not turn each task into a CR unless it produces a repository diff; one CR may cover multiple tasks.
+
+#### CR template
+
+CRs are committed under `docs/records/cr/CR-NNN-short-title.md`.
+
+```md
+# CR-NNN: Change title
+
+**Status:** Draft | In Review | Accepted | Merged | Rejected | Abandoned
+**Type:** Feature | Bugfix | Maintenance | Documentation
+**Branch:** exact-worker-branch
+**Base branch:** main
+**Base commit:** FULL_COMMIT_ID
+**Parent CR:** CR-NNN | None
+**Covers:** #g001, #g001#t1 | Untracked
+
+## Why
+
+## What changed
+
+## Behavior
+
+## Files changed
+
+| File | Semantic role |
+|---|---|
+| `path/to/file` | Role |
+
+## Test plan
+
+- [ ] Exact command and result
+
+## Compatibility and operations
+
+## Documentation and records
+
+List ADRs/FDRs created or updated, or `None`.
+
+## Review
+
+- [ ] Changed files inspected
+- [ ] Regression coverage reviewed
+- [ ] CR branch and base verified
+- [ ] Stacked dependency reviewed, if applicable
+- [ ] Ready to merge
+```
+
+`Parent CR` expresses a stacked review dependency, not a planning hierarchy. The branch, base branch, and base commit must describe the exact change being reviewed.
+
+#### ADR template
+
+ADRs are committed under `docs/records/adr/ADR-NNN-short-title.md`. Create one only for a durable architectural decision.
+
+```md
+# ADR-NNN: Decision title
+
+**Status:** Proposed | Accepted | Superseded | Retired
+**Date:** YYYY-MM-DD
+**Decision basis:** FULL_COMMIT_ID
+**Supersedes:** ADR-NNN | None
+
+## Context
+
+## Decision
+
+## Consequences
+
+## Related
+
+CRs, FDRs, goals, tasks, or external references.
+```
+
+#### FDR template
+
+FDRs are committed under `docs/records/fdr/FDR-NNN-short-title.md`. Create one only for durable current user-visible behavior or feature rationale.
+
+```md
+# FDR-NNN: Feature or behavior
+
+**Status:** Proposed | Active | Experimental | Retired
+**Date:** YYYY-MM-DD
+**Behavior commit:** FULL_COMMIT_ID
+**Supersedes:** FDR-NNN | None
+
+## Overview
+
+## Behavior
+
+## Design decisions
+
+## Related
+
+CRs, ADRs, goals, tasks, or external references.
+
+## Open questions
+```
+
+Do not create an FDR for a small bug fix when an existing FDR remains accurate. Update the existing FDR through the CR when behavior changes but the feature record remains the right document.
 
 ---
 
