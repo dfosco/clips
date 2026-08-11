@@ -8,7 +8,7 @@ metadata:
 
 # Skill: clips — Issue Tracking
 
-clips is a local-first issue tracker that mirrors GitHub Issues. Data lives in `.clips/db/` as append-only JSONL files. Every mutation syncs to GitHub and commits to git automatically.
+clips is a local-first planning tool that mirrors goals and tasks to GitHub Issues. The current compatibility CLI stores planning events in `.clips/db/`; the target model keeps planning state external to the source repository. Repository records (CRs, ADRs, and FDRs) are committed under `docs/records/`.
 
 ## Triggers
 
@@ -86,15 +86,17 @@ When the user asks to implement a task (e.g. "work on t1", "implement the next t
 
 ## Concepts
 
-**Goals** are top-level issues (GitHub Issues). Each goal has a title, description, status, and tasks.
+**Goals** are top-level planning items, optionally mirrored as GitHub Issues. Each goal has a title, description, status, and tasks.
 
-**Tasks** are checklist items within a goal. They appear as markdown checkboxes in the GitHub Issue body. With `tasks_as_issues: true`, tasks become their own GitHub Issues.
+**Tasks** are actionable planning items within a goal. They appear as markdown checkboxes in the GitHub Issue mirror. With `tasks_as_issues: true`, tasks become their own GitHub Issues.
 
 **Refs** identify goals and tasks: `#g001`, `#g001#t1`, or shorthand `g1`, `g1 t1`.
 
 **Statuses** mirror GitHub: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
-**Auto-sync**: Every mutation writes JSONL locally → pushes to GitHub API → commits `.clips/` to git.
+**Record boundary**: Goals and tasks are planning state. Every non-trivial repository diff gets one committed CR. ADRs record durable architectural decisions; FDRs record durable user-visible behavior. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR/FDR.
+
+**CR basis**: Every CR records `Branch`, `Base branch`, `Base commit`, and optional `Parent CR`. `Parent CR` expresses a stacked review dependency; it is not a task hierarchy.
 
 ---
 
@@ -134,7 +136,7 @@ clips view --all-users      # Show all users' goals
 
 ### `clips goal create`
 
-Create a new goal (top-level issue). Automatically creates a GitHub Issue and commits to git.
+Create a new goal (top-level planning item). The current compatibility CLI may create or update a GitHub Issue mirror.
 
 **When to use:** Starting new work, planning a feature, tracking a bug, defining a milestone.
 
@@ -285,15 +287,14 @@ clips sync g12          # Shorthand
 
 View or change clips configuration.
 
-**When to use:** Checking current settings, enabling sub-issues for tasks, disabling auto-commit.
+**When to use:** Checking current settings or enabling sub-issues for tasks. The legacy `auto_commit` setting does not change the repository-record boundary.
 
-**Triggers:** "show config", "change settings", "enable sub-issues", "disable auto-commit"
+**Triggers:** "show config", "change settings", "enable sub-issues"
 
 ```bash
 clips config                            # Show all config
 clips config tasks_as_issues            # Show specific key
 clips config tasks_as_issues true       # Enable task sub-issues
-clips config auto_commit false          # Disable auto git commit
 clips config collaboration false        # Solo mode (no git sync)
 ```
 
@@ -301,7 +302,7 @@ clips config collaboration false        # Solo mode (no git sync)
 - `default_branch` — Git branch (default: `main`)
 - `username` — GitHub username
 - `collaboration` — Enable git sync (default: `true`)
-- `auto_commit` — Commit+push `.clips/` on mutations (default: `true`)
+- `auto_commit` — Legacy compatibility setting; planning state should move to the external workflow store
 - `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
 - `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)
 

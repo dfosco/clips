@@ -6,7 +6,7 @@ Skills are detailed guides that describe how and when to use specific tools and 
 
 | Skill | Path | Description |
 |-------|------|-------------|
-| **clips** | `.agents/skills/CLIPS.md` | Issue tracking CLI — create goals and tasks, sync with GitHub Issues, view progress. Read this skill when the user wants to track work, plan features, manage issues, or check status. |
+| **clips** | `.agents/skills/clips/SKILL.md` | Planning workflow — create goals and tasks, sync with GitHub Issues, view progress, and keep repository records separate. Read this skill when the user wants to track work, plan features, manage issues, or check status. |
 
 ## Quick Reference
 
@@ -14,3 +14,12 @@ Skills are detailed guides that describe how and when to use specific tools and 
 - **Check status:** `clips view`
 - **Update progress:** `clips task status g1 t1 closed`
 - **Sync with GitHub:** `clips sync`
+
+## Artifact boundary
+
+- Goals and tasks are planning state. Keep them in the external clips workflow store; GitHub Issues are an optional mirror.
+- CRs are committed review packets for repository changes. Every non-trivial reviewable diff gets exactly one active CR.
+- ADRs record durable architectural decisions. FDRs record durable current user-visible behavior and feature rationale.
+- A CR may cover one task, several tasks, or a whole small goal. It may update an existing ADR/FDR without creating a new record.
+- CR metadata must include `Branch`, `Base branch`, `Base commit`, and optional `Parent CR`.
+- Workers may commit records in their isolated worktree. Supervisors may update external planning state, but must not edit source or repository records.

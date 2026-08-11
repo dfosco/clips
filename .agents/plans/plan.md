@@ -1,4 +1,10 @@
-# clips v0.3 — Auto-commit and push `.clips/` on every mutation
+# Superseded plan: commit and push `.clips/` on every mutation
+
+This plan is superseded by [ADR-001](../../docs/records/adr/ADR-001-separate-planning-state-from-repository-records.md).
+
+Goals and tasks are planning state and should move to an external workflow store. They must not be made repository commits as part of normal clips mutations. CRs, ADRs, and FDRs are the repository-committed records.
+
+The historical proposal is retained below for context only; it is not an implementation target.
 
 ## Problem
 
