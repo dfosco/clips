@@ -10,7 +10,7 @@ import {
   getOrderedTasks,
   normalizeGoalId,
 } from './core.js';
-import { readConfig } from './config.js';
+import { readConfig, isCollaborationEnabled } from './config.js';
 
 function generateGoalId() {
   const dbDir = getClipsDbDir();
@@ -235,6 +235,10 @@ export function importIssue(issueData) {
 // ── Pull ──────────────────────────────────────────────────────────
 
 export function pullAllIssues() {
+  if (!isCollaborationEnabled()) {
+    return { imported: 0, updated: 0, total: 0, skipped: true };
+  }
+
   const result = spawnSync(
     'gh',
     [
@@ -303,6 +307,10 @@ export function pullAllIssues() {
 // ── Push ──────────────────────────────────────────────────────────
 
 export function pushGoal(goalId) {
+  if (!isCollaborationEnabled()) {
+    return { skipped: true };
+  }
+
   const goal = readGoalWithTasks(goalId);
   if (!goal) return;
 
@@ -439,6 +447,10 @@ export function pushGoal(goalId) {
 // ── Sync single goal ──────────────────────────────────────────────
 
 export function syncGoal(goalId) {
+  if (!isCollaborationEnabled()) {
+    return { skipped: true };
+  }
+
   const goal = readGoalWithTasks(goalId);
   if (!goal || !goal.issue_number) {
     pushGoal(goalId);
@@ -496,6 +508,14 @@ export function syncGoal(goalId) {
 // ── Sync all ──────────────────────────────────────────────────────
 
 export function syncAll() {
+  if (!isCollaborationEnabled()) {
+    return {
+      pulled: { imported: 0, updated: 0 },
+      pushed: 0,
+      skipped: true,
+    };
+  }
+
   const pullResult = pullAllIssues();
 
   const dbDir = getClipsDbDir();

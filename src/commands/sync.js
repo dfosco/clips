@@ -23,6 +23,10 @@ export function runSyncCommand(args) {
   if (!ref) {
     console.log('🔄 Syncing all issues...');
     const result = syncAll();
+    if (result.skipped) {
+      console.log('⏸️  GitHub sync disabled; local data unchanged remotely');
+      return;
+    }
     const { imported, updated } = result.pulled;
     console.log(`⬇️  Pulled: ${imported} imported, ${updated} updated`);
     console.log(`⬆️  Pushed: ${result.pushed} goals`);
@@ -39,7 +43,11 @@ export function runSyncCommand(args) {
 
   const goalId = parsed.goalId;
   console.log(`🔄 Syncing #${goalId}...`);
-  syncGoal(goalId);
+  const result = syncGoal(goalId);
+  if (result?.skipped) {
+    console.log('⏸️  GitHub sync disabled; local data unchanged remotely');
+    return;
+  }
 
   const goal = readGoalWithTasks(goalId);
   const issueNum = goal?.issue_number;

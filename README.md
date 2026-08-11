@@ -74,6 +74,8 @@ clips init
 
 `clips init` creates the legacy `.clips/` working state and imports existing GitHub Issues as goals. The planning-store migration described above is the target model.
 
+Set `collaboration` to `false` for local-only mode. In that mode, `init`, `sync`, and goal/task mutations do not call GitHub; the CLI keeps local planning data and adds `.clips/` to `.gitignore`.
+
 ## Commands
 
 ```bash

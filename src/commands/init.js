@@ -270,7 +270,9 @@ export function runInitCommand(args) {
     try {
       console.log('\n📥 Importing existing GitHub Issues...');
       const result = pullAllIssues();
-      if (result && result.imported > 0) {
+      if (result?.skipped) {
+        console.log('• GitHub sync disabled; skipped issue import');
+      } else if (result && result.imported > 0) {
         console.log(`✓ Imported ${result.imported} issues as goals`);
       } else if (result && result.total > 0) {
         console.log(`• ${result.total} issues found, all already imported`);
