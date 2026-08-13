@@ -5,6 +5,10 @@
 - **Planning state:** goals and tasks, kept in an external workflow store and optionally mirrored to GitHub Issues.
 - **Repository records:** CRs, ADRs, and FDRs, committed with the code they describe.
 
+CR = Change Record
+ADR = Architecture Decision Record
+FDR = Feature Decision Record (for user-facing functionality, can be a source of truth for usage docs)
+
 This separation keeps the board useful for scheduling while leaving the repository with a durable account of what changed and why.
 
 ## Artifact model
