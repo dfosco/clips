@@ -1,6 +1,6 @@
 # CR-003: Add read-only local kanban board
 
-**Status:** In Review
+**Status:** Merged
 **Type:** Feature
 **Branch:** codex/local-github-pr-sync
 **Base branch:** main
@@ -74,3 +74,4 @@ Iconoir: https://iconoir.com/ and the `iconoir` npm package.
 - [x] CR branch and base verified
 - [ ] Stacked dependency reviewed, if applicable
 - [x] Ready to merge
+- [x] Merged into `main`
