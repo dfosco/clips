@@ -1,6 +1,6 @@
 // Goal management commands
 import fs from 'fs';
-import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, parseRef } from '../lib/core.js';
+import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 
 // Normalize goal ID by stripping # prefix if present
@@ -78,7 +78,8 @@ function changeStatus(goalId, status) {
     event: 'status_changed',
     goal_id: normalizedId,
     timestamp: new Date().toISOString(),
-    status: status
+    status: status,
+    commit_sha: status === 'closed' ? getCurrentCommitSha() : null,
   };
   appendEvent(normalizedId, event);
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }

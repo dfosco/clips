@@ -12,6 +12,122 @@ import {
 } from './core.js';
 import { readConfig, isCollaborationEnabled } from './config.js';
 
+const GITHUB_CACHE_FILE = '_github.jsonl';
+
+function runGh(args) {
+  return spawnSync('gh', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+function repositoryFromRemote() {
+  const result = spawnSync('git', ['config', '--get', 'remote.origin.url'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  if (result.status !== 0) return '';
+  return result.stdout.trim().replace(/^git@github\.com:/, '').replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '');
+}
+
+function cachePath() {
+  return path.join(getClipsDbDir(), GITHUB_CACHE_FILE);
+}
+
+function prKey(pr) {
+  return `${pr.repository || ''}#${pr.pr_number}`;
+}
+
+export function parsePlanningRefs(text = '') {
+  const covers = [...text.matchAll(/(?:^|[^\w])(#(?:[a-z][\w-]*#)?g\d+(?:#t\d+)?)/gi)].map((match) => match[1]);
+  const crIds = [...text.matchAll(/(?:^|[^\w])(CR-\d+)\b/gi)].map((match) => match[1].toUpperCase());
+  return { covers: [...new Set(covers)], cr_ids: [...new Set(crIds)] };
+}
+
+export function normalizePullRequest(pr, repository = repositoryFromRemote()) {
+  const body = pr.body || '';
+  const refs = parsePlanningRefs(`${pr.title || ''}\n${body}`);
+  const author = typeof pr.author === 'string' ? pr.author : pr.author?.login || pr.author?.name || '';
+  const repo = typeof pr.repository === 'string' ? pr.repository : pr.repository?.nameWithOwner || repository;
+  return {
+    event: 'github_pr_synced',
+    repository: repo,
+    pr_number: Number(pr.number ?? pr.pr_number),
+    title: pr.title || '',
+    body,
+    url: pr.url || pr.html_url || '',
+    state: String(pr.state || 'OPEN').toLowerCase(),
+    merged: Boolean(pr.mergedAt || pr.merged),
+    head_ref: pr.headRefName || pr.head_ref || '',
+    author,
+    created_at: pr.createdAt || pr.created_at || '',
+    updated_at: pr.updatedAt || pr.updated_at || '',
+    covers: refs.covers,
+    cr_ids: refs.cr_ids,
+  };
+}
+
+function samePullRequest(left, right) {
+  return JSON.stringify({ ...left, event: undefined }) === JSON.stringify({ ...right, event: undefined });
+}
+
+function readJsonl(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+}
+
+function readCachedPullRequests() {
+  try {
+    const latest = new Map();
+    for (const event of readJsonl(cachePath())) {
+      if (event.event === 'github_pr_synced' && event.pr_number) latest.set(prKey(event), event);
+    }
+    return { records: [...latest.values()], warnings: [] };
+  } catch (error) {
+    return { records: [], warnings: [{ path: cachePath(), message: error.message }] };
+  }
+}
+
+function appendCachedPullRequest(pr) {
+  const filePath = cachePath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const cached = readCachedPullRequests().records.find((item) => prKey(item) === prKey(pr));
+  if (cached && samePullRequest(cached, pr)) return 'unchanged';
+  fs.appendFileSync(filePath, `${JSON.stringify(pr)}\n`);
+  return cached ? 'updated' : 'imported';
+}
+
+function findGoalTarget(ref) {
+  const match = ref.match(/^#?(?:([a-z][\w-]*)#)?(g\d+)$/i);
+  if (!match) return null;
+  const username = match[1] || null;
+  const goalId = match[2].toLowerCase();
+  const dbDir = getClipsDbDir();
+  if (username && fs.existsSync(path.join(dbDir, username, `${goalId}.jsonl`))) return { goalId, username };
+  if (fs.existsSync(path.join(dbDir, `${goalId}.jsonl`))) return { goalId, username: null };
+  return null;
+}
+
+function appendPullRequestToGoals(pr) {
+  const targets = new Map();
+  for (const cover of pr.covers) {
+    const goalRef = cover.match(/^#?(?:[a-z][\w-]*#)?g\d+/i)?.[0];
+    const target = goalRef && findGoalTarget(goalRef);
+    if (target) targets.set(`${target.username || ''}/${target.goalId}`, target);
+  }
+  if (!targets.size) return false;
+  let hadExisting = false;
+  let changed = false;
+  let updatedExisting = false;
+  for (const target of targets.values()) {
+    const existing = readGoalWithTasks(target.goalId, target.username);
+    const previous = existing?.github_prs?.[prKey(pr)];
+    if (previous) {
+      hadExisting = true;
+      if (samePullRequest(previous, pr)) continue;
+      updatedExisting = true;
+    }
+    appendEvent(target.goalId, pr, target.username ? { username: target.username } : {});
+    changed = true;
+  }
+  if (!changed) return 'unchanged';
+  return hadExisting || updatedExisting ? 'updated' : 'imported';
+}
+
 function generateGoalId() {
   const dbDir = getClipsDbDir();
   if (!fs.existsSync(dbDir)) return 'g001';
@@ -235,13 +351,7 @@ export function importIssue(issueData) {
 // ── Pull ──────────────────────────────────────────────────────────
 
 export function pullAllIssues() {
-  if (!isCollaborationEnabled()) {
-    return { imported: 0, updated: 0, total: 0, skipped: true };
-  }
-
-  const result = spawnSync(
-    'gh',
-    [
+  const result = runGh([
       'issue',
       'list',
       '--state',
@@ -250,9 +360,7 @@ export function pullAllIssues() {
       'number,title,body,state,createdAt,updatedAt',
       '--limit',
       '1000',
-    ],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
-  );
+  ]);
 
   if (result.status !== 0) {
     throw new Error(result.stderr || 'gh issue list failed');
@@ -302,6 +410,52 @@ export function pullAllIssues() {
   }
 
   return { imported, updated, total: issues.length };
+}
+
+export function pullAllPullRequests() {
+  const result = runGh([
+    'pr', 'list', '--state', 'all', '--json',
+    'number,title,body,state,url,repository,headRefName,author,createdAt,updatedAt,mergedAt',
+    '--limit', '1000',
+  ]);
+  if (result.status !== 0) throw new Error(result.stderr || 'gh pr list failed');
+
+  const imported = [];
+  const updated = [];
+  const unchanged = [];
+  const unmatched = [];
+  const repository = repositoryFromRemote();
+  const rawPullRequests = JSON.parse(result.stdout);
+  if (!Array.isArray(rawPullRequests)) throw new Error('gh pr list returned a non-array response');
+  for (const raw of rawPullRequests) {
+    const pr = normalizePullRequest(raw, repository);
+    const linkedOutcome = appendPullRequestToGoals(pr);
+    const outcome = linkedOutcome || appendCachedPullRequest(pr);
+    if (!linkedOutcome) unmatched.push(pr);
+    if (outcome === 'imported') imported.push(pr);
+    else if (outcome === 'updated') updated.push(pr);
+    else if (outcome === 'unchanged') unchanged.push(pr);
+  }
+  return { imported, updated, unchanged, unmatched, total: rawPullRequests.length };
+}
+
+export function pullAllGithub() {
+  const result = {
+    issues: { imported: 0, updated: 0, total: 0 },
+    pull_requests: { imported: [], updated: [], unchanged: [], unmatched: [], total: 0 },
+    warnings: [],
+  };
+  try {
+    result.issues = pullAllIssues();
+  } catch (error) {
+    result.warnings.push({ source: 'issues', message: error.message });
+  }
+  try {
+    result.pull_requests = pullAllPullRequests();
+  } catch (error) {
+    result.warnings.push({ source: 'pull_requests', message: error.message });
+  }
+  return result;
 }
 
 // ── Push ──────────────────────────────────────────────────────────
@@ -447,76 +601,17 @@ export function pushGoal(goalId) {
 // ── Sync single goal ──────────────────────────────────────────────
 
 export function syncGoal(goalId) {
-  if (!isCollaborationEnabled()) {
-    return { skipped: true };
-  }
-
   const goal = readGoalWithTasks(goalId);
-  if (!goal || !goal.issue_number) {
-    pushGoal(goalId);
-    return;
-  }
-
-  // Pull latest state for this single issue
-  const viewRes = spawnSync(
-    'gh',
-    [
-      'issue',
-      'view',
-      String(goal.issue_number),
-      '--json',
-      'number,title,body,state,createdAt,updatedAt',
-    ],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
-  );
-
-  if (viewRes.status === 0) {
-    try {
-      const remote = JSON.parse(viewRes.stdout);
-      const ghClosed = remote.state === 'CLOSED' || remote.state === 'closed';
-      const localClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
-
-      if (ghClosed && !localClosed) {
-        appendEvent(
-          goalId,
-          {
-            event: 'status_changed',
-            goal_id: goalId,
-            timestamp: new Date().toISOString(),
-            status: 'closed',
-          },
-        );
-      } else if (!ghClosed && localClosed) {
-        appendEvent(
-          goalId,
-          {
-            event: 'status_changed',
-            goal_id: goalId,
-            timestamp: new Date().toISOString(),
-            status: 'open',
-          },
-        );
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  pushGoal(goalId);
+  if (!goal) return { skipped: false, pulls: null };
+  const pulls = pullAllGithub();
+  if (isCollaborationEnabled()) pushGoal(goalId);
+  return { skipped: false, pulls };
 }
 
 // ── Sync all ──────────────────────────────────────────────────────
 
 export function syncAll() {
-  if (!isCollaborationEnabled()) {
-    return {
-      pulled: { imported: 0, updated: 0 },
-      pushed: 0,
-      skipped: true,
-    };
-  }
-
-  const pullResult = pullAllIssues();
+  const pullResult = pullAllGithub();
 
   const dbDir = getClipsDbDir();
   let pushed = 0;
@@ -526,12 +621,14 @@ export function syncAll() {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
           scanGoals(path.join(dir, entry.name));
-        } else if (entry.name.endsWith('.jsonl')) {
+        } else if (entry.name.endsWith('.jsonl') && entry.name !== GITHUB_CACHE_FILE) {
           const gId = entry.name.replace('.jsonl', '');
           const goal = readGoalWithTasks(gId);
           if (goal) {
-            pushGoal(gId);
-            pushed++;
+            if (isCollaborationEnabled()) {
+              pushGoal(gId);
+              pushed++;
+            }
           }
         }
       }
@@ -540,7 +637,16 @@ export function syncAll() {
   }
 
   return {
-    pulled: { imported: pullResult.imported, updated: pullResult.updated },
+    pulled: {
+      imported: pullResult.issues.imported,
+      updated: pullResult.issues.updated,
+      prs_imported: pullResult.pull_requests.imported.length,
+      prs_updated: pullResult.pull_requests.updated.length,
+      prs_unchanged: pullResult.pull_requests.unchanged.length,
+      prs_unmatched: pullResult.pull_requests.unmatched.length,
+      warnings: pullResult.warnings,
+    },
     pushed,
+    skipped: false,
   };
 }

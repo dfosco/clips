@@ -462,7 +462,7 @@ clips config collaboration false        # Solo mode (no git sync)
 **Config keys:**
 - `default_branch` — Git branch (default: `main`)
 - `username` — GitHub username
-- `collaboration` — Enable GitHub pull/push during init, sync, and goal/task mutations (default: `true`)
+- `collaboration` — Enable GitHub push during goal/task mutations and sync (default: `true`). When `false`, `clips sync` remains an authenticated, pull-only GitHub read for Issues and PRs.
 - `auto_commit` — Legacy compatibility setting; planning state should move to the external workflow store
 - `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
 - `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)

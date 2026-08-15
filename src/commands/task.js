@@ -1,6 +1,6 @@
 // Task management commands
 import fs from 'fs';
-import { appendEvent, readGoalWithTasks, goalExists, parseRef, parseArgs, normalizeGoalId, normalizeTaskId } from '../lib/core.js';
+import { appendEvent, readGoalWithTasks, goalExists, getCurrentCommitSha, parseRef, parseArgs, normalizeGoalId, normalizeTaskId } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 
 function generateTaskId(goalId) {
@@ -107,7 +107,8 @@ export function changeTaskStatus(goalId, taskId, status) {
     goal_id: goalId,
     task_id: taskId,
     timestamp: new Date().toISOString(),
-    status: status
+    status: status,
+    commit_sha: status === 'closed' ? getCurrentCommitSha() : null,
   };
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }

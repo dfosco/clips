@@ -8,6 +8,7 @@ import { runViewCommand } from './commands/view.js';
 import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
+import { runWebCommand } from './commands/web.js';
 import { version } from './version.js';
 import { ensureSoloMode } from './lib/config.js';
 
@@ -37,8 +38,9 @@ Commands:
   view [ref]              View goal/task (or list all)
   goal <action> [args]    Manage goals
   task <action> [args]    Manage tasks
-  sync [ref]              Sync with GitHub Issues (bidirectional)
+  sync [ref]              Pull GitHub Issues/PRs; push only when collaboration is enabled
   config [key] [value]    View/set configuration
+  web [args]              Start the local read-only web board
 
 Options:
   --version, -v           Show version
@@ -52,6 +54,7 @@ Examples:
   clips view #g001
   clips task status g1 t1 done
   clips sync
+  clips web
 `);
   process.exit(0);
 }
@@ -64,6 +67,7 @@ const commands = {
   config: runConfigCommand,
   init: runInitCommand,
   sync: runSyncCommand,
+  web: runWebCommand,
 };
 
 const handler = commands[command];

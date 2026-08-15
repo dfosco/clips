@@ -211,6 +211,19 @@ export function getRepoRoot() {
   return path.dirname(absGitDir);
 }
 
+/**
+ * Return the repository commit associated with a planning status change.
+ * Status changes are appended after the implementation commit in the normal
+ * workflow, so HEAD is the commit that produced the completed work.
+ */
+export function getCurrentCommitSha() {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function getClipsDir() {
   return path.join(getRepoRoot(), CLIPS_DIR);
 }
@@ -322,10 +335,15 @@ export function readGoalWithTasks(goalId, username = null) {
         break;
       case 'status_changed':
         goal.status = event.status;
+        goal.closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
         break;
       case 'github_synced':
         goal.issue_number = event.issue_number;
         goal.issue_url = event.issue_url;
+        break;
+      case 'github_pr_synced':
+        goal.github_prs = goal.github_prs || {};
+        goal.github_prs[`${event.repository || ''}#${event.pr_number}`] = event;
         break;
       case 'task_created':
         goal.tasks[event.task_id] = {
@@ -345,6 +363,7 @@ export function readGoalWithTasks(goalId, username = null) {
       case 'task_status_changed':
         if (goal.tasks[event.task_id]) {
           goal.tasks[event.task_id].status = event.status;
+          goal.tasks[event.task_id].closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
         }
         break;
       case 'task_github_synced':

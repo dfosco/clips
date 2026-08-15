@@ -8,6 +8,10 @@
   },
   "scripts": {
     "test": "node src/cli.js --version",
+    "test:all": "npm test && npm run web:test",
+    "web:dev": "vite --config web/vite.config.js",
+    "web:build": "vite build --config web/vite.config.js",
+    "web:test": "vitest run --config web/vitest.config.js",
     "preversion": "npm test",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
     "postversion": "git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
@@ -25,7 +29,8 @@
     "src/",
     ".agents/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "web/"
   ],
   "keywords": [
     "cli",
@@ -40,5 +45,19 @@
   "homepage": "https://github.com/dfosco/clips#readme",
   "bugs": {
     "url": "https://github.com/dfosco/clips/issues"
+  },
+  "devDependencies": {
+    "@internationalized/date": "^3.12.3",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/svelte": "^5.4.2",
+    "bits-ui": "^2.18.1",
+    "jsdom": "^30.0.1",
+    "svelte": "^5.56.8",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "iconoir": "^7.12.1"
   }
 }

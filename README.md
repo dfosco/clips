@@ -78,7 +78,7 @@ clips init
 
 `clips init` creates the legacy `.clips/` working state and imports existing GitHub Issues as goals. The planning-store migration described above is the target model.
 
-Set `collaboration` to `false` for local-only mode. In that mode, `init`, `sync`, and goal/task mutations do not call GitHub; the CLI keeps local planning data and adds `.clips/` to `.gitignore`.
+Set `collaboration` to `false` for local mode. Goal/task mutations remain local, while `clips sync` still performs authenticated, pull-only GitHub reads. It imports Issues as goals and PRs as read-only external metadata; it never creates, edits, closes, reopens, or pushes GitHub objects. Pull failures are reported as warnings and do not remove existing local data. The CLI keeps local planning data and adds `.clips/` to `.gitignore`.
 
 ## Commands
 
@@ -92,8 +92,30 @@ clips goal status g1 closed         # Close goal (+ close issue)
 clips task create-batch g001 '[{"title":"Task A"},{"title":"Task B"}]'
 clips task status g1 t1 closed      # Close task (+ update issue)
 
-clips sync                           # Bidirectional sync with GitHub
+clips sync                           # Pull Issues/PRs; push only when collaboration is enabled
 clips config                         # View configuration
+```
+
+## Local board
+
+Run the read-only local kanban board from a Clips repository:
+
+```bash
+npm install
+npm run web:dev
+# Or, from any directory inside this repository:
+clips web
+```
+
+Open the printed local URL. The board reads all discoverable goals and tasks from `.clips/db`, including local-only goals and goals with GitHub metadata. It exposes only `GET /api/board`; the UI cannot create, edit, reorder, or synchronize planning data.
+
+`clips sync` also pulls all GitHub PRs with the existing `gh` CLI session. A PR is associated only when its title or body explicitly references `#g001`, `#g001#t01`, or `CR-NNN`. Matched PRs are recorded as `github_pr_synced` events in the goal stream; unmatched PRs are retained in `.clips/db/_github.jsonl`, which is a reserved cache and is not discovered as a goal. Repeated pulls are idempotent by repository and PR number. The board shows linked PRs on CRs and goal/task details, plus unmatched changes on the CR surface; PR links open GitHub in a new tab.
+
+Build and test the board with:
+
+```bash
+npm run web:build
+npm run web:test
 ```
 
 Use the committed templates for records until record-specific CLI commands are introduced. Do not add goals or tasks to `docs/records/`.

@@ -4,8 +4,8 @@ import { parseRef, readGoalWithTasks } from '../lib/core.js';
 
 const USAGE = `Usage: clips sync [ref]
 
-  clips sync          Sync all goals ↔ GitHub Issues
-  clips sync #g001    Sync a single goal
+  clips sync          Pull GitHub Issues/PRs; push only when collaboration is enabled
+  clips sync #g001    Pull all GitHub data; push only this goal when enabled
 
 Examples:
   clips sync
@@ -23,13 +23,11 @@ export function runSyncCommand(args) {
   if (!ref) {
     console.log('🔄 Syncing all issues...');
     const result = syncAll();
-    if (result.skipped) {
-      console.log('⏸️  GitHub sync disabled; local data unchanged remotely');
-      return;
-    }
     const { imported, updated } = result.pulled;
     console.log(`⬇️  Pulled: ${imported} imported, ${updated} updated`);
-    console.log(`⬆️  Pushed: ${result.pushed} goals`);
+    console.log(`🔀 PRs: ${result.pulled.prs_imported} imported, ${result.pulled.prs_updated} updated, ${result.pulled.prs_unchanged} unchanged, ${result.pulled.prs_unmatched} unmatched`);
+    for (const warning of result.pulled.warnings || []) console.log(`⚠️  ${warning.source}: ${warning.message}`);
+    console.log(`⬆️  Pushed: ${result.pushed} goals${result.pushed === 0 ? ' (pull-only local mode)' : ''}`);
     console.log('✅ Sync complete!');
     return;
   }
@@ -44,9 +42,12 @@ export function runSyncCommand(args) {
   const goalId = parsed.goalId;
   console.log(`🔄 Syncing #${goalId}...`);
   const result = syncGoal(goalId);
-  if (result?.skipped) {
-    console.log('⏸️  GitHub sync disabled; local data unchanged remotely');
-    return;
+
+  for (const warning of result.pulls?.warnings || []) console.log(`⚠️  ${warning.source}: ${warning.message}`);
+  if (result.pulls) {
+    console.log(`⬇️  Issues: ${result.pulls.issues.imported} imported, ${result.pulls.issues.updated} updated`);
+    const prs = result.pulls.pull_requests;
+    console.log(`🔀 PRs: ${prs.imported.length} imported, ${prs.updated.length} updated, ${prs.unchanged.length} unchanged, ${prs.unmatched.length} unmatched`);
   }
 
   const goal = readGoalWithTasks(goalId);
