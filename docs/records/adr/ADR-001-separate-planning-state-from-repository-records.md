@@ -1,6 +1,6 @@
 # ADR-001: Separate planning state from repository records
 
-**Status:** Accepted
+**Status:** Superseded
 **Date:** 2026-08-11
 **Decision basis:** 0a77da5591a377dbcc65135bacf3fb55cf1573b5
 **Supersedes:** None
@@ -30,6 +30,6 @@ Stacked CRs require topological review: a dependent CR cannot be accepted agains
 
 ## Related
 
+- [ADR-002](ADR-002-use-living-crs-as-development-records.md) supersedes this decision.
 - [CR-001](../cr/CR-001-redefine-clips-artifact-model.md)
 - [CR template](../cr/CR-TEMPLATE.md)
-- [FDR template](../fdr/FDR-TEMPLATE.md)

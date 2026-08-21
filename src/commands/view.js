@@ -30,6 +30,10 @@ function formatStatus(status) {
   return `${color}${icon} ${status}${RESET}`;
 }
 
+function formatVerificationMode(mode) {
+  return mode === 'behavior_and_tests' ? 'behavior + tests' : 'behavior';
+}
+
 function wrapText(text, width, indent = '') {
   if (!text) return '';
   const words = text.split(' ');
@@ -73,6 +77,7 @@ function viewGoal(goalId, username = null) {
   console.log(`${BOLD}│${RESET} ${BOLD}${displayRef}${RESET} ${goal.title}`);
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
+  console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
   if (goal.issue_number) {
     console.log(`${BOLD}│${RESET} GitHub: #${goal.issue_number} ${DIM}${goal.issue_url || ''}${RESET}`);
   }
@@ -93,6 +98,13 @@ function viewGoal(goalId, username = null) {
     for (const criterion of goal.acceptance_criteria) {
       console.log(`  • ${criterion}`);
     }
+  }
+
+  if (goal.behavior) {
+    console.log();
+    console.log(`${BOLD}Behavior${RESET}`);
+    console.log(`${DIM}─────────────────────────────────────────${RESET}`);
+    console.log(goal.behavior);
   }
   
   if (tasks.length > 0) {
@@ -156,6 +168,7 @@ function viewTask(goalId, taskId, username = null) {
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(task.status)}`);
   console.log(`${BOLD}│${RESET} Goal:   ${DIM}${goalRef} ${goal.title}${RESET}`);
+  console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(task.effective_verification_mode)}`);
   if (task.issue_number) {
     console.log(`${BOLD}│${RESET} GitHub: #${task.issue_number}`);
   }
@@ -166,6 +179,13 @@ function viewTask(goalId, taskId, username = null) {
     console.log(`${BOLD}Description${RESET}`);
     console.log(`${DIM}─────────────────────────────────────────${RESET}`);
     console.log(wrapText(task.description, 60));
+  }
+
+  if (task.behavior) {
+    console.log();
+    console.log(`${BOLD}Behavior${RESET}`);
+    console.log(`${DIM}─────────────────────────────────────────${RESET}`);
+    console.log(task.behavior);
   }
   
   console.log();
@@ -291,7 +311,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       );
       
       console.log();
-      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo}`);
+      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${formatVerificationMode(goal.verification_mode)}]${RESET}`);
       
       // Hide tasks if goal status is in hideTasksForGoalStatuses
       if (hideTasksForGoalStatuses.includes(goal.status)) continue;
@@ -317,7 +337,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
             default:
               checkbox = ' '; color = ''; break;
           }
-          console.log(`     ${color}[${checkbox}]${RESET} ${DIM}#${task.task_id}${RESET} ${task.title}`);
+          console.log(`     ${color}[${checkbox}]${RESET} ${DIM}#${task.task_id}${RESET} ${task.title} ${DIM}[${formatVerificationMode(task.effective_verification_mode)}]${RESET}`);
         }
       }
     }

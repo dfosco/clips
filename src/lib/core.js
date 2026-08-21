@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { readConfig } from './config.js';
+import { effectiveVerificationMode } from './behavior.js';
 
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
@@ -349,7 +350,11 @@ export function readGoalWithTasks(goalId, username = null) {
         goal.tasks[event.task_id] = {
           task_id: event.task_id,
           title: event.title,
-          description: event.description,
+          description: event.description || '',
+          behavior: event.behavior || '',
+          ...(Object.prototype.hasOwnProperty.call(event, 'verification_mode')
+            ? { verification_mode: event.verification_mode }
+            : {}),
           status: 'open'
         };
         goal._taskOrder = goal._taskOrder || [];
@@ -375,6 +380,16 @@ export function readGoalWithTasks(goalId, username = null) {
         goal._taskOrder = event.order;
         break;
     }
+  }
+
+  goal.behavior = goal.behavior || '';
+  goal.verification_mode = effectiveVerificationMode(goal.verification_mode);
+  for (const task of Object.values(goal.tasks)) {
+    task.behavior = task.behavior || '';
+    task.effective_verification_mode = effectiveVerificationMode(
+      goal.verification_mode,
+      task.verification_mode,
+    );
   }
   
   return goal;

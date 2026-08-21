@@ -7,7 +7,7 @@
 
 ## Context
 
-What problem or constraint requires a durable architectural decision?
+What problem or constraint requires a rare, durable cross-cutting architectural decision?
 
 ## Decision
 
@@ -19,4 +19,4 @@ Describe benefits, costs, operational impact, and follow-up work.
 
 ## Related
 
-CRs, FDRs, goals, tasks, or external references.
+CRs, goals, tasks, product documentation, or external references.

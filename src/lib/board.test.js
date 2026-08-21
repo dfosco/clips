@@ -65,6 +65,40 @@ describe('readBoardData', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it('exposes behavior and resolves task verification mode inheritance', () => {
+    const dbDir = makeDb({
+      'g001.jsonl': [
+        JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Behavior goal', behavior: 'Feature: Manage to-dos', verification_mode: 'behavior_and_tests' }),
+        JSON.stringify({ event: 'task_created', task_id: 't01', title: 'Inherited task', behavior: 'Scenario: Add a to-do' }),
+        JSON.stringify({ event: 'task_created', task_id: 't02', title: 'Behavior-only task', verification_mode: 'behavior' }),
+      ].join('\n'),
+    });
+
+    const result = readBoardData({ dbDir });
+    const goal = result.goals[0];
+    expect(goal.behavior).toBe('Feature: Manage to-dos');
+    expect(goal.effective_verification_mode).toBe('behavior_and_tests');
+    expect(goal.tasks[0]).toMatchObject({
+      behavior: 'Scenario: Add a to-do',
+      verification_mode: null,
+      effective_verification_mode: 'behavior_and_tests',
+    });
+    expect(goal.tasks[1].effective_verification_mode).toBe('behavior');
+  });
+
+  it('defaults legacy goals and tasks to behavior mode', () => {
+    const dbDir = makeDb({
+      'g001.jsonl': [
+        JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Legacy goal' }),
+        JSON.stringify({ event: 'task_created', task_id: 't01', title: 'Legacy task' }),
+      ].join('\n'),
+    });
+
+    const goal = readBoardData({ dbDir }).goals[0];
+    expect(goal.effective_verification_mode).toBe('behavior');
+    expect(goal.tasks[0].effective_verification_mode).toBe('behavior');
+  });
+
   it('links change records to covered goals and tasks', () => {
     const dbDir = makeDb({
       'g001.jsonl': [

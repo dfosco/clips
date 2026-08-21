@@ -8,9 +8,10 @@ import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 
 /**
- * Add .dots to .git/info/exclude so it's ignored locally (not via .gitignore)
+ * Add .clips to .git/info/exclude so local planning state is ignored locally
+ * without changing the repository's shared .gitignore.
  */
-function setupGitExclude(cwd) {
+export function setupGitExclude(cwd) {
   try {
     const gitDir = execSync('git rev-parse --git-common-dir', {
       encoding: 'utf8',
@@ -29,12 +30,12 @@ function setupGitExclude(cwd) {
     if (fs.existsSync(excludePath)) {
       content = fs.readFileSync(excludePath, 'utf8');
       const lines = content.split('\n');
-      if (lines.some(line => line.trim() === '.dots' || line.trim() === '.dots/')) {
+      if (lines.some(line => line.trim() === '.clips' || line.trim() === '.clips/')) {
         return false;
       }
     }
 
-    const entry = content.endsWith('\n') || content === '' ? '.dots\n' : '\n.dots\n';
+    const entry = content.endsWith('\n') || content === '' ? '.clips\n' : '\n.clips\n';
     fs.appendFileSync(excludePath, entry);
     return true;
   } catch (e) {
@@ -190,11 +191,11 @@ export function runInitCommand(args) {
     console.log('• .clips/db/ directory already exists');
   }
 
-  // Set up .git/info/exclude with .dots
+  // Set up .git/info/exclude with .clips
   if (setupGitExclude(cwd)) {
-    console.log('✓ Added .dots to .git/info/exclude');
+    console.log('✓ Added .clips to .git/info/exclude');
   } else {
-    console.log('• .dots already in .git/info/exclude');
+    console.log('• .clips already in .git/info/exclude');
   }
 
   // Set up .vscode/settings.json to show .git folder

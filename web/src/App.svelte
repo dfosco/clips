@@ -52,11 +52,11 @@
   }
 
   function goalMatches(goal, query) {
-    return [goal.title, goal.description, goal.ref].some((value) => matches(value, query));
+    return [goal.title, goal.description, goal.behavior, goal.effective_verification_mode, goal.ref].some((value) => matches(value, query));
   }
 
   function taskMatches(task, query) {
-    return [task.title, task.description, task.goal_title, task.ref].some((value) => matches(value, query));
+    return [task.title, task.description, task.behavior, task.effective_verification_mode, task.goal_title, task.ref].some((value) => matches(value, query));
   }
 
   function recordMatches(record, query) {
@@ -287,7 +287,8 @@
             <h2 id="detail-title">{selectedItem.item.title}</h2>
             <p class="detail-context">Part of <button type="button" onclick={() => { const goal = board?.goals?.find((candidate) => candidate.goal_id === selectedItem.item.goal_id); if (goal) openGoal(goal); }}>{selectedItem.item.goal_title}</button></p>
             {#if selectedItem.item.description}<p class="detail-description">{selectedItem.item.description}</p>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
-            <div class="detail-meta"><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Source</span><strong>{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
+            {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
+            <div class="detail-meta"><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Source</span><strong>{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
             {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked change records</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
             {#if selectedItem.item.linked_prs?.length}<div class="detail-task-list"><h3>Linked GitHub PRs</h3>{#each selectedItem.item.linked_prs as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}
@@ -295,7 +296,8 @@
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="source-label source-label--{selectedItem.item.source}"><Icon name={selectedItem.item.source === 'github' ? 'github' : 'bookmark'} size={15} />{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
             {#if selectedItem.item.description}<p class="detail-description">{selectedItem.item.description}</p>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
-            <div class="detail-meta"><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Tasks</span><strong>{selectedItem.item.tasks.length}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
+            {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
+            <div class="detail-meta"><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Tasks</span><strong>{selectedItem.item.tasks.length}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
             <div class="detail-task-list"><h3>Tasks in this goal</h3>{#each selectedItem.item.tasks as task}<button type="button" onclick={() => openTask(task)}><span class="status-dot status-dot--{task.column}"></span><span>{task.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>
             {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked change records</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}

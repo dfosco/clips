@@ -27,6 +27,7 @@
   {#if goal.description}<p>{goal.description}</p>{:else}<p class="goal-card__empty">No description provided.</p>{/if}
   <div class="goal-card__footer">
     <span class="source-label source-label--{goal.source}"><Icon name={goal.source === 'github' ? 'github' : 'bookmark'} size={16} />{sourceLabel}</span>
+    <span class="verification-label">{goal.effective_verification_mode === 'behavior_and_tests' ? 'Behavior + tests' : 'Behavior'}</span>
     <span>{goal.tasks.length} {goal.tasks.length === 1 ? 'task' : 'tasks'}</span>
   </div>
   {#if goal.status === 'closed' && goal.closed_commit_sha}<div class="closed-commit"><Icon name="commit" size={14} /><span title={goal.closed_commit_sha}>Closed in <code>{goal.closed_commit_sha.slice(0, 7)}</code></span></div>{/if}

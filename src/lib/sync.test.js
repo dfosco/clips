@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePullRequest, parsePlanningRefs } from './sync.js';
+import {
+  buildIssueBody,
+  buildTaskIssueBody,
+  normalizePullRequest,
+  parsePlanningRefs,
+} from './sync.js';
 
 describe('GitHub pull normalization', () => {
   it('extracts explicit goal, task, and CR references from PR text', () => {
@@ -33,5 +38,44 @@ describe('GitHub pull normalization', () => {
       covers: ['#g001'],
       cr_ids: ['CR-003'],
     });
+  });
+});
+
+describe('GitHub behavior rendering', () => {
+  it('renders goal and task behavior with effective verification modes', () => {
+    const body = buildIssueBody({
+      goal_id: 'g001',
+      description: 'Manage to-dos.',
+      behavior: 'Feature: Manage to-dos',
+      verification_mode: 'behavior_and_tests',
+      acceptance_criteria: [],
+      tasks: {
+        t01: {
+          task_id: 't01',
+          title: 'Add a to-do',
+          description: '',
+          behavior: 'Scenario: Add a to-do',
+          status: 'open',
+        },
+      },
+      _taskOrder: ['t01'],
+    });
+
+    expect(body).toContain('## Behavior\n\n```gherkin\nFeature: Manage to-dos');
+    expect(body).toContain('## Verification Mode\n\n`behavior_and_tests`');
+    expect(body).toContain('Verification: `behavior_and_tests`');
+    expect(body).toContain('Scenario: Add a to-do');
+  });
+
+  it('renders standalone task issue details using a task override', () => {
+    const body = buildTaskIssueBody({
+      description: 'Render the behavior.',
+      behavior: 'Scenario: View attachment',
+      verification_mode: 'behavior',
+    }, { verification_mode: 'behavior_and_tests' }, 42);
+
+    expect(body).toContain('Sub-issue of #42');
+    expect(body).toContain('```gherkin\nScenario: View attachment\n```');
+    expect(body).toContain('## Verification Mode\n\n`behavior`');
   });
 });

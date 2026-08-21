@@ -2,6 +2,7 @@
 import fs from 'fs';
 import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
+import { planningBehaviorFields } from '../lib/behavior.js';
 
 // Normalize goal ID by stripping # prefix if present
 function normalizeGoalId(goalId) {
@@ -36,6 +37,7 @@ function createGoal(data) {
     title: data.title,
     description: data.description || '',
     acceptance_criteria: data.acceptance_criteria || [],
+    ...planningBehaviorFields(data, { defaultMode: true }),
     status: 'open'
   };
   
@@ -54,11 +56,13 @@ function createGoal(data) {
 
 function updateGoal(goalId, data) {
   const normalizedId = normalizeGoalId(goalId);
+  const behaviorFields = planningBehaviorFields(data);
   const event = {
     event: 'updated',
     goal_id: normalizedId,
     timestamp: new Date().toISOString(),
-    ...data
+    ...data,
+    ...behaviorFields,
   };
   appendEvent(normalizedId, event);
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
@@ -143,6 +147,10 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
+
+Behavior fields:
+  behavior             Optional Gherkin-style behavior text
+  verification_mode    behavior | behavior_and_tests
 
 Internal (prefer 'clips view' for browsing):
   status <id> <status> Change goal status

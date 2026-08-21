@@ -50,6 +50,7 @@ Examples:
   clips init
   clips view
   clips goal create '{"title":"My Goal","description":"..."}'
+  clips goal create '{"title":"My Goal","behavior":"Feature: My goal","verification_mode":"behavior_and_tests"}'
   clips task create-batch g001 '[{"title":"Task 1"},{"title":"Task 2"}]'
   clips view #g001
   clips task status g1 t1 done

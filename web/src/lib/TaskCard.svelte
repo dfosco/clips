@@ -31,6 +31,7 @@
     {:else}
       <span class="source-label source-label--{task.source}"><Icon name={task.source === 'github' ? 'github' : 'bookmark'} size={16} />{sourceLabel}</span>
     {/if}
+    <span class="verification-label">{task.effective_verification_mode === 'behavior_and_tests' ? 'Behavior + tests' : 'Behavior'}</span>
   </div>
   {#if task.status === 'closed' && task.closed_commit_sha}<div class="closed-commit"><Icon name="commit" size={14} /><span title={task.closed_commit_sha}>Closed in <code>{task.closed_commit_sha.slice(0, 7)}</code></span></div>{/if}
   {#if task.linked_crs?.length}<div class="linked-crs"><span>CR</span>{#each task.linked_crs as record}<button type="button" onclick={(event) => { event.stopPropagation(); onOpenChange(record); }}>{record.id}</button>{/each}</div>{/if}

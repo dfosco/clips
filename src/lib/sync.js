@@ -11,6 +11,7 @@ import {
   normalizeGoalId,
 } from './core.js';
 import { readConfig, isCollaborationEnabled } from './config.js';
+import { effectiveVerificationMode } from './behavior.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
 
@@ -171,6 +172,22 @@ function formatDescription(description) {
   return formatted.trim();
 }
 
+function formatBehaviorBlock(behavior, indent = '') {
+  const content = String(behavior || '').trim();
+  if (!content) return '';
+  const lines = content.split(/\r?\n/).map((line) => `${indent}${line}`).join('\n');
+  return `${indent}\`\`\`gherkin\n${lines}\n${indent}\`\`\``;
+}
+
+export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
+  const sections = [];
+  if (parentIssueNumber) sections.push(`Sub-issue of #${parentIssueNumber}`);
+  if (task.description) sections.push(formatDescription(task.description));
+  if (task.behavior) sections.push(`## Behavior\n\n${formatBehaviorBlock(task.behavior)}`);
+  sections.push(`## Verification Mode\n\n\`${effectiveVerificationMode(goal?.verification_mode, task.verification_mode)}\``);
+  return sections.join('\n\n').trim();
+}
+
 export function buildIssueBody(goal) {
   const config = readConfig();
   let body = '';
@@ -181,6 +198,12 @@ export function buildIssueBody(goal) {
       body += `## Description\n\n${desc}\n\n`;
     }
   }
+
+  if (goal.behavior) {
+    body += `## Behavior\n\n${formatBehaviorBlock(goal.behavior)}\n\n`;
+  }
+
+  body += `## Verification Mode\n\n\`${effectiveVerificationMode(goal.verification_mode)}\`\n\n`;
 
   if (goal.acceptance_criteria) {
     const criteria = Array.isArray(goal.acceptance_criteria)
@@ -209,7 +232,11 @@ export function buildIssueBody(goal) {
       } else {
         body += `- [${checked}] **#${goal.goal_id}#${task.task_id}**: ${task.title}\n`;
         if (task.description) {
-          body += `  ${task.description}\n`;
+          body += `${String(task.description).split(/\r?\n/).map((line) => `  ${line}`).join('\n')}\n`;
+        }
+        body += `  - Verification: \`${effectiveVerificationMode(goal.verification_mode, task.verification_mode)}\`\n`;
+        if (task.behavior) {
+          body += `  - Behavior:\n\n${formatBehaviorBlock(task.behavior, '    ')}\n`;
         }
       }
     }
@@ -507,7 +534,7 @@ export function pushGoal(goalId) {
             'gh',
             ['issue', 'create', '--title', task.title, '--body-file', '-'],
             {
-              input: `Sub-issue of #${issueNumber}\n\n${task.description || ''}`.trim(),
+              input: buildTaskIssueBody(task, goal, issueNumber),
               encoding: 'utf8',
               stdio: ['pipe', 'pipe', 'pipe'],
             },
@@ -578,6 +605,15 @@ export function pushGoal(goalId) {
         const tasks = getOrderedTasks(goal);
         for (const task of tasks) {
           if (!task.issue_number) continue;
+          spawnSync(
+            'gh',
+            ['issue', 'edit', String(task.issue_number), '--title', task.title, '--body-file', '-'],
+            {
+              input: buildTaskIssueBody(task, goal, num),
+              encoding: 'utf8',
+              stdio: ['pipe', 'pipe', 'pipe'],
+            },
+          );
           const taskDone = ['closed', 'not_planned', 'duplicate'].includes(task.status);
           if (taskDone) {
             spawnSync('gh', ['issue', 'close', String(task.issue_number)], {

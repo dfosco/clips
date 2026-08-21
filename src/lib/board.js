@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getClipsDbDir, getRepoRoot } from './core.js';
+import { effectiveVerificationMode } from './behavior.js';
 
 export const BOARD_COLUMNS = [
   { id: 'open', label: 'Open' },
@@ -157,6 +158,10 @@ export function parseGoalFile(filePath, goalId) {
           task_id: event.task_id,
           title: event.title,
           description: event.description || '',
+          behavior: event.behavior || '',
+          ...(Object.prototype.hasOwnProperty.call(event, 'verification_mode')
+            ? { verification_mode: event.verification_mode }
+            : {}),
           status: 'open',
         };
         goal._taskOrder.push(event.task_id);
@@ -213,6 +218,7 @@ export function discoverBoardGoals(dbDir = getClipsDbDir()) {
 
 function normalizeGoal(rawGoal, username, records, allPrs) {
   const goalStatus = normalizeStatus(rawGoal.status);
+  const goalVerificationMode = effectiveVerificationMode(rawGoal.verification_mode);
   const source = rawGoal.issue_number ? 'github' : 'local';
   const goalRef = formatRef(username, rawGoal.goal_id);
   const shortGoalRef = formatRef(null, rawGoal.goal_id);
@@ -224,6 +230,9 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
     username,
     title: rawGoal.title || rawGoal.goal_id,
     description: rawGoal.description || '',
+    behavior: rawGoal.behavior || '',
+    verification_mode: goalVerificationMode,
+    effective_verification_mode: goalVerificationMode,
     status: goalStatus,
     issue_number: rawGoal.issue_number || null,
     issue_url: rawGoal.issue_url || null,
@@ -240,6 +249,12 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
         ref: taskRef,
         title: rawTask.title || 'Untitled task',
         description: rawTask.description || '',
+        behavior: rawTask.behavior || '',
+        verification_mode: rawTask.verification_mode || null,
+        effective_verification_mode: effectiveVerificationMode(
+          goalVerificationMode,
+          rawTask.verification_mode,
+        ),
         status,
         column: columnForStatus(status),
         issue_number: rawTask.issue_number || null,

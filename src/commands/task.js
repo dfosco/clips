@@ -2,6 +2,7 @@
 import fs from 'fs';
 import { appendEvent, readGoalWithTasks, goalExists, getCurrentCommitSha, parseRef, parseArgs, normalizeGoalId, normalizeTaskId } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
+import { planningBehaviorFields } from '../lib/behavior.js';
 
 function generateTaskId(goalId) {
   const goal = readGoalWithTasks(goalId);
@@ -31,7 +32,8 @@ function createTask(goalId, data) {
     task_id: taskId,
     timestamp: new Date().toISOString(),
     title: data.title,
-    description: data.description || ''
+    description: data.description || '',
+    ...planningBehaviorFields(data, { allowInheritedMode: true }),
   };
   
   appendEvent(goalId, event);
@@ -64,7 +66,8 @@ function createTasks(goalId, tasksArray) {
       task_id: taskId,
       timestamp: new Date().toISOString(),
       title: task.title,
-      description: task.description || ''
+      description: task.description || '',
+      ...planningBehaviorFields(task, { allowInheritedMode: true }),
     };
     // Skip sync for all but last task in batch
     const isLast = i === tasksArray.length - 1;
@@ -82,12 +85,14 @@ function updateTask(goalId, taskId, data) {
     process.exit(1);
   }
   
+  const behaviorFields = planningBehaviorFields(data, { allowInheritedMode: true });
   const event = {
     event: 'task_updated',
     goal_id: goalId,
     task_id: taskId,
     timestamp: new Date().toISOString(),
-    ...data
+    ...data,
+    ...behaviorFields,
   };
   appendEvent(goalId, event);
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
@@ -264,6 +269,10 @@ Commands:
   show <goal_id>                   Show goal with all tasks
   reorder <goal_id> <json>         Reorder tasks (draft goals only)
 
+Behavior fields:
+  behavior             Optional Gherkin-style behavior text
+  verification_mode    behavior | behavior_and_tests | null (inherit goal)
+
 Flexible ID formats:
   Goal: #g001, g001, g1
   Task: #t4, t4
@@ -271,6 +280,7 @@ Flexible ID formats:
 
 Examples:
   clips task create g001 '{"title":"Add auth"}'
+  clips task create g001 '{"title":"Add auth","verification_mode":"behavior_and_tests"}'
   clips task create-batch g001 '[{"title":"Task 1"},{"title":"Task 2"}]'
   echo '[{"title":"Task 1"}]' | clips task create-batch g001 --stdin
   clips task status g1 t1 done

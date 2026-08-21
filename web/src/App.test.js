@@ -10,6 +10,8 @@ const board = {
     ref: '#g001',
     title: 'Local roadmap',
     source: 'local',
+    behavior: 'Feature: Local roadmap',
+    effective_verification_mode: 'behavior_and_tests',
   tasks: [{
       ref: '#g001#t01',
       title: 'Define board data contract',
@@ -18,6 +20,8 @@ const board = {
       source: 'local',
       column: 'open',
       status: 'open',
+      behavior: 'Scenario: Define the board contract',
+      effective_verification_mode: 'behavior_and_tests',
     }],
   }],
   warnings: [],
@@ -113,6 +117,8 @@ describe('board app', () => {
     const panel = screen.getByRole('dialog');
     expect(within(panel).getByRole('heading', { name: 'Define board data contract' })).toBeInTheDocument();
     expect(within(panel).getByText('Document response shape.')).toBeInTheDocument();
+    expect(within(panel).getByText('Scenario: Define the board contract')).toBeInTheDocument();
+    expect(within(panel).getByText('behavior and tests')).toBeInTheDocument();
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
@@ -143,6 +149,7 @@ describe('board app', () => {
     await screen.getByRole('button', { name: 'Open goal Local roadmap' }).click();
 
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Local roadmap' })).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Feature: Local roadmap')).toBeInTheDocument();
     await screen.getByRole('button', { name: 'Define board data contract' }).click();
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Define board data contract' })).toBeInTheDocument();
   });
