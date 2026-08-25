@@ -4,8 +4,11 @@ import { parseRef, readGoalWithTasks } from '../lib/core.js';
 
 const USAGE = `Usage: clips sync [ref]
 
-  clips sync          Pull GitHub Issues/PRs; push only when collaboration is enabled
-  clips sync #g001    Pull all GitHub data; push only this goal when enabled
+  clips sync          Pull and push GitHub data when collaboration is enabled
+  clips sync #g001    Pull all GitHub data; push only this goal
+
+GitHub sync is disabled by default. Enable explicitly with:
+  clips config collaboration true
 
 Examples:
   clips sync
@@ -21,13 +24,17 @@ export function runSyncCommand(args) {
   const ref = args[0];
 
   if (!ref) {
-    console.log('🔄 Syncing all issues...');
     const result = syncAll();
+    if (result.skipped) {
+      console.log('• GitHub sync disabled. Enable with: clips config collaboration true');
+      return;
+    }
+    console.log('🔄 Syncing all issues...');
     const { imported, updated } = result.pulled;
     console.log(`⬇️  Pulled: ${imported} imported, ${updated} updated`);
     console.log(`🔀 PRs: ${result.pulled.prs_imported} imported, ${result.pulled.prs_updated} updated, ${result.pulled.prs_unchanged} unchanged, ${result.pulled.prs_unmatched} unmatched`);
     for (const warning of result.pulled.warnings || []) console.log(`⚠️  ${warning.source}: ${warning.message}`);
-    console.log(`⬆️  Pushed: ${result.pushed} goals${result.pushed === 0 ? ' (pull-only local mode)' : ''}`);
+    console.log(`⬆️  Pushed: ${result.pushed} goals`);
     console.log('✅ Sync complete!');
     return;
   }
@@ -40,8 +47,12 @@ export function runSyncCommand(args) {
   }
 
   const goalId = parsed.goalId;
-  console.log(`🔄 Syncing #${goalId}...`);
   const result = syncGoal(goalId);
+  if (result.skipped) {
+    console.log('• GitHub sync disabled. Enable with: clips config collaboration true');
+    return;
+  }
+  console.log(`🔄 Syncing #${goalId}...`);
 
   for (const warning of result.pulls?.warnings || []) console.log(`⚠️  ${warning.source}: ${warning.message}`);
   if (result.pulls) {

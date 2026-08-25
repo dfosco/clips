@@ -3,7 +3,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getClipsDir, getRepoRoot } from './core.js';
+import { getClipsDir } from './core.js';
 
 export const CONFIG_FILE = 'clips.config.json';
 
@@ -11,7 +11,7 @@ export const CONFIG_FILE = 'clips.config.json';
 export const DEFAULT_CONFIG = {
   default_branch: 'main',
   username: null,               // user's GitHub username
-  collaboration: true,          // if false, .clips is gitignored and sync/commit operations are disabled
+  collaboration: false,         // GitHub reads and writes require explicit opt-in
   body_max_length: null,        // max chars for imported issue descriptions (null = no limit)
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
@@ -122,38 +122,10 @@ export function initConfig(overrides = {}) {
 }
 
 /**
- * Ensure solo mode is properly configured
- * If collaboration is false and .clips is not in .gitignore, add it
- */
-export function ensureSoloMode() {
-  const config = readConfig();
-  if (config.collaboration !== false) return;
-
-  const repoRoot = getRepoRoot();
-  const gitignorePath = path.join(repoRoot, '.gitignore');
-
-  // Check if .clips is already in .gitignore
-  let gitignoreContent = '';
-  if (fs.existsSync(gitignorePath)) {
-    gitignoreContent = fs.readFileSync(gitignorePath, 'utf8');
-    const lines = gitignoreContent.split('\n');
-    if (lines.some(line => line.trim() === '.clips' || line.trim() === '.clips/')) {
-      return; // Already ignored
-    }
-  }
-
-  // Add .clips to .gitignore
-  const newEntry = gitignoreContent.endsWith('\n') || gitignoreContent === ''
-    ? '.clips/\n'
-    : '\n.clips/\n';
-  fs.appendFileSync(gitignorePath, newEntry);
-}
-
-/**
  * Check if collaboration mode is enabled
  * @returns {boolean}
  */
 export function isCollaborationEnabled() {
   const config = readConfig();
-  return config.collaboration !== false;
+  return config.collaboration === true;
 }

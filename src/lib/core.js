@@ -7,6 +7,7 @@ import { effectiveVerificationMode } from './behavior.js';
 
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
+export const CLIPS_RECORDS_DIR = '.clips/records';
 
 /**
  * Get the current username from config
@@ -231,6 +232,11 @@ export function getClipsDir() {
 
 export function getClipsDbDir() {
   return path.join(getRepoRoot(), CLIPS_DB_DIR);
+}
+
+export function getClipsRecordsDir(recordType = null) {
+  const recordsDir = path.join(getRepoRoot(), CLIPS_RECORDS_DIR);
+  return recordType ? path.join(recordsDir, recordType) : recordsDir;
 }
 
 /**

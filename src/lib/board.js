@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getClipsDbDir, getRepoRoot } from './core.js';
+import { getClipsDbDir, getClipsRecordsDir } from './core.js';
 import { effectiveVerificationMode } from './behavior.js';
 
 export const BOARD_COLUMNS = [
@@ -63,7 +63,7 @@ function parseChangeRecord(filePath) {
   };
 }
 
-export function readChangeRecords(recordsDir = path.join(getRepoRoot(), 'docs', 'records', 'cr')) {
+export function readChangeRecords(recordsDir = getClipsRecordsDir('cr')) {
   if (!fs.existsSync(recordsDir)) return { records: [], warnings: [] };
 
   const records = [];
@@ -271,7 +271,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
   };
 }
 
-export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = path.join(getRepoRoot(), 'docs', 'records', 'cr') } = {}) {
+export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = getClipsRecordsDir('cr') } = {}) {
   const warnings = [];
   const goals = [];
   const changeRecords = readChangeRecords(recordsDir);

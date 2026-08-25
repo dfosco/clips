@@ -10,16 +10,8 @@ import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runWebCommand } from './commands/web.js';
 import { version } from './version.js';
-import { ensureSoloMode } from './lib/config.js';
 
 const [,, command, ...args] = process.argv;
-
-// Ensure solo mode is configured (adds .clips to .gitignore if collaboration is false)
-try {
-  ensureSoloMode();
-} catch (e) {
-  // Silently fail - config might not exist yet (e.g., before init)
-}
 
 // Handle --version flag
 if (command === '--version' || command === '-v') {
@@ -34,11 +26,11 @@ if (command === '--help' || command === '-h' || !command) {
 Usage: clips <command> [args]
 
 Commands:
-  init                    Initialize clips (imports existing GitHub Issues)
+  init                    Initialize local-only clips state
   view [ref]              View goal/task (or list all)
   goal <action> [args]    Manage goals
   task <action> [args]    Manage tasks
-  sync [ref]              Pull GitHub Issues/PRs; push only when collaboration is enabled
+  sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration
   web [args]              Start the local read-only web board
 

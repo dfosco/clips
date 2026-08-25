@@ -122,6 +122,21 @@ describe('readBoardData', () => {
     expect(result.goals[0].tasks[0].linked_crs.map((record) => record.id)).toEqual(['CR-003']);
   });
 
+  it('reads change records from a local .clips records directory', () => {
+    const clipsDir = makeDb({
+      'db/g001.jsonl': JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Local goal' }),
+      'records/cr/CR-009-local-record.md': '# CR-009: Local record\n\n**Status:** Draft\n**Type:** Feature\n**Covers:** #g001',
+    });
+
+    const result = readBoardData({
+      dbDir: path.join(clipsDir, 'db'),
+      recordsDir: path.join(clipsDir, 'records', 'cr'),
+    });
+
+    expect(result.change_records.map((record) => record.id)).toEqual(['CR-009']);
+    expect(result.goals[0].linked_crs.map((record) => record.id)).toEqual(['CR-009']);
+  });
+
   it('normalizes the closing commit SHA for goals and tasks', () => {
     const dbDir = makeDb({
       'g001.jsonl': [

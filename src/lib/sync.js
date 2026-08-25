@@ -378,6 +378,10 @@ export function importIssue(issueData) {
 // ── Pull ──────────────────────────────────────────────────────────
 
 export function pullAllIssues() {
+  if (!isCollaborationEnabled()) {
+    return { imported: 0, updated: 0, total: 0, skipped: true };
+  }
+
   const result = runGh([
       'issue',
       'list',
@@ -440,6 +444,10 @@ export function pullAllIssues() {
 }
 
 export function pullAllPullRequests() {
+  if (!isCollaborationEnabled()) {
+    return { imported: [], updated: [], unchanged: [], unmatched: [], total: 0, skipped: true };
+  }
+
   const result = runGh([
     'pr', 'list', '--state', 'all', '--json',
     'number,title,body,state,url,repository,headRefName,author,createdAt,updatedAt,mergedAt',
@@ -472,6 +480,8 @@ export function pullAllGithub() {
     pull_requests: { imported: [], updated: [], unchanged: [], unmatched: [], total: 0 },
     warnings: [],
   };
+  if (!isCollaborationEnabled()) return { ...result, skipped: true };
+
   try {
     result.issues = pullAllIssues();
   } catch (error) {
@@ -637,6 +647,8 @@ export function pushGoal(goalId) {
 // ── Sync single goal ──────────────────────────────────────────────
 
 export function syncGoal(goalId) {
+  if (!isCollaborationEnabled()) return { skipped: true, pulls: null };
+
   const goal = readGoalWithTasks(goalId);
   if (!goal) return { skipped: false, pulls: null };
   const pulls = pullAllGithub();
@@ -647,6 +659,22 @@ export function syncGoal(goalId) {
 // ── Sync all ──────────────────────────────────────────────────────
 
 export function syncAll() {
+  if (!isCollaborationEnabled()) {
+    return {
+      pulled: {
+        imported: 0,
+        updated: 0,
+        prs_imported: 0,
+        prs_updated: 0,
+        prs_unchanged: 0,
+        prs_unmatched: 0,
+        warnings: [],
+      },
+      pushed: 0,
+      skipped: true,
+    };
+  }
+
   const pullResult = pullAllGithub();
 
   const dbDir = getClipsDbDir();

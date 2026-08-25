@@ -1,15 +1,16 @@
 # clips
 
-`clips` manages two related but deliberately separate things:
+`clips` manages local workflow state without adding it to repository history:
 
-- **Planning state:** goals and tasks, kept in an external workflow store and optionally mirrored to GitHub Issues.
-- **Repository records:** CRs and ADRs, committed with the code they describe.
+- **Planning state:** goals and tasks under `.clips/db/`, optionally mirrored to GitHub Issues after explicit opt-in.
+- **Review and decision records:** CRs, ADRs, and related artifacts under `.clips/records/`.
+- **Committed schemas:** record templates under `docs/records/`; these are not record instances.
 
 CR = Change Record  
 ADR = Architecture Decision Record  
 FDR = Feature Decision Record (for user-facing functionality, can be a source of truth for usage docs)  
 
-This separation keeps the board useful for scheduling while leaving the repository with a durable account of what changed and why.
+This keeps planning and review state local while allowing the repository to ship shared record formats.
 
 ## Artifact model
 
@@ -17,10 +18,11 @@ This separation keeps the board useful for scheduling while leaving the reposito
 |---|---|---|---|
 | Goal | An outcome or epic | Before and during work | External clips store |
 | Task | An actionable piece of a goal | Before and during work | External clips store |
-| CR | The review packet for a repository change; the local equivalent of a PR | Draft → In Review → Accepted → Merged | `docs/records/cr/` |
-| ADR | A durable cross-cutting architectural decision | Proposed → Accepted → Superseded | `docs/records/adr/` |
+| CR | The review packet for a repository change; the local equivalent of a PR | Draft → In Review → Accepted → Merged | `.clips/records/cr/` |
+| ADR | A durable cross-cutting architectural decision | Proposed → Accepted → Superseded | `.clips/records/adr/` |
+| FDR or other record | Optional project-defined workflow record | Project-defined | `.clips/records/<type>/` |
 
-Goals and tasks define intended outcomes. CRs explain specific implementation attempts. ADRs preserve rare, cross-cutting architectural decisions. Product documentation describes current user-visible behavior.
+Goals and tasks define intended outcomes. CRs explain specific implementation attempts. ADRs preserve rare, cross-cutting architectural decisions for the local workflow. Committed product documentation describes current user-visible behavior.
 
 ### Behavior descriptions and verification modes
 
@@ -82,7 +84,7 @@ Task, CR, and PR have distinct roles:
 - **CR:** how this repository change intends to produce it, then what it actually changed and verified.
 - **PR:** hosted Git diff, checks, discussion, and review workflow.
 
-A Draft CR and Draft PR are counterparts. The CR is repository-native and preserves rationale; the PR is provider-hosted and exposes the diff and collaboration state. Either can exist without the other.
+A Draft CR and Draft PR are counterparts. The CR is local workflow state and preserves rationale; the PR is provider-hosted and exposes the diff and collaboration state. Either can exist without the other.
 
 ### CR metadata and stacked CRs
 
@@ -101,17 +103,18 @@ When a CR is accepted, its recorded branch, base, covered planning refs, verific
 
 ## Storage boundary
 
-Goals and tasks are workflow state. They may be synchronized to GitHub Issues, but they should not be committed to the source repository. The current CLI still has a legacy `.clips/db/` JSONL layout; moving that state to an external store is the intended storage direction and is a compatibility migration, not a reason to put board state into new commits.
+Goals, tasks, CRs, ADRs, and other record instances are workflow state. They live under `.clips/` and must not be committed. `.clips` is excluded through the repository-local `.git/info/exclude`, so no shared `.gitignore` change is required.
 
-CRs and ADRs are repository state. They must be committed in the target repository, under `docs/records/`. A worker may write these records in its isolated worktree as part of its change, but it must not mutate the external board. The supervisor may update board state, but must not edit source or committed records.
+Committed `docs/records/` files are templates only. Product documentation and source code remain repository state. Workers and supervisors may update `.clips` workflow artifacts, but source changes remain governed by the normal worktree boundary.
 
-This boundary also gives a simple loop-manager model: select runnable goals/tasks externally, assign an isolated worktree and CR to a worker, let the worker produce code plus records, then use the CR and process result to decide whether the next action is automatic or requires the developer.
+This gives a simple loop-manager model: select runnable goals/tasks, assign a worktree and local CR, let the worker produce code while maintaining `.clips` records, then use the CR and process result to choose the next action.
 
 ## Record templates
 
 - [CR template](docs/records/cr/CR-TEMPLATE.md)
 - [ADR template](docs/records/adr/ADR-TEMPLATE.md)
-- [Living CR decision](docs/records/adr/ADR-002-use-living-crs-as-development-records.md)
+
+Copy templates into `.clips/records/<type>/` when creating a record. Never put record instances beside the templates.
 
 ## Installation
 
@@ -126,9 +129,18 @@ npm install -g github:dfosco/clips
 clips init
 ```
 
-`clips init` creates the legacy `.clips/` working state and imports existing GitHub Issues as goals. The planning-store migration described above is the target model.
+`clips init` creates local `.clips/` working state, including `.clips/records/{cr,adr,fdr}/`. It does not contact GitHub or import Issues by default.
 
-Set `collaboration` to `false` for local mode. Goal/task mutations remain local, while `clips sync` still performs authenticated, pull-only GitHub reads. It imports Issues as goals and PRs as read-only external metadata; it never creates, edits, closes, reopens, or pushes GitHub objects. Pull failures are reported as warnings and do not remove existing local data. The CLI keeps local planning data and adds `.clips/` to `.gitignore`.
+Non-collaborative mode is the default. Goal/task mutations remain local, and `clips init` plus `clips sync` perform no GitHub Issue or pull-request reads or writes. Clips adds `.clips` to the repository-local `.git/info/exclude`, leaving the shared `.gitignore` unchanged.
+
+GitHub integration requires explicit opt-in:
+
+```bash
+clips config collaboration true
+clips sync
+```
+
+Existing repositories that already set `collaboration: true` remain collaborative.
 
 ## Commands
 
@@ -136,14 +148,14 @@ Set `collaboration` to `false` for local mode. Goal/task mutations remain local,
 clips view                          # List all goals with tasks
 clips view #g001                    # View a specific goal
 
-clips goal create '{"title":"..."}'  # Create goal (+ GitHub Issue)
+clips goal create '{"title":"..."}'  # Create local goal
 clips goal create '{"title":"...","verification_mode":"behavior_and_tests","behavior":"Feature: ..."}'
-clips goal status g1 closed         # Close goal (+ close issue)
+clips goal status g1 closed         # Close local goal
 
 clips task create-batch g001 '[{"title":"Task A"},{"title":"Task B"}]'
-clips task status g1 t1 closed      # Close task (+ update issue)
+clips task status g1 t1 closed      # Close local task
 
-clips sync                           # Pull Issues/PRs; push only when collaboration is enabled
+clips sync                           # No-op unless collaboration is explicitly enabled
 clips config                         # View configuration
 ```
 
@@ -169,7 +181,7 @@ npm run web:build
 npm run web:test
 ```
 
-Use the committed templates for records until record-specific CLI commands are introduced. Do not add goals or tasks to `docs/records/`.
+Use committed templates for schemas until record-specific CLI commands are introduced. Create every record instance under `.clips/records/`; never under `docs/records/`.
 
 ## Current data model
 
@@ -179,6 +191,7 @@ The compatibility CLI currently represents planning state as append-only JSONL:
 - **Tasks** are checklist items within a goal, or sub-issues when configured. Their verification mode inherits from the goal unless overridden.
 - **Behavior** is optional, uninterpreted Gherkin-style text on a goal or task.
 - **Verification modes** are `behavior` and `behavior_and_tests`; missing legacy values resolve to `behavior`.
+- **Records** are Markdown instances under `.clips/records/<type>/`; board CR discovery reads `.clips/records/cr/`.
 - **Events** are append-only JSONL lines such as `goal_created` and `status_changed`.
 - **Refs** include `#g001`, `#g001#t1`, and shorthand forms such as `g1 t1`.
 

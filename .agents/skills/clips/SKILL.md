@@ -8,7 +8,7 @@ metadata:
 
 # Skill: clips — Planning and Records
 
-clips is a local-first planning tool that mirrors goals and tasks to GitHub Issues. The current compatibility CLI stores planning events in `.clips/db/`; the target model keeps planning state external to the source repository. Repository records (CRs, ADRs, and FDRs) are committed under `docs/records/`.
+clips is a local-first workflow tool that can mirror goals and tasks to GitHub Issues after explicit opt-in. Planning events live in `.clips/db/`; CR, ADR, FDR, and other record instances live in `.clips/records/`. All are local workflow state and must not be committed. Committed `docs/records/` files are templates only.
 
 ## Triggers
 
@@ -92,7 +92,7 @@ Use these rules whenever the user asks for a CR, ADR, FDR, or asks to document r
 1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision; an FDR records durable current user-visible behavior and feature rationale.
 2. Do not create a new ADR or FDR merely because a task or CR exists. Update an existing record when it still describes the decision or behavior. Small bug fixes and feature iterations normally need only a CR.
 3. Every non-trivial, reviewable repository diff gets exactly one active CR. A CR may cover one task, several tasks, or a complete small goal. It is not a child item of a goal or task.
-4. Create or update records in `docs/records/` and commit them with the repository change. Do not commit goals or tasks as source-repository records.
+4. Create or update record instances in `.clips/records/<type>/`. Never commit goals, tasks, CRs, ADRs, FDRs, or other workflow instances. Files under `docs/records/` are template schemas only.
 5. For a stacked CR, set `Parent CR` and record the exact Git basis. Do not create a separate stack record.
 
 When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Only a human may manufacture explicitly human-owned approval states such as `Testing`, `Needs Changes`, and `Ready to Merge`.
@@ -147,7 +147,7 @@ For the current CLI, create the task with `title` and optional `description` und
 
 #### CR template
 
-CRs are committed under `docs/records/cr/CR-NNN-short-title.md`.
+CR instances are local under `.clips/records/cr/CR-NNN-short-title.md`. Start from committed `docs/records/cr/CR-TEMPLATE.md`, but never place instances beside the template.
 
 ```md
 # CR-NNN: Change title
@@ -195,7 +195,7 @@ List ADRs/FDRs created or updated, or `None`.
 
 #### ADR template
 
-ADRs are committed under `docs/records/adr/ADR-NNN-short-title.md`. Create one only for a durable architectural decision.
+ADR instances are local under `.clips/records/adr/ADR-NNN-short-title.md`. Start from committed `docs/records/adr/ADR-TEMPLATE.md`. Create one only for a durable architectural decision.
 
 ```md
 # ADR-NNN: Decision title
@@ -218,7 +218,7 @@ CRs, FDRs, goals, tasks, or external references.
 
 #### FDR template
 
-FDRs are committed under `docs/records/fdr/FDR-NNN-short-title.md`. Create one only for durable current user-visible behavior or feature rationale.
+FDR instances, when a project uses them, are local under `.clips/records/fdr/FDR-NNN-short-title.md`. Create one only for durable current user-visible behavior or feature rationale.
 
 ```md
 # FDR-NNN: Feature or behavior
@@ -255,7 +255,7 @@ Do not create an FDR for a small bug fix when an existing FDR remains accurate. 
 
 **Statuses** mirror GitHub: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
-**Record boundary**: Goals and tasks are planning state. Every non-trivial repository diff gets one committed CR. ADRs record durable architectural decisions; FDRs record durable user-visible behavior. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR/FDR.
+**Record boundary**: Goals, tasks, CRs, ADRs, and FDRs are local workflow state under `.clips/` and are never committed. Every non-trivial repository diff gets one active local CR. Committed product documentation holds user-visible truth; committed `docs/records/` files are schemas only. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR/FDR.
 
 **CR basis**: Every CR records `Branch`, `Base branch`, `Base commit`, and optional `Parent CR`. `Parent CR` expresses a stacked review dependency; it is not a task hierarchy.
 
@@ -265,7 +265,7 @@ Do not create an FDR for a small bug fix when an existing FDR remains accurate. 
 
 ### `clips init`
 
-Set up clips in the current repo. Creates `.clips/` directory, detects GitHub settings, and imports all existing GitHub Issues as goals.
+Set up clips in the current repo. Creates local `.clips/` state with collaboration disabled. It does not contact GitHub or import Issues by default.
 
 **When to use:** First time using clips in a repo, or when a repo has existing GitHub Issues you want to track locally.
 
@@ -314,7 +314,7 @@ The JSON accepts: `title` (required), `description`, `acceptance_criteria` (arra
 
 ### `clips goal status`
 
-Change a goal's status. Automatically closes/reopens the GitHub Issue.
+Change a goal's status. A linked GitHub Issue changes only when collaboration was explicitly enabled.
 
 **When to use:** When work begins, completes, or is cancelled.
 
@@ -334,7 +334,7 @@ Valid statuses: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
 ### `clips goal update`
 
-Update a goal's title, description, or acceptance criteria. Pushes changes to the GitHub Issue.
+Update a goal's title, description, or acceptance criteria. Pushes to a linked GitHub Issue only when collaboration was explicitly enabled.
 
 **When to use:** Refining scope, correcting a title, adding details after creation.
 
@@ -350,7 +350,7 @@ clips goal update g1 '{"acceptance_criteria":["Users can login","Users can logou
 
 ### `clips task create`
 
-Add a single task to a goal. Updates the GitHub Issue body with a new checkbox.
+Add a single task to a goal. Updates a linked GitHub Issue only when collaboration was explicitly enabled.
 
 **When to use:** Adding one task to an existing goal.
 
@@ -430,7 +430,7 @@ clips task reorder g001 '["t03","t01","t02"]'
 
 ### `clips sync`
 
-Bidirectional sync between local JSONL and GitHub Issues. Pulls new/updated issues from GitHub, pushes local changes. Idempotent — safe to run anytime.
+Bidirectional sync between local JSONL and GitHub Issues, available only after explicit opt-in with `clips config collaboration true`. With collaboration disabled, this command performs no GitHub reads or writes.
 
 **When to use:** After external changes on GitHub (someone edited an issue in the UI), to ensure local and remote are consistent, or as a periodic reconciliation.
 
@@ -462,7 +462,7 @@ clips config collaboration false        # Solo mode (no git sync)
 **Config keys:**
 - `default_branch` — Git branch (default: `main`)
 - `username` — GitHub username
-- `collaboration` — Enable GitHub pull/push during init, sync, and goal/task mutations (default: `true`)
+- `collaboration` — Enable GitHub reads and writes during init, sync, and goal/task mutations (default: `false`; explicit opt-in)
 - `auto_commit` — Legacy compatibility setting; planning state should move to the external workflow store
 - `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
 - `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)
@@ -477,6 +477,10 @@ clips config collaboration false        # Solo mode (no git sync)
   db/
     g001.jsonl            # Goal g001 + its tasks (append-only events)
     g002.jsonl            # Goal g002 + its tasks
+  records/
+    cr/                   # Local Change Record instances
+    adr/                  # Local Architecture Decision Record instances
+    fdr/                  # Optional local Feature Decision Record instances
 ```
 
 Each `.jsonl` file is an append-only event log. State is computed by replaying events. Files are never overwritten.

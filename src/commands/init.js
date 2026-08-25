@@ -166,6 +166,7 @@ export function runInitCommand(args) {
   const cwd = process.cwd();
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
+  const clipsRecordDirs = ['cr', 'adr', 'fdr'].map((type) => path.join(cwd, '.clips', 'records', type));
 
   const alreadyInitialized = fs.existsSync(clipsDir);
 
@@ -191,6 +192,12 @@ export function runInitCommand(args) {
     console.log('• .clips/db/ directory already exists');
   }
 
+  // Create local record directories
+  for (const recordDir of clipsRecordDirs) {
+    if (!fs.existsSync(recordDir)) fs.mkdirSync(recordDir, { recursive: true });
+  }
+  console.log('✓ Ensured .clips/records/{cr,adr,fdr}/ directories');
+
   // Set up .git/info/exclude with .clips
   if (setupGitExclude(cwd)) {
     console.log('✓ Added .clips to .git/info/exclude');
@@ -205,52 +212,15 @@ export function runInitCommand(args) {
     console.log('• .vscode/settings.json already configured');
   }
 
-  // Create default config (only if not exists)
+  // Create local-only default config (only if not exists)
   const configPath = path.join(clipsDir, 'clips.config.json');
-  let username = null;
+  let config;
 
   if (!fs.existsSync(configPath)) {
-    // Try to auto-detect default branch from GitHub
-    let defaultBranch = 'main';
-    try {
-      const ghOutput = execSync('gh repo view --json defaultBranchRef -q .defaultBranchRef.name', {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe']
-      }).trim();
-      if (ghOutput) {
-        defaultBranch = ghOutput;
-      }
-    } catch (e) {
-      // gh CLI not available or not in a repo, use default
-    }
-
-    // Try to get GitHub username
-    try {
-      const ghUser = execSync('gh api user -q .login', {
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe']
-      }).trim();
-      if (ghUser) {
-        username = ghUser;
-      }
-    } catch (e) {
-      // gh CLI not available, try git config
-      try {
-        const gitUser = execSync('git config user.name', {
-          encoding: 'utf8',
-          stdio: ['pipe', 'pipe', 'pipe']
-        }).trim().toLowerCase().replace(/\s+/g, '');
-        if (gitUser) {
-          username = gitUser;
-        }
-      } catch (e2) {
-        // No git user either, leave as null
-      }
-    }
-
-    initConfig({ default_branch: defaultBranch, username });
-    console.log(`✓ Created .clips/clips.config.json (default_branch: ${defaultBranch}, username: ${username || 'not set'})`);
+    config = initConfig();
+    console.log('✓ Created .clips/clips.config.json (collaboration: disabled)');
   } else {
+    config = readConfig();
     console.log('• .clips/clips.config.json already exists');
   }
 
@@ -268,20 +238,24 @@ export function runInitCommand(args) {
 
   // Import existing GitHub Issues
   if (!alreadyInitialized) {
-    try {
-      console.log('\n📥 Importing existing GitHub Issues...');
-      const result = pullAllIssues();
-      if (result?.skipped) {
-        console.log('• GitHub sync disabled; skipped issue import');
-      } else if (result && result.imported > 0) {
-        console.log(`✓ Imported ${result.imported} issues as goals`);
-      } else if (result && result.total > 0) {
-        console.log(`• ${result.total} issues found, all already imported`);
-      } else {
-        console.log('• No existing issues found');
+    if (config.collaboration !== true) {
+      console.log('\n• GitHub sync disabled; skipped issue import');
+    } else {
+      try {
+        console.log('\n📥 Importing existing GitHub Issues...');
+        const result = pullAllIssues();
+        if (result?.skipped) {
+          console.log('• GitHub sync disabled; skipped issue import');
+        } else if (result && result.imported > 0) {
+          console.log(`✓ Imported ${result.imported} issues as goals`);
+        } else if (result && result.total > 0) {
+          console.log(`• ${result.total} issues found, all already imported`);
+        } else {
+          console.log('• No existing issues found');
+        }
+      } catch (e) {
+        console.log(`• Could not import issues (${e.message || 'gh CLI may not be available'})`);
       }
-    } catch (e) {
-      console.log(`• Could not import issues (${e.message || 'gh CLI may not be available'})`);
     }
   }
 
@@ -310,8 +284,8 @@ Usage:
   clips view #g001        # View a goal
   clips goal create '{"title":"My Goal","description":"..."}'
   clips task create-batch g001 '[{"title":"Task 1"}]'
-  clips sync              # Sync goals with GitHub Issues
-  clips github_sync #g001
+  clips config collaboration true  # Explicitly enable GitHub sync
+  clips sync              # Sync only after collaboration is enabled
 `);
   }
 
