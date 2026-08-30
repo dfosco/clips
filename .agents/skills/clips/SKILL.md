@@ -38,15 +38,17 @@ When the user wants to create a goal (gives you a title, says "let's plan this",
   - What the scope is (what's in, what's out)
   - Any constraints, dependencies, or context that matters
 
-**Step 2 — Draft the goal description.** After you have enough context, write a 3–4 paragraph description of the problem/goal. This should read like a well-written GitHub Issue body:
+**Step 2 — Draft the goal description and behavior.** After you have enough context, write a 3–4 paragraph description of the problem/goal. This should read like a well-written GitHub Issue body:
   - Paragraph 1: The problem or motivation — why this work matters
   - Paragraph 2: What the solution looks like at a high level
   - Paragraph 3: Scope boundaries — what's included and what's explicitly not
   - Paragraph 4 (optional): Technical considerations, constraints, or open questions
 
-Present this to the user and ask them to confirm, using `ask_user`: _"Does this capture the goal correctly, or would you like to change anything?"_
+Unless the user explicitly asks not to include behavior, also generate a concise, implementation-neutral Gherkin-like behavior description. Include a `Feature` and one or more `Scenario` blocks using `Given`, `When`, and `Then` to express observable outcomes. Do not ask whether to include behavior by default, and do not add an empty behavior placeholder when the user opts out.
 
-**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the title and the full description. Show the user the created goal reference (e.g. `#g001`).
+Present the description and behavior to the user and ask them to confirm, using `ask_user`: _"Does this capture the goal correctly, or would you like to change anything?"_
+
+**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the title, full description, and generated `behavior`. Omit `behavior` only when the user explicitly opted out. Show the user the created goal reference (e.g. `#g001`).
 
 **Step 4 — Offer task breakdown.** Ask: _"Would you like to break this down into tasks?"_ If yes, move to the Task Breakdown workflow. If no, you're done.
 
@@ -100,9 +102,9 @@ Use the following canonical templates. Preserve the field names and section orde
 
 #### Goal template
 
-Goals are external planning artifacts and are not committed to the source repository.
+Goals are external planning artifacts and are not committed to the source repository. Include generated Gherkin-like behavior unless the user explicitly asks not to.
 
-```md
+````md
 # Goal: Outcome title
 
 **Status:** open | in_progress | closed | not_planned | duplicate
@@ -119,6 +121,16 @@ Why is this work needed?
 
 What is included and explicitly excluded?
 
+## Behavior
+
+```gherkin
+Feature: Observable outcome
+  Scenario: Representative behavior
+    Given a relevant starting condition
+    When an actor performs an action
+    Then an observable outcome occurs
+```
+
 ## Acceptance criteria
 
 - Observable condition that proves the outcome exists.
@@ -126,9 +138,9 @@ What is included and explicitly excluded?
 ## Constraints and dependencies
 
 Known limits, dependencies, or unresolved questions.
-```
+````
 
-For the current CLI, map the goal to `clips goal create` with `title`, `description`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief.
+For the current CLI, map the goal to `clips goal create` with `title`, `description`, `behavior`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief. Omit `behavior` only after an explicit user request.
 
 #### Task template
 
@@ -276,11 +288,11 @@ Create a new goal (top-level planning item). The current compatibility CLI may c
 **Triggers:** "create a goal", "new issue", "let's track this", "plan a feature", "write up this work"
 
 ```bash
-clips goal create '{"title":"Add authentication"}'
-clips goal create '{"title":"Fix login bug","description":"Users get 500 on /login"}'
+clips goal create '{"title":"Add authentication","behavior":"Feature: User authentication\n  Scenario: Sign in with valid credentials\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
+clips goal create '{"title":"Fix login bug","description":"Users get 500 on /login","behavior":"Feature: Reliable login\n  Scenario: Open the login page\n    Given the service is available\n    When a user opens /login\n    Then the login page is displayed without a server error"}'
 ```
 
-The JSON accepts: `title` (required), `description`, `acceptance_criteria` (array of strings).
+The JSON accepts: `title` (required), `description`, `behavior` (Gherkin-like text), `acceptance_criteria` (array of strings). Generate `behavior` by default; omit it only when the user explicitly asks not to include it.
 
 ---
 
@@ -306,15 +318,16 @@ Valid statuses: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
 ### `clips goal update`
 
-Update a goal's title, description, or acceptance criteria. Pushes to a linked GitHub Issue only when collaboration was explicitly enabled.
+Update a goal's title, description, behavior, or acceptance criteria. Pushes to a linked GitHub Issue only when collaboration was explicitly enabled.
 
 **When to use:** Refining scope, correcting a title, adding details after creation.
 
-**Triggers:** "update the goal", "change the title", "edit the description", "add acceptance criteria"
+**Triggers:** "update the goal", "change the title", "edit the description", "update behavior", "add acceptance criteria"
 
 ```bash
 clips goal update g1 '{"title":"New title"}'
 clips goal update g1 '{"description":"Updated scope description"}'
+clips goal update g1 '{"behavior":"Scenario: Updated outcome\n  Given a relevant condition\n  When the goal behavior occurs\n  Then the updated outcome is observable"}'
 clips goal update g1 '{"acceptance_criteria":["Users can login","Users can logout"]}'
 ```
 
@@ -496,7 +509,7 @@ Each `.jsonl` file is an append-only event log. State is computed by replaying e
 clips init
 
 # 2. Create a goal
-clips goal create '{"title":"Add user authentication"}'
+clips goal create '{"title":"Add user authentication","behavior":"Feature: User authentication\n  Scenario: Sign in\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
 # → Creates goal g001, GitHub Issue #1
 
 # 3. Break into tasks
