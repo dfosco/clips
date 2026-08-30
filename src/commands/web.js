@@ -1,36 +1,36 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { getRepoRoot } from '../lib/core.js';
+import { createWebServer, parseWebArgs } from '../lib/web-server.js';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export function runWebCommand(args = []) {
-  const viteBin = path.join(packageRoot, 'node_modules', 'vite', 'bin', 'vite.js');
-  const viteConfig = path.join(packageRoot, 'web', 'vite.config.js');
+  const assetsDir = path.join(packageRoot, 'dist', 'web');
 
-  if (!fs.existsSync(viteBin) || !fs.existsSync(viteConfig)) {
-    console.error('Error: Web board dependencies are not installed. Run `npm install` in the clips package.');
+  if (!fs.existsSync(path.join(assetsDir, 'index.html'))) {
+    console.error('Error: Packaged web board assets are missing. Reinstall clips or run `npm run web:build` in the clips source package.');
     process.exitCode = 1;
     return;
   }
 
-  const server = spawn(process.execPath, [viteBin, '--config', viteConfig, ...args], {
-    cwd: getRepoRoot(),
-    stdio: 'inherit',
-  });
+  let options;
+  try {
+    options = parseWebArgs(args);
+  } catch (error) {
+    console.error(`Error: ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
 
+  const server = createWebServer({ assetsDir, cwd: process.cwd() });
   server.on('error', (error) => {
     console.error(`Error: Could not start web board: ${error.message}`);
     process.exitCode = 1;
   });
-
-  server.on('close', (code, signal) => {
-    if (signal) {
-      process.exitCode = 1;
-    } else if (code !== null) {
-      process.exitCode = code;
-    }
+  server.listen(options.port, options.host, () => {
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : options.port;
+    console.log(`Clips board: http://${options.host}:${port}`);
   });
 }

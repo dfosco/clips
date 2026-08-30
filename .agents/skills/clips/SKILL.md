@@ -446,19 +446,18 @@ clips sync g12          # Shorthand
 
 ### `clips web`
 
-Start the local read-only kanban board for the current Clips repository. The board reads discoverable goals and tasks from `.clips/db` and exposes only `GET /api/board`; it cannot create, edit, reorder, or synchronize planning data.
+Start the read-only kanban board. Inside an initialized Clips repository it opens that project; from any other directory it opens all projects registered by `clips init`. The board exposes only `GET /api/board` and cannot create, edit, reorder, or synchronize planning data.
 
-**When to use:** Reviewing goals and tasks in a visual board, including local-only goals and GitHub-linked planning state.
+**When to use:** Reviewing one project or combining goals and tasks from multiple initialized repositories in a visual board.
 
 **Triggers:** "open the board", "show the kanban board", "start the local board", "view planning board"
 
 ```bash
-npm install                  # Run once in the Clips package if dependencies are missing
-clips web                    # Start the board from inside a Clips repository
-clips web --host 127.0.0.1   # Pass additional Vite server arguments
+clips web                              # Current project, or all registered projects elsewhere
+clips web --host 127.0.0.1 --port 4173
 ```
 
-Open the local URL printed by Vite. The command requires the Clips web dependencies and `web/vite.config.js` to be present.
+Open the printed local URL. The installed package includes the board assets and does not require Vite or project-local dependencies. The project selector supports combining registered projects; qualified references use `project#g001#t01`.
 
 ---
 
@@ -475,6 +474,7 @@ clips config                            # Show all config
 clips config tasks_as_issues            # Show specific key
 clips config tasks_as_issues true       # Enable task sub-issues
 clips config collaboration false        # Solo mode (no git sync)
+clips config project_id my-project      # Override the repository-name board ID
 ```
 
 **Config keys:**
@@ -484,6 +484,7 @@ clips config collaboration false        # Solo mode (no git sync)
 - `auto_commit` — Legacy compatibility setting; planning state should move to the external workflow store
 - `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
 - `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)
+- `project_id` — Unique cross-project board ID (defaults to the repository directory name)
 
 ---
 

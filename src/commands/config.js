@@ -1,5 +1,7 @@
 // Config command - view and edit clips configuration
 import { readConfig, setConfigValue, DEFAULT_CONFIG, getConfigPath } from '../lib/config.js';
+import { getRepoRoot } from '../lib/core.js';
+import { effectiveProjectId, registerProject } from '../lib/registry.js';
 import fs from 'fs';
 
 export function runConfigCommand(args) {
@@ -20,7 +22,9 @@ export function runConfigCommand(args) {
 }
 
 function showAllConfig() {
-  const config = readConfig();
+  const repoRoot = getRepoRoot();
+  const config = readConfig(repoRoot);
+  config.project_id = effectiveProjectId(repoRoot);
   const configPath = getConfigPath();
   const exists = fs.existsSync(configPath);
   
@@ -43,7 +47,8 @@ function showAllConfig() {
 }
 
 function showConfigKey(key) {
-  const config = readConfig();
+  const repoRoot = getRepoRoot();
+  const config = readConfig(repoRoot);
   
   if (!(key in DEFAULT_CONFIG)) {
     console.error(`Unknown config key: ${key}`);
@@ -51,12 +56,14 @@ function showConfigKey(key) {
     process.exit(1);
   }
   
-  console.log(config[key]);
+  console.log(key === 'project_id' ? effectiveProjectId(repoRoot) : config[key]);
 }
 
 function setConfig(key, value) {
   try {
-    const config = setConfigValue(key, value);
+    const repoRoot = getRepoRoot();
+    const config = setConfigValue(key, value, repoRoot);
+    if (key === 'project_id') registerProject(repoRoot);
     console.log(`✅ Set ${key} = ${config[key]}`);
   } catch (e) {
     console.error(`❌ ${e.message}`);

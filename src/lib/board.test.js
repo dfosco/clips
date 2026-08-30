@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBoardData } from './board.js';
+import { readBoardData, readWorkspaceBoard } from './board.js';
 
 const tempDirs = [];
 
@@ -170,5 +170,28 @@ describe('readBoardData', () => {
     expect(result.github_prs.map((pr) => pr.pr_number)).toEqual([99, 12]);
     expect(result.goals[0].tasks[0].linked_prs[0].pr_number).toBe(12);
     expect(result.change_records[0].linked_prs[0].pr_number).toBe(12);
+  });
+
+  it('aggregates projects with qualified collision-safe references', () => {
+    const first = makeDb({
+      '.clips/db/g001.jsonl': `${JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'First goal' })}\n${JSON.stringify({ event: 'task_created', task_id: 't01', title: 'First task' })}`,
+      '.clips/records/cr/CR-001-first.md': '# CR-001: First\n\n**Status:** Draft\n**Type:** Feature\n**Covers:** #g001#t01',
+    });
+    const second = makeDb({
+      '.clips/db/g001.jsonl': `${JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Second goal' })}\n${JSON.stringify({ event: 'task_created', task_id: 't01', title: 'Second task' })}`,
+      '.clips/records/cr/CR-001-second.md': '# CR-001: Second\n\n**Status:** Draft\n**Type:** Feature\n**Covers:** #g001#t01',
+    });
+    const projects = [
+      { id: 'first', label: 'First', path: first },
+      { id: 'second', label: 'Second', path: second },
+    ];
+
+    const result = readWorkspaceBoard({ projects });
+    expect(result.version).toBe(2);
+    expect(result.goals.map((goal) => goal.ref)).toEqual(['first#g001', 'second#g001']);
+    expect(result.goals.map((goal) => goal.tasks[0].ref)).toEqual(['first#g001#t01', 'second#g001#t01']);
+    expect(result.goals.map((goal) => goal.tasks[0].linked_crs[0].key)).toEqual(['first#CR-001', 'second#CR-001']);
+    expect(result.change_records.map((record) => record.covers[0])).toEqual(['first#g001#t01', 'second#g001#t01']);
+    expect(result.change_records[0]).not.toHaveProperty('path');
   });
 });

@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { readBoardData } from '../src/lib/board.js';
+import { boardResponse } from '../src/lib/web-server.js';
 
 function boardApi() {
   return {
@@ -19,8 +19,9 @@ function boardApi() {
         }
 
         try {
-          response.statusCode = 200;
-          response.end(JSON.stringify(readBoardData()));
+          const result = boardResponse(new URL(request.url || '', 'http://localhost'));
+          response.statusCode = result.status;
+          response.end(JSON.stringify(result.body));
         } catch (error) {
           response.statusCode = 500;
           response.end(JSON.stringify({ error: 'Could not read clips planning data.', detail: error.message }));

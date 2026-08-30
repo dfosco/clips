@@ -32,7 +32,7 @@ Commands:
   task <action> [args]    Manage tasks
   sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration
-  web [args]              Start the local read-only web board
+  web [--host H] [--port P] Start the read-only local or multi-project board
 
 Options:
   --version, -v           Show version
@@ -48,6 +48,7 @@ Examples:
   clips task status g1 t1 done
   clips sync
   clips web
+  clips config project_id my-project
 `);
   process.exit(0);
 }

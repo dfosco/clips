@@ -7,11 +7,12 @@
     "clips": "./src/cli.js"
   },
   "scripts": {
-    "test": "node src/cli.js --version",
-    "test:all": "npm test && npm run web:test",
+    "test": "vitest run --config web/vitest.config.js",
+    "test:all": "npm test && npm run web:build",
     "web:dev": "vite --config web/vite.config.js",
     "web:build": "vite build --config web/vite.config.js",
     "web:test": "vitest run --config web/vitest.config.js",
+    "prepack": "npm run web:build",
     "preversion": "npm test",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
     "postversion": "git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
@@ -30,7 +31,7 @@
     ".agents/",
     "README.md",
     "LICENSE",
-    "web/"
+    "dist/web/"
   ],
   "keywords": [
     "cli",
@@ -55,9 +56,8 @@
     "jsdom": "^30.0.1",
     "svelte": "^5.56.8",
     "vite": "^8.2.1",
-    "vitest": "^4.1.10"
-  },
-  "dependencies": {
+    "vitest": "^4.1.10",
     "iconoir": "^7.12.1"
-  }
+  },
+  "dependencies": {}
 }

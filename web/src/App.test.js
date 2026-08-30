@@ -5,15 +5,27 @@ import App from './App.svelte';
 afterEach(() => vi.restoreAllMocks());
 
 const board = {
-  version: 1,
+  version: 2,
+  scope: 'local',
+  projects: [{ id: 'clips', label: 'clips' }],
+  default_project_ids: ['clips'],
   goals: [{
-    ref: '#g001',
+    project_id: 'clips',
+    project_label: 'clips',
+    goal_id: 'g001',
+    ref: 'clips#g001',
     title: 'Local roadmap',
     source: 'local',
+    status: 'open',
     behavior: 'Feature: Local roadmap',
     effective_verification_mode: 'behavior_and_tests',
   tasks: [{
-      ref: '#g001#t01',
+      project_id: 'clips',
+      project_label: 'clips',
+      goal_id: 'g001',
+      goal_ref: 'clips#g001',
+      task_id: 't01',
+      ref: 'clips#g001#t01',
       title: 'Define board data contract',
       description: 'Document response shape.',
       goal_title: 'Local roadmap',
@@ -35,15 +47,18 @@ const boardWithRecord = {
     tasks: [{ ...board.goals[0].tasks[0], linked_crs: [{ id: 'CR-003', title: 'Add read-only local kanban board' }] }],
   }],
   change_records: [{
+    key: 'clips#CR-003',
+    project_id: 'clips',
+    project_label: 'clips',
     id: 'CR-003',
     title: 'Add read-only local kanban board',
     status: 'In Review',
     type: 'Feature',
-    covers: ['#g001', '#g001#t01'],
+    covers: ['clips#g001', 'clips#g001#t01'],
     markdown: '# CR-003: Add read-only local kanban board\n\n## Why\n\nThe complete review packet is visible here.\n\n| Field | Value |\n| --- | --- |\n| Mode | Read-only |\n\n## Behavior\n\nThe board is read-only.',
-    linked_prs: [{ repository: 'acme/app', pr_number: 12, title: 'Implement board', url: 'https://github.com/acme/app/pull/12', state: 'open', merged: false }],
+    linked_prs: [{ project_id: 'clips', project_label: 'clips', repository: 'acme/app', pr_number: 12, title: 'Implement board', url: 'https://github.com/acme/app/pull/12', state: 'open', merged: false }],
   }],
-  github_prs: [{ repository: 'acme/app', pr_number: 99, title: 'Unassociated cleanup', url: 'https://github.com/acme/app/pull/99', state: 'open', merged: false, covers: [], cr_ids: [] }],
+  github_prs: [{ project_id: 'clips', project_label: 'clips', repository: 'acme/app', pr_number: 99, title: 'Unassociated cleanup', url: 'https://github.com/acme/app/pull/99', state: 'open', merged: false, covers: [], cr_ids: [] }],
 };
 
 const closedBoard = {
@@ -63,6 +78,43 @@ const closedBoard = {
 };
 
 describe('board app', () => {
+  it('renders and filters project-qualified data from multiple projects', async () => {
+    const betaGoal = {
+      ...board.goals[0],
+      project_id: 'beta',
+      project_label: 'beta',
+      ref: 'beta#g001',
+      title: 'Beta roadmap',
+      tasks: [{
+        ...board.goals[0].tasks[0],
+        project_id: 'beta',
+        project_label: 'beta',
+        goal_ref: 'beta#g001',
+        ref: 'beta#g001#t01',
+        title: 'Beta task',
+        goal_title: 'Beta roadmap',
+      }],
+    };
+    const multiProjectBoard = {
+      ...board,
+      scope: 'all',
+      projects: [{ id: 'clips', label: 'clips' }, { id: 'beta', label: 'beta' }],
+      default_project_ids: ['clips', 'beta'],
+      goals: [...board.goals, betaGoal],
+    };
+    vi.spyOn(window, 'fetch').mockImplementation(() => Promise.resolve(new Response(JSON.stringify(multiProjectBoard), { status: 200 })));
+    render(App);
+
+    expect(await screen.findByText('Beta task')).toBeInTheDocument();
+    expect(screen.getByText('clips#g001#t01')).toBeInTheDocument();
+    expect(screen.getByText('beta#g001#t01')).toBeInTheDocument();
+    const betaCheckbox = screen.getByRole('checkbox', { name: /beta/ });
+    await betaCheckbox.click();
+    expect(await screen.findByText('Define board data contract')).toBeInTheDocument();
+    expect(screen.queryByText('Beta task')).not.toBeInTheDocument();
+    expect(window.fetch).toHaveBeenLastCalledWith('/api/board?project=clips');
+  });
+
   it('renders tasks after loading board data', async () => {
     vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify(board), { status: 200 }));
     render(App);
@@ -111,7 +163,7 @@ describe('board app', () => {
     render(App);
 
     await screen.findByText('Define board data contract');
-    await screen.getByRole('button', { name: 'Open task Define board data contract' }).click();
+    await screen.getByRole('button', { name: 'Open task Define board data contract in clips' }).click();
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     const panel = screen.getByRole('dialog');
@@ -130,12 +182,12 @@ describe('board app', () => {
 
     await screen.findByText('Define board data contract');
     expect(screen.getByRole('region', { name: 'Task card board' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open task Define board data contract' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open task Define board data contract in clips' })).toBeInTheDocument();
 
     await screen.getByRole('button', { name: 'Show goal cards' }).click();
     expect(screen.getByRole('region', { name: 'Goal card board' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open goal Local roadmap' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open task Define board data contract' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open goal Local roadmap in clips' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open task Define board data contract in clips' })).not.toBeInTheDocument();
 
     await screen.getByRole('button', { name: 'Show task cards' }).click();
     expect(screen.getByRole('region', { name: 'Task card board' })).toBeInTheDocument();
@@ -146,7 +198,7 @@ describe('board app', () => {
     render(App);
 
     await screen.findByText('Define board data contract');
-    await screen.getByRole('button', { name: 'Open goal Local roadmap' }).click();
+    await screen.getByRole('button', { name: 'Open goal Local roadmap in clips' }).click();
 
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Local roadmap' })).toBeInTheDocument();
     expect(within(screen.getByRole('dialog')).getByText('Feature: Local roadmap')).toBeInTheDocument();
@@ -192,12 +244,12 @@ describe('board app', () => {
     await screen.findByText('Define board data contract');
     expect(screen.getByTitle('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toBeInTheDocument();
 
-    await screen.getByRole('button', { name: 'Open task Define board data contract' }).click();
+    await screen.getByRole('button', { name: 'Open task Define board data contract in clips' }).click();
     expect(screen.getByText('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toBeInTheDocument();
 
     await screen.getByRole('button', { name: 'Close detail panel' }).click();
     await screen.getByRole('button', { name: 'Show goal cards' }).click();
-    await screen.getByRole('button', { name: 'Open goal Local roadmap' }).click();
+    await screen.getByRole('button', { name: 'Open goal Local roadmap in clips' }).click();
     expect(screen.getByText('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')).toBeInTheDocument();
   });
 });

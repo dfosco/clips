@@ -18,7 +18,7 @@
 
 <!-- The card contains an optional external link, so it remains an article with button semantics. -->
 <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-<article class="goal-card" role="button" tabindex="0" aria-label={`Open goal ${goal.title}`} onclick={() => onOpen(goal)} onkeydown={handleKeydown}>
+<article class="goal-card" role="button" tabindex="0" aria-label={`Open goal ${goal.title} in ${goal.project_label}`} onclick={() => onOpen(goal)} onkeydown={handleKeydown}>
   <div class="goal-card__topline">
     <span class="task-ref">{goal.ref}</span>
     <span class="status-pill"><span class="status-dot status-dot--{goal.status === 'in_progress' ? 'in_progress' : goal.status === 'closed' ? 'closed' : goal.status === 'not_planned' || goal.status === 'duplicate' ? 'not_planned' : 'open'}"></span>{statusLabel}</span>
@@ -26,6 +26,7 @@
   <h3>{goal.title}</h3>
   {#if goal.description}<p>{goal.description}</p>{:else}<p class="goal-card__empty">No description provided.</p>{/if}
   <div class="goal-card__footer">
+    <span class="project-label">{goal.project_label}</span>
     <span class="source-label source-label--{goal.source}"><Icon name={goal.source === 'github' ? 'github' : 'bookmark'} size={16} />{sourceLabel}</span>
     <span class="verification-label">{goal.effective_verification_mode === 'behavior_and_tests' ? 'Behavior + tests' : 'Behavior'}</span>
     <span>{goal.tasks.length} {goal.tasks.length === 1 ? 'task' : 'tasks'}</span>

@@ -3,9 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import { getClipsDbDir, appendEvent, goalExists } from '../lib/core.js';
+import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
+import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
 
 /**
  * Add .clips to .git/info/exclude so local planning state is ignored locally
@@ -163,7 +164,7 @@ function installSkill(cwd) {
 }
 
 export function runInitCommand(args) {
-  const cwd = process.cwd();
+  const cwd = getRepoRoot(process.cwd());
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
   const clipsRecordDirs = ['cr', 'adr', 'fdr'].map((type) => path.join(cwd, '.clips', 'records', type));
@@ -217,12 +218,16 @@ export function runInitCommand(args) {
   let config;
 
   if (!fs.existsSync(configPath)) {
-    config = initConfig();
+    config = initConfig({}, cwd);
     console.log('✓ Created .clips/clips.config.json (collaboration: disabled)');
   } else {
-    config = readConfig();
+    config = readConfig(cwd);
     console.log('• .clips/clips.config.json already exists');
   }
+
+  const projectId = ensureProjectIdentity(cwd);
+  const registeredProject = registerProject(cwd);
+  console.log(`✓ Registered project ${projectId} in ${registeredProject.path}`);
 
   // Install or update skill file
   const skillResult = installSkill(cwd);

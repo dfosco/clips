@@ -161,16 +161,24 @@ clips config                         # View configuration
 
 ## Local board
 
-Run the read-only local kanban board from a Clips repository:
+Run the read-only kanban board from any directory after installing Clips:
+
+```bash
+clips web
+```
+
+Open the printed local URL. Inside an initialized Clips repository, the board opens that project. Everywhere else, it opens all projects registered by `clips init`, with a project multi-select for narrowing the combined view. Missing project paths are pruned safely from the system registry at `~/.clips/projects.json` (or `$CLIPS_HOME/projects.json`).
+
+Projects use their repository directory name as the default ID. Override it later with `clips config project_id <id>`; IDs must be unique across registered projects. Combined references are qualified as `project#g001` and `project#g001#t01`, and project identity is shown throughout the board.
+
+The board reads discoverable goals and tasks from each project’s `.clips/db`, including local-only goals and goals with GitHub metadata. It exposes only `GET /api/board`; the UI cannot create, edit, reorder, or synchronize planning data. Use `clips web --host <host> --port <port>` to customize the local server.
+
+For development from this repository:
 
 ```bash
 npm install
 npm run web:dev
-# Or, from any directory inside this repository:
-clips web
 ```
-
-Open the printed local URL. The board reads all discoverable goals and tasks from `.clips/db`, including local-only goals and goals with GitHub metadata. It exposes only `GET /api/board`; the UI cannot create, edit, reorder, or synchronize planning data.
 
 `clips sync` also pulls all GitHub PRs with the existing `gh` CLI session. A PR is associated only when its title or body explicitly references `#g001`, `#g001#t01`, or `CR-NNN`. Matched PRs are recorded as `github_pr_synced` events in the goal stream; unmatched PRs are retained in `.clips/db/_github.jsonl`, which is a reserved cache and is not discovered as a goal. Repeated pulls are idempotent by repository and PR number. The board shows linked PRs on CRs and goal/task details, plus unmatched changes on the CR surface; PR links open GitHub in a new tab.
 

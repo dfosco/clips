@@ -57,7 +57,7 @@ describe('setupGitExclude', () => {
     fs.mkdirSync(binDir);
     fs.writeFileSync(ghPath, `#!/bin/sh\nprintf called >> "${markerPath}"\nprintf '[]\\n'\n`);
     fs.chmodSync(ghPath, 0o755);
-    const env = { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
+    const env = { ...process.env, PATH: `${binDir}:${process.env.PATH}`, CLIPS_HOME: path.join(cwd, 'system-clips') };
 
     execFileSync(process.execPath, [cliPath, 'init'], { cwd, env });
 

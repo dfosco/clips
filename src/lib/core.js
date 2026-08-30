@@ -206,11 +206,25 @@ export function parseArgs(args) {
   return parseRef(args[0]);
 }
 
-export function getRepoRoot() {
+export function getRepoRoot(cwd = process.cwd()) {
   // Use --git-common-dir to find main repo even from worktrees
-  const gitDir = execSync('git rev-parse --git-common-dir', { encoding: 'utf8' }).trim();
-  const absGitDir = path.resolve(gitDir);
-  return path.dirname(absGitDir);
+  const gitDir = execSync('git rev-parse --git-common-dir', {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  }).trim();
+  const absGitDir = path.resolve(cwd, gitDir);
+  return fs.realpathSync(path.dirname(absGitDir));
+}
+
+export function tryGetRepoRoot(cwd = process.cwd(), { requireClips = false } = {}) {
+  try {
+    const repoRoot = getRepoRoot(cwd);
+    if (requireClips && !fs.existsSync(path.join(repoRoot, CLIPS_DIR))) return null;
+    return repoRoot;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -226,16 +240,16 @@ export function getCurrentCommitSha() {
   }
 }
 
-export function getClipsDir() {
-  return path.join(getRepoRoot(), CLIPS_DIR);
+export function getClipsDir(repoRoot = getRepoRoot()) {
+  return path.join(repoRoot, CLIPS_DIR);
 }
 
-export function getClipsDbDir() {
-  return path.join(getRepoRoot(), CLIPS_DB_DIR);
+export function getClipsDbDir(repoRoot = getRepoRoot()) {
+  return path.join(repoRoot, CLIPS_DB_DIR);
 }
 
-export function getClipsRecordsDir(recordType = null) {
-  const recordsDir = path.join(getRepoRoot(), CLIPS_RECORDS_DIR);
+export function getClipsRecordsDir(recordType = null, repoRoot = getRepoRoot()) {
+  const recordsDir = path.join(repoRoot, CLIPS_RECORDS_DIR);
   return recordType ? path.join(recordsDir, recordType) : recordsDir;
 }
 

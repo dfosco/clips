@@ -3,7 +3,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { getClipsDir } from './core.js';
+import { getClipsDir, getRepoRoot } from './core.js';
+import { assertProjectIdAvailable, validateProjectId } from './registry.js';
 
 export const CONFIG_FILE = 'clips.config.json';
 
@@ -15,6 +16,7 @@ export const DEFAULT_CONFIG = {
   body_max_length: null,        // max chars for imported issue descriptions (null = no limit)
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
+  project_id: null,             // stable board identifier; repository name when unset
   view: {
     hide_goal_statuses: [],
     hide_task_statuses: [],
@@ -25,15 +27,15 @@ export const DEFAULT_CONFIG = {
 /**
  * Get the path to the config file
  */
-export function getConfigPath() {
-  return path.join(getClipsDir(), CONFIG_FILE);
+export function getConfigPath(repoRoot) {
+  return path.join(getClipsDir(repoRoot), CONFIG_FILE);
 }
 
 /**
  * Read config from file, returns merged with defaults
  */
-export function readConfig() {
-  const configPath = getConfigPath();
+export function readConfig(repoRoot) {
+  const configPath = getConfigPath(repoRoot);
 
   if (!fs.existsSync(configPath)) {
     return { ...DEFAULT_CONFIG };
@@ -52,24 +54,24 @@ export function readConfig() {
 /**
  * Write config to file
  */
-export function writeConfig(config) {
-  const configPath = getConfigPath();
+export function writeConfig(config, repoRoot) {
+  const configPath = getConfigPath(repoRoot);
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 }
 
 /**
  * Get a single config value
  */
-export function getConfigValue(key) {
-  const config = readConfig();
+export function getConfigValue(key, repoRoot) {
+  const config = readConfig(repoRoot);
   return config[key];
 }
 
 /**
  * Set a single config value
  */
-export function setConfigValue(key, value) {
-  const config = readConfig();
+export function setConfigValue(key, value, repoRoot = getRepoRoot()) {
+  const config = readConfig(repoRoot);
 
   // Validate key
   if (!(key in DEFAULT_CONFIG)) {
@@ -78,6 +80,10 @@ export function setConfigValue(key, value) {
 
   // Validate value based on key
   switch (key) {
+    case 'project_id':
+      validateProjectId(value);
+      assertProjectIdAvailable(value, repoRoot);
+      break;
     case 'merge_mode':
       if (!['merge', 'pr', 'wait'].includes(value)) {
         throw new Error(`Invalid merge_mode: ${value}. Must be 'merge', 'pr', or 'wait'`);
@@ -95,7 +101,7 @@ export function setConfigValue(key, value) {
   }
 
   config[key] = value;
-  writeConfig(config);
+  writeConfig(config, repoRoot);
   return config;
 }
 
@@ -103,21 +109,21 @@ export function setConfigValue(key, value) {
  * Initialize config file with defaults if it doesn't exist
  * @param {Object} overrides - Optional values to override defaults
  */
-export function initConfig(overrides = {}) {
-  const configPath = getConfigPath();
+export function initConfig(overrides = {}, repoRoot) {
+  const configPath = getConfigPath(repoRoot);
 
   if (fs.existsSync(configPath)) {
-    return readConfig();
+    return readConfig(repoRoot);
   }
 
   // Ensure .clips directory exists
-  const clipsDir = getClipsDir();
+  const clipsDir = getClipsDir(repoRoot);
   if (!fs.existsSync(clipsDir)) {
     fs.mkdirSync(clipsDir, { recursive: true });
   }
 
   const config = { ...DEFAULT_CONFIG, ...overrides };
-  writeConfig(config);
+  writeConfig(config, repoRoot);
   return config;
 }
 

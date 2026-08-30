@@ -298,3 +298,94 @@ export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = getClipsRe
   }
   return { version: 1, generated_at: new Date().toISOString(), goals, change_records: records, github_prs: uniquePrs, warnings };
 }
+
+function qualifyRef(projectId, ref) {
+  return `${projectId}#${String(ref).replace(/^#/, '')}`;
+}
+
+function qualifyRecord(project, record) {
+  const { path: recordPath, ...safeRecord } = record;
+  return {
+    ...safeRecord,
+    key: `${project.id}#${record.id}`,
+    project_id: project.id,
+    project_label: project.label,
+    covers: record.covers.map((ref) => qualifyRef(project.id, ref)),
+    linked_prs: (record.linked_prs || []).map((pr) => ({ ...pr, project_id: project.id, project_label: project.label })),
+  };
+}
+
+function qualifyRecordSummary(project, record) {
+  return qualifyRecord(project, { ...record, linked_prs: record.linked_prs || [] });
+}
+
+export function readProjectBoard(project) {
+  const localBoard = readBoardData({
+    dbDir: path.join(project.path, '.clips', 'db'),
+    recordsDir: path.join(project.path, '.clips', 'records', 'cr'),
+  });
+  const goals = localBoard.goals.map((goal) => {
+    const ref = qualifyRef(project.id, goal.ref);
+    return {
+      ...goal,
+      ref,
+      project_id: project.id,
+      project_label: project.label,
+      linked_crs: (goal.linked_crs || []).map((record) => qualifyRecordSummary(project, record)),
+      linked_prs: (goal.linked_prs || []).map((pr) => ({ ...pr, project_id: project.id, project_label: project.label })),
+      tasks: goal.tasks.map((task) => ({
+        ...task,
+        ref: qualifyRef(project.id, task.ref),
+        goal_ref: ref,
+        project_id: project.id,
+        project_label: project.label,
+        linked_crs: (task.linked_crs || []).map((record) => qualifyRecordSummary(project, record)),
+        linked_prs: (task.linked_prs || []).map((pr) => ({ ...pr, project_id: project.id, project_label: project.label })),
+      })),
+    };
+  });
+
+  return {
+    goals,
+    change_records: localBoard.change_records.map((record) => qualifyRecord(project, record)),
+    github_prs: localBoard.github_prs.map((pr) => ({ ...pr, project_id: project.id, project_label: project.label })),
+    warnings: localBoard.warnings.map((warning) => ({
+      kind: 'project_data',
+      project_id: project.id,
+      project_label: project.label,
+      message: warning.message,
+    })),
+  };
+}
+
+export function readWorkspaceBoard({ projects, availableProjects = projects, scope = 'all', warnings = [] }) {
+  const board = {
+    version: 2,
+    generated_at: new Date().toISOString(),
+    scope,
+    projects: availableProjects.map(({ id, label }) => ({ id, label })),
+    default_project_ids: projects.map((project) => project.id),
+    goals: [],
+    change_records: [],
+    github_prs: [],
+    warnings: [...warnings],
+  };
+
+  for (const project of projects) {
+    try {
+      const projectBoard = readProjectBoard(project);
+      board.goals.push(...projectBoard.goals);
+      board.change_records.push(...projectBoard.change_records);
+      board.github_prs.push(...projectBoard.github_prs);
+      board.warnings.push(...projectBoard.warnings);
+    } catch (error) {
+      board.warnings.push({
+        kind: 'project_data',
+        project_id: project.id,
+        project_label: project.label,
+        message: `Could not read project data: ${error.message}`,
+      });
+    }
+  }
+  return board;
+}
