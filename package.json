@@ -16,7 +16,7 @@
     "prepublishOnly": "npm run test:all",
     "prepack": "npm run web:build",
     "preversion": "npm test",
-    "publish": "npm publish --access public",
+    "publish:npm": "npm publish --access public",
     "update": "npm install -g @dfosco/clips && npm list -g @dfosco/clips --depth=0",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
     "postversion": "git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
