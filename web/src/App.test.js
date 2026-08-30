@@ -5,6 +5,7 @@ import App from './App.svelte';
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  history.replaceState(null, '', '/');
 });
 
 function mockColorScheme(matches) {
