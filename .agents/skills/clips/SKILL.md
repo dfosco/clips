@@ -1,6 +1,6 @@
 ---
 name: clips
-description: Local-first planning and repository-record workflow. Use when creating goals, tasks, CRs, ADRs, FDRs, and tracking progress.
+description: Local-first planning and repository-record workflow. Use when creating goals, tasks, CRs, ADRs, and tracking progress.
 metadata:
   author: Daniel Fosco
   version: "2026.3.28"
@@ -8,7 +8,7 @@ metadata:
 
 # Skill: clips — Planning and Records
 
-clips is a local-first workflow tool that can mirror goals and tasks to GitHub Issues after explicit opt-in. Planning events live in `.clips/db/`; CR, ADR, FDR, and other record instances live in `.clips/records/`. All are local workflow state and must not be committed. Committed `docs/records/` files are templates only.
+clips is a local-first workflow tool that can mirror goals and tasks to GitHub Issues after explicit opt-in. Planning events live in `.clips/db/`; CR and ADR record instances live in `.clips/records/`. All are local workflow state and must not be committed. Committed `docs/records/` files are templates only.
 
 ## Triggers
 
@@ -16,7 +16,6 @@ clips is a local-first workflow tool that can mirror goals and tasks to GitHub I
 - "break this down into tasks", "add tasks to the goal"
 - "create a CR", "write a change record", "update the CR", "stack this CR"
 - "write an ADR", "record this architectural decision", "update the ADR"
-- "write an FDR", "record the feature behavior", "update the FDR"
 - "what's the status?", "show me the issues", "what are we tracking?"
 - "mark it done", "close that task", "update the status"
 - "sync with github", "pull latest issues", "push to github"
@@ -87,12 +86,12 @@ When the user asks to implement a task (e.g. "work on t1", "implement the next t
 
 ### Creating or Updating Repository Records
 
-Use these rules whenever the user asks for a CR, ADR, FDR, or asks to document repository work:
+Use these rules whenever the user asks for a CR, ADR, or asks to document repository work:
 
-1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision; an FDR records durable current user-visible behavior and feature rationale.
-2. Do not create a new ADR or FDR merely because a task or CR exists. Update an existing record when it still describes the decision or behavior. Small bug fixes and feature iterations normally need only a CR.
+1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision.
+2. Do not create a new ADR merely because a task or CR exists. Update an existing record when it still describes the decision. Small bug fixes and feature iterations normally need only a CR.
 3. Every non-trivial, reviewable repository diff gets exactly one active CR. A CR may cover one task, several tasks, or a complete small goal. It is not a child item of a goal or task.
-4. Create or update record instances in `.clips/records/<type>/`. Never commit goals, tasks, CRs, ADRs, FDRs, or other workflow instances. Files under `docs/records/` are template schemas only.
+4. Create or update record instances in `.clips/records/<type>/`. Never commit goals, tasks, CRs, ADRs, or other workflow instances. Files under `docs/records/` are template schemas only.
 5. For a stacked CR, set `Parent CR` and record the exact Git basis. Do not create a separate stack record.
 
 When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Only a human may manufacture explicitly human-owned approval states such as `Testing`, `Needs Changes`, and `Ready to Merge`.
@@ -180,7 +179,7 @@ CR instances are local under `.clips/records/cr/CR-NNN-short-title.md`. Start fr
 
 ## Documentation and records
 
-List ADRs/FDRs created or updated, or `None`.
+List ADRs created or updated, or `None`.
 
 ## Review
 
@@ -213,35 +212,8 @@ ADR instances are local under `.clips/records/adr/ADR-NNN-short-title.md`. Start
 
 ## Related
 
-CRs, FDRs, goals, tasks, or external references.
+CRs, goals, tasks, or external references.
 ```
-
-#### FDR template
-
-FDR instances, when a project uses them, are local under `.clips/records/fdr/FDR-NNN-short-title.md`. Create one only for durable current user-visible behavior or feature rationale.
-
-```md
-# FDR-NNN: Feature or behavior
-
-**Status:** Proposed | Active | Experimental | Retired
-**Date:** YYYY-MM-DD
-**Behavior commit:** FULL_COMMIT_ID
-**Supersedes:** FDR-NNN | None
-
-## Overview
-
-## Behavior
-
-## Design decisions
-
-## Related
-
-CRs, ADRs, goals, tasks, or external references.
-
-## Open questions
-```
-
-Do not create an FDR for a small bug fix when an existing FDR remains accurate. Update the existing FDR through the CR when behavior changes but the feature record remains the right document.
 
 ---
 
@@ -255,7 +227,7 @@ Do not create an FDR for a small bug fix when an existing FDR remains accurate. 
 
 **Statuses** mirror GitHub: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
-**Record boundary**: Goals, tasks, CRs, ADRs, and FDRs are local workflow state under `.clips/` and are never committed. Every non-trivial repository diff gets one active local CR. Committed product documentation holds user-visible truth; committed `docs/records/` files are schemas only. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR/FDR.
+**Record boundary**: Goals, tasks, CRs, and ADRs are local workflow state under `.clips/` and are never committed. Every non-trivial repository diff gets one active local CR. Committed product documentation holds user-visible truth; committed `docs/records/` files are schemas only. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR.
 
 **CR basis**: Every CR records `Branch`, `Base branch`, `Base commit`, and optional `Parent CR`. `Parent CR` expresses a stacked review dependency; it is not a task hierarchy.
 
@@ -513,7 +485,6 @@ clips config project_id my-project      # Override the repository-name board ID
   records/
     cr/                   # Local Change Record instances
     adr/                  # Local Architecture Decision Record instances
-    fdr/                  # Optional local Feature Decision Record instances
 ```
 
 Each `.jsonl` file is an append-only event log. State is computed by replaying events. Files are never overwritten.

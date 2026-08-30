@@ -167,7 +167,7 @@ export function runInitCommand(args) {
   const cwd = getRepoRoot(process.cwd());
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
-  const clipsRecordDirs = ['cr', 'adr', 'fdr'].map((type) => path.join(cwd, '.clips', 'records', type));
+  const clipsRecordDirs = ['cr', 'adr'].map((type) => path.join(cwd, '.clips', 'records', type));
 
   const alreadyInitialized = fs.existsSync(clipsDir);
 
@@ -197,7 +197,7 @@ export function runInitCommand(args) {
   for (const recordDir of clipsRecordDirs) {
     if (!fs.existsSync(recordDir)) fs.mkdirSync(recordDir, { recursive: true });
   }
-  console.log('✓ Ensured .clips/records/{cr,adr,fdr}/ directories');
+  console.log('✓ Ensured .clips/records/{cr,adr}/ directories');
 
   // Set up .git/info/exclude with .clips
   if (setupGitExclude(cwd)) {

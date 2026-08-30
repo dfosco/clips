@@ -3,12 +3,11 @@
 `clips` manages local workflow state without adding it to repository history:
 
 - **Planning state:** goals and tasks under `.clips/db/`, optionally mirrored to GitHub Issues after explicit opt-in.
-- **Review and decision records:** CRs, ADRs, and related artifacts under `.clips/records/`.
+- **Review and decision records:** CRs and ADRs under `.clips/records/`.
 - **Committed schemas:** record templates under `docs/records/`; these are not record instances.
 
 CR = Change Record  
 ADR = Architecture Decision Record  
-FDR = Feature Decision Record (for user-facing functionality, can be a source of truth for usage docs)  
 
 This keeps planning and review state local while allowing the repository to ship shared record formats.
 
@@ -20,7 +19,7 @@ This keeps planning and review state local while allowing the repository to ship
 | Task | An actionable piece of a goal | Before and during work | External clips store |
 | CR | The review packet for a repository change; the local equivalent of a PR | Draft → In Review → Accepted → Merged | `.clips/records/cr/` |
 | ADR | A durable cross-cutting architectural decision | Proposed → Accepted → Superseded | `.clips/records/adr/` |
-| FDR or other record | Optional project-defined workflow record | Project-defined | `.clips/records/<type>/` |
+| Other record | Optional project-defined workflow record | Project-defined | `.clips/records/<type>/` |
 
 Goals and tasks define intended outcomes. CRs explain specific implementation attempts. ADRs preserve rare, cross-cutting architectural decisions for the local workflow. Committed product documentation describes current user-visible behavior.
 
@@ -135,7 +134,7 @@ npx @dfosco/clips --help
 clips init
 ```
 
-`clips init` creates local `.clips/` working state, including `.clips/records/{cr,adr,fdr}/`. It does not contact GitHub or import Issues by default.
+`clips init` creates local `.clips/` working state, including `.clips/records/{cr,adr}/`. It does not contact GitHub or import Issues by default.
 
 Non-collaborative mode is the default. Goal/task mutations remain local, and `clips init` plus `clips sync` perform no GitHub Issue or pull-request reads or writes. Clips adds `.clips` to the repository-local `.git/info/exclude`, leaving the shared `.gitignore` unchanged.
 

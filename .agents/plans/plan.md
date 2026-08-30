@@ -2,7 +2,7 @@
 
 This plan is superseded by [ADR-001](../../docs/records/adr/ADR-001-separate-planning-state-from-repository-records.md).
 
-Goals and tasks are planning state and should move to an external workflow store. They must not be made repository commits as part of normal clips mutations. CRs, ADRs, and FDRs are the repository-committed records.
+Goals and tasks are planning state and should move to an external workflow store. They must not be made repository commits as part of normal clips mutations. CRs and ADRs are the repository-committed records.
 
 The historical proposal is retained below for context only; it is not an implementation target.
 
