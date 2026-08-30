@@ -1,0 +1,21 @@
+{
+  "lockfileVersion": 1,
+  "registry": "local",
+  "skills": {
+    "changelog": {
+      "version": "2026.8.25",
+      "author": "Daniel Fosco",
+      "path": ".agents/skills/changelog"
+    },
+    "release": {
+      "version": "2026.4.08",
+      "author": "Daniel Fosco",
+      "path": ".agents/skills/release"
+    },
+    "skillz": {
+      "version": "2026.8.25",
+      "author": "Daniel Fosco",
+      "path": ".agents/skills/skillz"
+    }
+  }
+}

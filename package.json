@@ -1,17 +1,19 @@
 {
-  "name": "clips",
+  "name": "@dfosco/clips",
   "version": "1.2.3",
-  "description": "JSONL git-based issue tracker",
+  "description": "Local-first planning and change-record workflow CLI",
   "type": "module",
   "bin": {
-    "clips": "./src/cli.js"
+    "clips": "src/cli.js"
   },
   "scripts": {
     "test": "vitest run --config web/vitest.config.js",
-    "test:all": "npm test && npm run web:build",
+    "test:all": "npm test && npm run test:package",
+    "test:package": "npm run web:build && node scripts/package-smoke.js",
     "web:dev": "vite --config web/vite.config.js",
     "web:build": "vite build --config web/vite.config.js",
     "web:test": "vitest run --config web/vitest.config.js",
+    "prepublishOnly": "npm run test:all",
     "prepack": "npm run web:build",
     "preversion": "npm test",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
@@ -27,9 +29,11 @@
   "author": "dfosco",
   "license": "MIT",
   "files": [
-    "src/",
-    ".agents/",
+    "src/**/*.js",
+    "!src/**/*.test.js",
+    ".agents/skills/clips/SKILL.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "dist/web/"
   ],
@@ -42,6 +46,9 @@
   ],
   "engines": {
     "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "homepage": "https://github.com/dfosco/clips#readme",
   "bugs": {

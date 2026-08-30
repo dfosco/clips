@@ -119,7 +119,13 @@ Copy templates into `.clips/records/<type>/` when creating a record. Never put r
 ## Installation
 
 ```bash
-npm install -g github:dfosco/clips
+npm install -g @dfosco/clips
+```
+
+Or run it without a global install:
+
+```bash
+npx @dfosco/clips --help
 ```
 
 ### Setup
@@ -211,9 +217,10 @@ That storage format is an implementation detail of the current CLI, not the repo
 npm run release              # patch
 npm run release:minor        # minor
 npm run release:major        # major
+npm publish                   # publish the tagged version to npm
 ```
 
-The release command runs tests, updates the version, creates a tag and commit, pushes to GitHub, and creates a GitHub Release. It requires the [GitHub CLI](https://cli.github.com/) to be installed and authenticated.
+The versioning commands run tests, update the version, create a tag and commit, push to GitHub, and create a GitHub Release. They require the [GitHub CLI](https://cli.github.com/) to be installed and authenticated. `npm publish` reruns the complete test and package smoke suite before publishing the public `@dfosco/clips` package.
 
 ## License
 
