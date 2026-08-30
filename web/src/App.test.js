@@ -2,7 +2,26 @@ import { render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+function mockColorScheme(matches) {
+  const listeners = new Set();
+  const colorScheme = {
+    matches,
+    addEventListener: vi.fn((event, listener) => event === 'change' && listeners.add(listener)),
+    removeEventListener: vi.fn((event, listener) => event === 'change' && listeners.delete(listener)),
+  };
+  vi.stubGlobal('matchMedia', vi.fn(() => colorScheme));
+  return {
+    set(matchesNext) {
+      colorScheme.matches = matchesNext;
+      for (const listener of listeners) listener({ matches: matchesNext });
+    },
+  };
+}
 
 const board = {
   version: 2,
@@ -78,6 +97,25 @@ const closedBoard = {
 };
 
 describe('board app', () => {
+  it('follows the system theme until the user chooses an override', async () => {
+    const colorScheme = mockColorScheme(true);
+    vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify(board), { status: 200 }));
+    render(App);
+
+    await screen.findByText('Define board data contract');
+    const shell = document.querySelector('.app-shell');
+    expect(shell).toHaveClass('dark-mode');
+
+    colorScheme.set(false);
+    await waitFor(() => expect(shell).not.toHaveClass('dark-mode'));
+
+    await screen.getByRole('button', { name: 'Toggle color theme' }).click();
+    expect(shell).toHaveClass('dark-mode');
+    colorScheme.set(true);
+    colorScheme.set(false);
+    expect(shell).toHaveClass('dark-mode');
+  });
+
   it('renders and filters project-qualified data from multiple projects', async () => {
     const betaGoal = {
       ...board.goals[0],

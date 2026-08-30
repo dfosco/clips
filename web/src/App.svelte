@@ -28,7 +28,10 @@
   let sourceFilter = $state('all');
   let goalFilter = $state('all');
   let activeView = $state('board');
-  let darkMode = $state(false);
+  let systemDark = $state(false);
+  let themeOverride = $state(null);
+  let darkMode = $derived(themeOverride ?? systemDark);
+  let themeLabel = $derived(themeOverride === null ? `System (${darkMode ? 'Dark' : 'Light'})` : darkMode ? 'Dark' : 'Light');
   let selectedItem = $state(null);
   let activeRecord = $state(null);
   let cardMode = $state('task');
@@ -140,7 +143,7 @@
   }
 
   function toggleTheme() {
-    darkMode = !darkMode;
+    themeOverride = !darkMode;
   }
 
   function openTask(task) {
@@ -183,9 +186,20 @@
   }
 
   onMount(() => {
+    const colorScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const handleColorSchemeChange = (event) => {
+      systemDark = event.matches;
+    };
+    if (colorScheme) {
+      systemDark = colorScheme.matches;
+      colorScheme.addEventListener('change', handleColorSchemeChange);
+    }
     loadBoard();
     window.addEventListener('keydown', handleGlobalKeydown);
-    return () => window.removeEventListener('keydown', handleGlobalKeydown);
+    return () => {
+      colorScheme?.removeEventListener('change', handleColorSchemeChange);
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
   });
 </script>
 
@@ -194,7 +208,7 @@
   <meta name="description" content="Read-only local board for Clips goals and tasks." />
 </svelte:head>
 
-<div class:dark-mode={darkMode} class="app-shell">
+<div class:dark-mode={darkMode} class:light-mode={themeOverride === false} class="app-shell">
   <aside class="sidebar" aria-label="Primary navigation">
     <div class="brand"><span class="brand-mark"><Icon name="logo" size={25} /></span><span>Clips</span></div>
     <nav class="sidebar-nav">
@@ -284,7 +298,7 @@
     {:else if activeView === 'github'}
       <section class="secondary-view"><div class="secondary-heading"><div><h1>GitHub</h1><p>Planning data linked to GitHub Issues.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>{#if linkedGoals.length}<div class="goal-list">{#each linkedGoals as goal}<button class="goal-row" type="button" onclick={() => { goalFilter = goal.ref; sourceFilter = 'github'; openView('board'); }}><span class="goal-row__icon"><Icon name="github" size={18} /></span><span><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · Issue #{goal.issue_number ?? '—'} · {goal.tasks.length} tasks</small></span><Icon name="chevron-right" size={17} /></button>{/each}</div>{:else}<div class="state-panel"><div class="state-icon"><Icon name="github" size={21} /></div><h2>No GitHub-linked goals</h2><p>Local-only goals appear in the board.</p></div>{/if}</section>
     {:else}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>Settings</h1><p>Local board preferences and limits.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="settings-list"><div><strong>Data source</strong><span>Local .clips/db JSONL records</span></div><div><strong>Mutations</strong><span>Disabled in this first iteration</span></div><div><strong>GitHub sync</strong><span>Not triggered by the web app</span></div><div><strong>Color theme</strong><button type="button" onclick={toggleTheme}>{darkMode ? 'Dark' : 'Light'}</button></div></div></section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Settings</h1><p>Local board preferences and limits.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="settings-list"><div><strong>Data source</strong><span>Local .clips/db JSONL records</span></div><div><strong>Mutations</strong><span>Disabled in this first iteration</span></div><div><strong>GitHub sync</strong><span>Not triggered by the web app</span></div><div><strong>Color theme</strong><button type="button" onclick={toggleTheme}>{themeLabel}</button></div></div></section>
     {/if}
   </main>
 
