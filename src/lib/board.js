@@ -148,6 +148,16 @@ export function parseGoalFile(filePath, goalId) {
       case 'github_synced':
         goal.issue_number = event.issue_number;
         goal.issue_url = event.issue_url;
+        goal.github_unlinked = false;
+        break;
+      case 'github_unlinked':
+        delete goal.issue_number;
+        delete goal.issue_url;
+        goal.github_unlinked = true;
+        for (const task of Object.values(goal.tasks)) {
+          delete task.issue_number;
+          delete task.issue_url;
+        }
         break;
       case 'github_pr_synced':
         goal.github_prs = goal.github_prs || {};
@@ -176,7 +186,7 @@ export function parseGoalFile(filePath, goalId) {
         }
         break;
       case 'task_github_synced':
-        if (goal.tasks[event.task_id]) {
+        if (goal.tasks[event.task_id] && !goal.github_unlinked) {
           goal.tasks[event.task_id].issue_number = event.issue_number;
           goal.tasks[event.task_id].issue_url = event.issue_url;
         }

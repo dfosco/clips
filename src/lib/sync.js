@@ -407,6 +407,7 @@ export function pullAllIssues() {
       // Already imported — check if status diverged
       const goal = readGoalWithTasks(existingGoalId);
       if (!goal) continue;
+      if (goal.github_unlinked) continue;
 
       const ghClosed = issue.state === 'CLOSED' || issue.state === 'closed';
       const localClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
@@ -504,6 +505,7 @@ export function pushGoal(goalId) {
 
   const goal = readGoalWithTasks(goalId);
   if (!goal) return;
+  if (goal.github_unlinked) return { skipped: true, reason: 'unlinked' };
 
   const config = readConfig();
   const title = `[Goal] ${goal.title}`;
@@ -688,7 +690,7 @@ export function syncAll() {
         } else if (entry.name.endsWith('.jsonl') && entry.name !== GITHUB_CACHE_FILE) {
           const gId = entry.name.replace('.jsonl', '');
           const goal = readGoalWithTasks(gId);
-          if (goal) {
+          if (goal && !goal.github_unlinked) {
             if (isCollaborationEnabled()) {
               pushGoal(gId);
               pushed++;

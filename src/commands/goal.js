@@ -3,6 +3,7 @@ import fs from 'fs';
 import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
+import { discoverBoardGoals } from '../lib/board.js';
 
 // Normalize goal ID by stripping # prefix if present
 function normalizeGoalId(goalId) {
@@ -90,6 +91,55 @@ function changeStatus(goalId, status) {
   console.log(JSON.stringify({ success: true, goal_id: normalizedId, status: status }));
 }
 
+function unlinkGoalRecord(goalId, username = null) {
+  const goal = readGoalWithTasks(goalId, username);
+  if (!goal?.issue_number) return null;
+
+  appendEvent(goalId, {
+    event: 'github_unlinked',
+    goal_id: goalId,
+    timestamp: new Date().toISOString(),
+    issue_number: goal.issue_number,
+    issue_url: goal.issue_url || '',
+  }, { username });
+  return { goal_id: goalId, username, issue_number: goal.issue_number };
+}
+
+function unlinkGoal(goalRef) {
+  const parsed = parseRef(goalRef);
+  const normalizedId = parsed?.goalId || normalizeGoalId(goalRef);
+  const username = parsed?.username || null;
+  const goal = readGoalWithTasks(normalizedId, username);
+  if (!goal) {
+    console.error(JSON.stringify({ error: 'Goal not found' }));
+    process.exit(1);
+  }
+
+  const result = unlinkGoalRecord(normalizedId, username);
+  if (!result) {
+    console.log(JSON.stringify({ success: true, goal_id: normalizedId, unlinked: false }));
+    return;
+  }
+
+  console.log(JSON.stringify({
+    success: true,
+    goal_id: normalizedId,
+    unlinked: true,
+    issue_number: result.issue_number,
+  }));
+}
+
+function unlinkAllGoals() {
+  const results = discoverBoardGoals(getClipsDbDir())
+    .map(({ goalId, username }) => unlinkGoalRecord(goalId, username))
+    .filter(Boolean);
+  console.log(JSON.stringify({
+    success: true,
+    unlinked: results.length,
+    goals: results.map(({ goal_id: goalId, username }) => username ? `#${username}#${goalId}` : `#${goalId}`),
+  }));
+}
+
 function showGoal(goalId) {
   const normalizedId = normalizeGoalId(goalId);
   const goal = readGoalWithTasks(normalizedId);
@@ -135,6 +185,10 @@ export function runGoalCommand(args) {
     case 'status':
       changeStatus(rest[0], rest[1]);
       break;
+    case 'unlink':
+      if (rest[0] === '--all') unlinkAllGoals();
+      else unlinkGoal(rest[0]);
+      break;
     case 'show':
       showGoal(rest[0]);
       break;
@@ -147,6 +201,7 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
+  unlink <id|--all>    Disconnect one or all goals and their tasks from GitHub
 
 Behavior fields:
   behavior             Optional Gherkin-style behavior text

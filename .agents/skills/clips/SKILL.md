@@ -348,6 +348,20 @@ clips goal update g1 '{"acceptance_criteria":["Users can login","Users can logou
 
 ---
 
+### `clips goal unlink`
+
+Disconnect one or all goals and their tasks from GitHub while preserving local planning history and existing remote issues. Detached goals remain local even when repository collaboration is enabled later.
+
+```bash
+clips goal unlink g1
+clips goal unlink #g001
+clips goal unlink --all
+```
+
+Both forms are idempotent. `--all` skips goals that are already local, and future local mutations or `clips sync` do not recreate, edit, or import detached issues.
+
+---
+
 ### `clips task create`
 
 Add a single task to a goal. Updates a linked GitHub Issue only when collaboration was explicitly enabled.

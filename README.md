@@ -157,6 +157,8 @@ clips view #g001                    # View a specific goal
 clips goal create '{"title":"..."}'  # Create local goal
 clips goal create '{"title":"...","verification_mode":"behavior_and_tests","behavior":"Feature: ..."}'
 clips goal status g1 closed         # Close local goal
+clips goal unlink g1                # Keep a linked goal local without changing its GitHub issue
+clips goal unlink --all             # Unlink every linked goal in this repository
 
 clips task create-batch g001 '[{"title":"Task A"},{"title":"Task B"}]'
 clips task status g1 t1 closed      # Close local task
@@ -164,6 +166,8 @@ clips task status g1 t1 closed      # Close local task
 clips sync                           # No-op unless collaboration is explicitly enabled
 clips config                         # View configuration
 ```
+
+`clips goal unlink <ref>` appends a local unlink event, removes the goal and its tasks from future GitHub synchronization, and leaves existing remote issues unchanged. Use `clips goal unlink --all` to detach every linked goal in the current repository. Both forms are safe to repeat and leave already-local goals unchanged.
 
 ## Local board
 
