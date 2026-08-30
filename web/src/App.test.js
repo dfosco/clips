@@ -159,6 +159,8 @@ describe('board app', () => {
 
     expect(screen.getByText('Loading planning data')).toBeInTheDocument();
     expect(await screen.findByText('Define board data contract')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Select projects' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /clips/ })).toBeChecked();
     expect(screen.getAllByText('Local only').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Read-only').length).toBeGreaterThanOrEqual(1);
     expect(document.querySelector('.iconoir')).toBeInTheDocument();
