@@ -7,6 +7,11 @@
       "author": "Daniel Fosco",
       "path": ".agents/skills/changelog"
     },
+    "one-shot": {
+      "version": "2026.8.21",
+      "author": "Daniel Fosco",
+      "path": ".agents/skills/one-shot"
+    },
     "release": {
       "version": "2026.4.08",
       "author": "Daniel Fosco",

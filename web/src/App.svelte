@@ -36,6 +36,55 @@
   let activeRecord = $state(null);
   let cardMode = $state('task');
   let selectedProjectIds = $state([]);
+  let requestedProjectIds = $state(null);
+
+  function routePath() {
+    if (selectedItem?.type === 'goal') return `/goals/${encodeURIComponent(selectedItem.item.ref)}`;
+    if (selectedItem?.type === 'task') return `/tasks/${encodeURIComponent(selectedItem.item.ref)}`;
+    if (activeView === 'change_record' && activeRecord) return `/changes/${encodeURIComponent(activeRecord.id)}`;
+    return activeView === 'board' ? '/board' : `/${activeView}`;
+  }
+
+  function updateUrl(replace = false) {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (sourceFilter !== 'all') params.set('source', sourceFilter);
+    if (goalFilter !== 'all') params.set('goal', goalFilter);
+    if (cardMode !== 'task') params.set('cards', cardMode);
+    if (selectedProjectIds.length) params.set('projects', selectedProjectIds.join(','));
+    if (themeOverride !== null) params.set('theme', themeOverride ? 'dark' : 'light');
+    const url = `${routePath()}${params.size ? `?${params}` : ''}`;
+    history[replace ? 'replaceState' : 'pushState'](null, '', url);
+  }
+
+  function applyLocation() {
+    const url = new URL(window.location.href);
+    const [view, identifier] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+    activeView = ['board', 'goals', 'tasks', 'changes', 'github', 'settings'].includes(view) ? view : 'board';
+    if (view === 'changes' && identifier) activeView = 'change_record';
+    search = url.searchParams.get('search') || '';
+    sourceFilter = url.searchParams.get('source') || 'all';
+    goalFilter = url.searchParams.get('goal') || 'all';
+    cardMode = url.searchParams.get('cards') === 'goal' ? 'goal' : 'task';
+    requestedProjectIds = url.searchParams.get('projects')?.split(',').filter(Boolean) || null;
+    const theme = url.searchParams.get('theme');
+    themeOverride = theme === 'dark' ? true : theme === 'light' ? false : null;
+    selectedItem = null;
+    activeRecord = null;
+    if (identifier && view === 'goals') selectedItem = { type: 'goal', ref: identifier };
+    if (identifier && view === 'tasks') selectedItem = { type: 'task', ref: identifier };
+    if (identifier && view === 'changes') activeRecord = { id: identifier };
+  }
+
+  function resolveRouteObjects() {
+    if (selectedItem?.ref) {
+      const item = selectedItem.type === 'goal'
+        ? board?.goals?.find((goal) => goal.ref === selectedItem.ref)
+        : board?.goals?.flatMap((goal) => goal.tasks).find((task) => task.ref === selectedItem.ref);
+      selectedItem = item ? { type: selectedItem.type, item } : null;
+    }
+    if (activeRecord?.id && !activeRecord.markdown) activeRecord = board?.change_records?.find((record) => record.id === activeRecord.id) || null;
+  }
 
   async function loadBoard(projectIds = null) {
     loading = true;
@@ -46,7 +95,9 @@
       const response = await fetch(`/api/board${params.size ? `?${params}` : ''}`);
       if (!response.ok) throw new Error(`Board API returned ${response.status}.`);
       board = await response.json();
-      selectedProjectIds = projectIds || board.default_project_ids || board.projects?.map((project) => project.id) || [];
+      const validRequestedProjects = requestedProjectIds?.filter((id) => board.projects?.some((project) => project.id === id));
+      selectedProjectIds = projectIds || validRequestedProjects?.length ? (projectIds || validRequestedProjects) : board.default_project_ids || board.projects?.map((project) => project.id) || [];
+      resolveRouteObjects();
     } catch (caught) {
       error = caught instanceof Error ? caught.message : 'Could not load board.';
     } finally {
@@ -133,31 +184,37 @@
     if (!next.length) return;
     goalFilter = 'all';
     loadBoard(next);
+    updateUrl();
   }
 
   function openView(view) {
     activeView = view;
     activeRecord = null;
     selectedItem = null;
+    updateUrl();
     requestAnimationFrame(() => document.querySelector('.top-search input')?.focus());
   }
 
   function toggleTheme() {
     themeOverride = !darkMode;
+    updateUrl();
   }
 
-  function openTask(task) {
-    selectedItem = { type: 'task', item: task };
+  function openTask(task, parentGoal = null) {
+    selectedItem = { type: 'task', item: task, parentGoal };
+    updateUrl();
   }
 
   function openGoal(goal) {
     selectedItem = { type: 'goal', item: goal };
+    updateUrl();
   }
 
   function openChangeRecord(record) {
     activeView = 'change_record';
     activeRecord = board?.change_records?.find((candidate) => candidate.key === record.key) || record;
     selectedItem = null;
+    updateUrl();
   }
 
   function linkedObject(ref) {
@@ -179,6 +236,27 @@
 
   function closePanel() {
     selectedItem = null;
+    updateUrl();
+  }
+
+  function setSearch(value) {
+    search = value;
+    updateUrl(true);
+  }
+
+  function setGoalFilter(value) {
+    goalFilter = value;
+    updateUrl();
+  }
+
+  function setSourceFilter(value) {
+    sourceFilter = value;
+    updateUrl();
+  }
+
+  function setCardMode(value) {
+    cardMode = value;
+    updateUrl();
   }
 
   function handleGlobalKeydown(event) {
@@ -186,6 +264,7 @@
   }
 
   onMount(() => {
+    applyLocation();
     const colorScheme = window.matchMedia?.('(prefers-color-scheme: dark)');
     const handleColorSchemeChange = (event) => {
       systemDark = event.matches;
@@ -194,11 +273,17 @@
       systemDark = colorScheme.matches;
       colorScheme.addEventListener('change', handleColorSchemeChange);
     }
-    loadBoard();
+    loadBoard(requestedProjectIds);
     window.addEventListener('keydown', handleGlobalKeydown);
+    const handlePopState = () => {
+      applyLocation();
+      loadBoard(requestedProjectIds);
+    };
+    window.addEventListener('popstate', handlePopState);
     return () => {
       colorScheme?.removeEventListener('change', handleColorSchemeChange);
       window.removeEventListener('keydown', handleGlobalKeydown);
+      window.removeEventListener('popstate', handlePopState);
     };
   });
 </script>
@@ -228,17 +313,17 @@
     <header class="topbar">
       <div class="topbar-brand"><span class="brand-mark"><Icon name="logo" size={20} /></span><strong>Clips</strong></div>
       <div class="breadcrumbs"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong>{activeView === 'board' ? scopeLabel : activeView === 'change_record' ? activeRecord?.id || 'Change record' : navigation.find((item) => item.id === activeView)?.label || 'Settings'}</strong></div>
-      <label class="top-search"><Icon name="search" size={17} /><span class="sr-only">Search current page</span><input bind:value={search} type="search" placeholder="Search current page" /></label>
+      <label class="top-search"><Icon name="search" size={17} /><span class="sr-only">Search current page</span><input value={search} oninput={(event) => setSearch(event.currentTarget.value)} type="search" placeholder="Search current page" /></label>
       <div class="topbar-actions"><button class="docs-button" type="button" onclick={() => openView('settings')} aria-label="Open documentation"><Icon name="book" size={18} /></button><div class="readonly-indicator"><Icon name="lock" size={15} /> Read-only</div></div>
     </header>
 
     {#if activeView === 'board'}
       <section class="board-header">
-        <div class="board-heading-main"><h1>{scopeLabel}</h1><div class="view-readonly"><Icon name="lock" size={13} /> Read-only</div><div class="segmented-control" role="group" aria-label="Show cards by"><span>Cards by</span><button class:segmented-control__active={cardMode === 'goal'} type="button" aria-label="Show goal cards" aria-pressed={cardMode === 'goal'} onclick={() => cardMode = 'goal'}>Goals</button><button class:segmented-control__active={cardMode === 'task'} type="button" aria-label="Show task cards" aria-pressed={cardMode === 'task'} onclick={() => cardMode = 'task'}>Tasks</button></div></div>
+        <div class="board-heading-main"><h1>{scopeLabel}</h1><div class="view-readonly"><Icon name="lock" size={13} /> Read-only</div><div class="segmented-control" role="group" aria-label="Show cards by"><span>Cards by</span><button class:segmented-control__active={cardMode === 'goal'} type="button" aria-label="Show goal cards" aria-pressed={cardMode === 'goal'} onclick={() => setCardMode('goal')}>Goals</button><button class:segmented-control__active={cardMode === 'task'} type="button" aria-label="Show task cards" aria-pressed={cardMode === 'task'} onclick={() => setCardMode('task')}>Tasks</button></div></div>
         <div class="board-controls" aria-label="Board filters">
           {#if board?.projects?.length}<details class="project-filter"><summary aria-label="Select projects">Projects · {selectedProjectIds.length}<Icon name="chevron" size={15} /></summary><fieldset><legend>Select projects</legend>{#each board.projects as project}<label><input type="checkbox" checked={selectedProjectIds.includes(project.id)} disabled={selectedProjectIds.length === 1 && selectedProjectIds.includes(project.id)} onchange={(event) => toggleProject(project.id, event.currentTarget.checked)} /><span>{project.label}</span><code>{project.id}</code></label>{/each}</fieldset></details>{/if}
-          <label class="select-field"><span class="sr-only">Filter by goal</span><select bind:value={goalFilter} aria-label="Filter by goal"><option value="all">All goals</option>{#each board?.goals ?? [] as goal}<option value={goal.ref}>{goal.project_label} · {goal.title}</option>{/each}</select><Icon name="chevron" size={15} /></label>
-          <label class="select-field select-field--source"><span class="sr-only">Filter by source</span><select bind:value={sourceFilter} aria-label="Filter by source"><option value="all">All sources</option><option value="github">GitHub linked</option><option value="local">Local only</option></select><Icon name="chevron" size={15} /></label>
+          <label class="select-field"><span class="sr-only">Filter by goal</span><select value={goalFilter} onchange={(event) => setGoalFilter(event.currentTarget.value)} aria-label="Filter by goal"><option value="all">All goals</option>{#each board?.goals ?? [] as goal}<option value={goal.ref}>{goal.project_label} · {goal.title}</option>{/each}</select><Icon name="chevron" size={15} /></label>
+          <label class="select-field select-field--source"><span class="sr-only">Filter by source</span><select value={sourceFilter} onchange={(event) => setSourceFilter(event.currentTarget.value)} aria-label="Filter by source"><option value="all">All sources</option><option value="github">GitHub linked</option><option value="local">Local only</option></select><Icon name="chevron" size={15} /></label>
           <Button.Root class="refresh-button" type="button" aria-label="Refresh board" on:click={() => loadBoard(selectedProjectIds)}><Icon name="refresh" size={18} /></Button.Root>
         </div>
       </section>
@@ -313,8 +398,9 @@
           {#if selectedItem.type === 'task'}
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="status-pill status-pill--{selectedItem.item.column}"><span class="status-dot status-dot--{selectedItem.item.column}"></span>{statusLabel(selectedItem.item.status)}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
+            {#if selectedItem.parentGoal}<button class="back-button" type="button" onclick={() => openGoal(selectedItem.parentGoal)}><Icon name="chevron-right" size={16} /> Back to goal</button>{/if}
             <p class="detail-context">Part of <button type="button" onclick={() => { const goal = board?.goals?.find((candidate) => candidate.ref === selectedItem.item.goal_ref); if (goal) openGoal(goal); }}>{selectedItem.item.goal_title}</button></p>
-            {#if selectedItem.item.description}<p class="detail-description">{selectedItem.item.description}</p>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
+            {#if selectedItem.item.description}<div class="detail-description"><MarkdownContent source={selectedItem.item.description} /></div>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
             {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
             <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Source</span><strong>{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
@@ -323,11 +409,11 @@
           {:else if selectedItem.type === 'goal'}
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="source-label source-label--{selectedItem.item.source}"><Icon name={selectedItem.item.source === 'github' ? 'github' : 'bookmark'} size={15} />{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
-            {#if selectedItem.item.description}<p class="detail-description">{selectedItem.item.description}</p>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
+            {#if selectedItem.item.description}<div class="detail-description"><MarkdownContent source={selectedItem.item.description} /></div>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
             {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
             <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Tasks</span><strong>{selectedItem.item.tasks.length}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
-            <div class="detail-task-list"><h3>Tasks in this goal</h3>{#each selectedItem.item.tasks as task}<button type="button" onclick={() => openTask(task)}><span class="status-dot status-dot--{task.column}"></span><span>{task.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>
+            <div class="detail-task-list"><h3>Tasks in this goal</h3>{#each selectedItem.item.tasks as task}<button type="button" onclick={() => openTask(task, selectedItem.item)}><span class="status-dot status-dot--{task.column}"></span><span>{task.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>
             {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked change records</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
             {#if selectedItem.item.linked_prs?.length}<div class="detail-task-list"><h3>Linked GitHub PRs</h3>{#each selectedItem.item.linked_prs as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}
           {:else}

@@ -1,5 +1,6 @@
 <script>
   import Icon from './Icon.svelte';
+  import MarkdownContent from './MarkdownContent.svelte';
 
   export let goal;
   export let onOpen = () => {};
@@ -24,7 +25,9 @@
     <span class="status-pill"><span class="status-dot status-dot--{goal.status === 'in_progress' ? 'in_progress' : goal.status === 'closed' ? 'closed' : goal.status === 'not_planned' || goal.status === 'duplicate' ? 'not_planned' : 'open'}"></span>{statusLabel}</span>
   </div>
   <h3>{goal.title}</h3>
-  {#if goal.description}<p>{goal.description}</p>{:else}<p class="goal-card__empty">No description provided.</p>{/if}
+  <!-- Links in Markdown should not also open the card. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  {#if goal.description}<div class="goal-card__description" onclick={(event) => event.stopPropagation()}><MarkdownContent source={goal.description} /></div>{:else}<p class="goal-card__empty">No description provided.</p>{/if}
   <div class="goal-card__footer">
     <span class="project-label">{goal.project_label}</span>
     <span class="source-label source-label--{goal.source}"><Icon name={goal.source === 'github' ? 'github' : 'bookmark'} size={16} />{sourceLabel}</span>

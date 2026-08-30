@@ -1,5 +1,6 @@
 <script>
   import Icon from './Icon.svelte';
+  import MarkdownContent from './MarkdownContent.svelte';
 
   export let task;
   export let onOpen = () => {};
@@ -24,7 +25,9 @@
   </div>
   <h3>{task.title}</h3>
   <p class="task-goal">Project: {task.project_label} · Goal: {task.goal_title} · {goalStatusLabel}</p>
-  {#if task.description}<p class="task-description">{task.description}</p>{/if}
+  <!-- Links in Markdown should not also open the card. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  {#if task.description}<div class="task-description" onclick={(event) => event.stopPropagation()}><MarkdownContent source={task.description} /></div>{/if}
   <div class="task-card__footer">
     {#if task.issue_url}
       <a class="source-link" href={task.issue_url} target="_blank" rel="noreferrer" onclick={(event) => event.stopPropagation()}><Icon name="github" size={16} />{sourceLabel}</a>
