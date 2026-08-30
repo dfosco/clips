@@ -444,6 +444,24 @@ clips sync g12          # Shorthand
 
 ---
 
+### `clips web`
+
+Start the local read-only kanban board for the current Clips repository. The board reads discoverable goals and tasks from `.clips/db` and exposes only `GET /api/board`; it cannot create, edit, reorder, or synchronize planning data.
+
+**When to use:** Reviewing goals and tasks in a visual board, including local-only goals and GitHub-linked planning state.
+
+**Triggers:** "open the board", "show the kanban board", "start the local board", "view planning board"
+
+```bash
+npm install                  # Run once in the Clips package if dependencies are missing
+clips web                    # Start the board from inside a Clips repository
+clips web --host 127.0.0.1   # Pass additional Vite server arguments
+```
+
+Open the local URL printed by Vite. The command requires the Clips web dependencies and `web/vite.config.js` to be present.
+
+---
+
 ### `clips config`
 
 View or change clips configuration.
