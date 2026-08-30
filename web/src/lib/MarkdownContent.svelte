@@ -32,7 +32,16 @@
 
     function flushList() {
       if (!list) return;
-      output.push(`<${list.type}>${list.items.map((item) => `<li>${inlineMarkdown(item)}</li>`).join('')}</${list.type}>`);
+      const taskPattern = /^\[([ xX])\]\s+(.+)$/;
+      const containsTasks = list.items.some((item) => taskPattern.test(item));
+      const items = list.items.map((item) => {
+        const task = item.match(taskPattern);
+        if (!task) return `<li>${inlineMarkdown(item)}</li>`;
+        const checked = task[1].toLowerCase() === 'x' ? ' checked' : '';
+        return `<li class="task-list-item"><input type="checkbox" disabled${checked}> ${inlineMarkdown(task[2])}</li>`;
+      }).join('');
+      const className = containsTasks ? ' class="contains-task-list"' : '';
+      output.push(`<${list.type}${className}>${items}</${list.type}>`);
       list = null;
     }
 
