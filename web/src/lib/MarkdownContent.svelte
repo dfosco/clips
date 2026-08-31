@@ -25,7 +25,7 @@
 
     function flushParagraph() {
       if (paragraph.length) {
-        output.push(`<p>${inlineMarkdown(paragraph.join(' '))}</p>`);
+        output.push(`<p>${paragraph.map(inlineMarkdown).join('<br />')}</p>`);
         paragraph = [];
       }
     }

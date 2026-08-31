@@ -1,15 +1,14 @@
 <script>
   import Icon from './Icon.svelte';
-  import MarkdownContent from './MarkdownContent.svelte';
 
   export let goal;
   export let onOpen = () => {};
-  export let onOpenChange = () => {};
 
   $: sourceLabel = goal.source === 'github' ? 'GitHub linked' : 'Local only';
   $: statusLabel = (goal.status || 'open').replaceAll('_', ' ');
 
   function handleKeydown(event) {
+    if (event.target !== event.currentTarget) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpen(goal);
@@ -25,9 +24,6 @@
     <span class="status-pill"><span class="status-dot status-dot--{goal.status === 'in_progress' ? 'in_progress' : goal.status === 'closed' ? 'closed' : goal.status === 'not_planned' || goal.status === 'duplicate' ? 'not_planned' : 'open'}"></span>{statusLabel}</span>
   </div>
   <h3>{goal.title}</h3>
-  <!-- Links in Markdown should not also open the card. -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  {#if goal.description}<div class="goal-card__description" onclick={(event) => event.stopPropagation()}><MarkdownContent source={goal.description} /></div>{:else}<p class="goal-card__empty">No description provided.</p>{/if}
   <div class="goal-card__footer">
     <span class="project-label">{goal.project_label}</span>
     <span class="source-label source-label--{goal.source}"><Icon name={goal.source === 'github' ? 'github' : 'bookmark'} size={16} />{sourceLabel}</span>
@@ -35,5 +31,5 @@
     <span>{goal.tasks.length} {goal.tasks.length === 1 ? 'task' : 'tasks'}</span>
   </div>
   {#if goal.status === 'closed' && goal.closed_commit_sha}<div class="closed-commit"><Icon name="commit" size={14} /><span title={goal.closed_commit_sha}>Closed in <code>{goal.closed_commit_sha.slice(0, 7)}</code></span></div>{/if}
-  {#if goal.linked_crs?.length}<div class="linked-crs"><span>CR</span>{#each goal.linked_crs as record}<button type="button" onclick={(event) => { event.stopPropagation(); onOpenChange(record); }}>{record.id}</button>{/each}</div>{/if}
+  {#if goal.linked_crs?.length}<div class="linked-crs"><span>CR</span>{#each goal.linked_crs as record}<button type="button">{record.id}</button>{/each}</div>{/if}
 </article>

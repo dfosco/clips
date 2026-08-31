@@ -311,7 +311,6 @@
 
   <main class="main-content" id="board">
     <header class="topbar">
-      <div class="topbar-brand"><span class="brand-mark"><Icon name="logo" size={20} /></span><strong>Clips</strong></div>
       <div class="breadcrumbs"><span>Workspace</span><span class="breadcrumb-separator">/</span><strong>{activeView === 'board' ? scopeLabel : activeView === 'change_record' ? activeRecord?.id || 'Change record' : navigation.find((item) => item.id === activeView)?.label || 'Settings'}</strong></div>
       <label class="top-search"><Icon name="search" size={17} /><span class="sr-only">Search current page</span><input value={search} oninput={(event) => setSearch(event.currentTarget.value)} type="search" placeholder="Search current page" /></label>
       <div class="topbar-actions"><button class="docs-button" type="button" onclick={() => openView('settings')} aria-label="Open documentation"><Icon name="book" size={18} /></button><div class="readonly-indicator"><Icon name="lock" size={15} /> Read-only</div></div>
@@ -343,12 +342,12 @@
               <div class="column-content">
                 {#if cardMode === 'goal'}
                   {#if visibleGoals[column.id].length === 0}<div class="column-empty"><Icon name="inbox" size={40} /><strong>No goals</strong><span>There are no goals<br />in this status yet.</span></div>
-                  {:else}{#each visibleGoals[column.id] as goal (goal.ref)}<GoalCard {goal} onOpen={openGoal} onOpenChange={openChangeRecord} />{/each}{/if}
+                  {:else}{#each visibleGoals[column.id] as goal (goal.ref)}<GoalCard {goal} onOpen={openGoal} />{/each}{/if}
                 {:else if visibleTasks[column.id].length === 0}<div class="column-empty"><Icon name="inbox" size={40} /><strong>No tasks</strong><span>There are no tasks<br />in this status yet.</span></div>
                 {:else}
                   {#each filteredGoals as goal (goal.ref)}
                     {@const goalTasks = visibleTasks[column.id].filter((task) => task.goal_ref === goal.ref)}
-                    {#if goalTasks.length}<div class="goal-group"><button class="goal-group__header" type="button" onclick={() => openGoal(goal)} aria-label={`Open goal ${goal.title} in ${goal.project_label}`}><strong>{goal.title}</strong><span>{goal.project_label} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'} {#if goal.source === 'github'}<Icon name="github" size={15} />{/if}</span></button>{#each goalTasks as task (task.ref)}<TaskCard {task} onOpen={openTask} onOpenChange={openChangeRecord} />{/each}</div>{/if}
+                    {#if goalTasks.length}<div class="goal-group"><button class="goal-group__header" type="button" onclick={() => openGoal(goal)} aria-label={`Open goal ${goal.title} in ${goal.project_label}`}><strong>{goal.title}</strong><span>{goal.project_label} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'} {#if goal.source === 'github'}<Icon name="github" size={15} />{/if}</span></button>{#each goalTasks as task (task.ref)}<TaskCard {task} onOpen={openTask} />{/each}</div>{/if}
                   {/each}
                 {/if}
               </div>
@@ -391,14 +390,16 @@
     <div class="detail-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && closePanel()}>
       <dialog open class="detail-panel" aria-labelledby="detail-title">
         <header class="detail-panel__header">
-          <span>{selectedItem.type === 'task' ? 'Task details' : selectedItem.type === 'goal' ? 'Goal details' : 'Change record'}</span>
+          <div class="detail-panel__title">
+            {#if selectedItem.type === 'task' && selectedItem.parentGoal}<button class="detail-header-back" type="button" onclick={() => openGoal(selectedItem.parentGoal)} aria-label="Back to goal"><Icon name="chevron-right" size={18} /></button>{/if}
+            <span>{selectedItem.type === 'task' ? 'Task details' : selectedItem.type === 'goal' ? 'Goal details' : 'Change record'}</span>
+          </div>
           <button class="detail-close" type="button" onclick={closePanel} aria-label="Close detail panel"><Icon name="close" size={19} /></button>
         </header>
         <div class="detail-panel__body">
           {#if selectedItem.type === 'task'}
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="status-pill status-pill--{selectedItem.item.column}"><span class="status-dot status-dot--{selectedItem.item.column}"></span>{statusLabel(selectedItem.item.status)}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
-            {#if selectedItem.parentGoal}<button class="back-button" type="button" onclick={() => openGoal(selectedItem.parentGoal)}><Icon name="chevron-right" size={16} /> Back to goal</button>{/if}
             <p class="detail-context">Part of <button type="button" onclick={() => { const goal = board?.goals?.find((candidate) => candidate.ref === selectedItem.item.goal_ref); if (goal) openGoal(goal); }}>{selectedItem.item.goal_title}</button></p>
             {#if selectedItem.item.description}<div class="detail-description"><MarkdownContent source={selectedItem.item.description} /></div>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
             {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}

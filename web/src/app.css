@@ -1,7 +1,7 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: light;
-  color: var(--ink); background: var(--canvas); font-synthesis: none; text-rendering: optimizeLegibility;
+  color: var(--ink); background: var(--canvas); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   --tw-slate-50: #f8fafc; --tw-slate-100: #f1f5f9; --tw-slate-200: #e2e8f0; --tw-slate-300: #cbd5e1; --tw-slate-400: #94a3b8; --tw-slate-500: #64748b; --tw-slate-600: #475569; --tw-slate-700: #334155; --tw-slate-800: #1e293b; --tw-slate-900: #0f172a; --tw-slate-950: #020617;
   --tw-violet-50: #f5f3ff; --tw-violet-100: #ede9fe; --tw-violet-200: #ddd6fe; --tw-violet-300: #c4b5fd; --tw-violet-500: #8b5cf6; --tw-violet-600: #7c3aed; --tw-violet-700: #6d28d9;
   --tw-emerald-500: #10b981; --tw-amber-500: #f59e0b; --tw-red-50: #fef2f2; --tw-red-200: #fecaca; --tw-red-700: #b91c1c; --tw-amber-50: #fffbeb; --tw-amber-200: #fde68a; --tw-amber-800: #92400e;
@@ -21,8 +21,8 @@ button, input, select { font: inherit; } button, a, select { -webkit-tap-highlig
   :root { color-scheme: dark; --canvas: var(--tw-slate-950); --panel: var(--tw-slate-900); --surface: var(--tw-slate-900); --surface-raised: var(--tw-slate-800); --ink: var(--tw-slate-50); --body: var(--tw-slate-300); --muted: var(--tw-slate-400); --faint: var(--tw-slate-500); --border: var(--tw-slate-700); --border-subtle: var(--tw-slate-800); --accent: var(--tw-violet-300); --accent-soft: rgb(109 40 217 / 18%); --accent-border: var(--tw-violet-700); --focus: var(--tw-violet-500); --danger-surface: rgb(185 28 28 / 15%); --danger-border: var(--tw-red-700); --danger-text: var(--tw-red-200); --warning-surface: rgb(146 64 14 / 18%); --warning-border: var(--tw-amber-800); --warning-text: var(--tw-amber-200); --on-accent: var(--tw-slate-950); --code-surface: var(--tw-slate-950); --code-text: var(--tw-slate-200); --backdrop: rgb(2 6 23 / 70%); --shadow: rgb(2 6 23 / 45%); }
 }
 
-.sidebar { position: fixed; inset: 60px auto 0 0; width: 110px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; background: var(--panel); z-index: 3; }
-.brand { display: none; height: 76px; width: 100%; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 760; letter-spacing: -.035em; }
+.sidebar { position: fixed; inset: 0 auto 0 0; width: 110px; border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; background: var(--panel); z-index: 3; }
+.brand { display: flex; width: 100%; height: 60px; flex: 0 0 60px; align-items: center; justify-content: center; gap: 8px; font-size: 16px; font-weight: 760; letter-spacing: -.035em; }
 .brand-mark { width: 26px; height: 26px; display: grid; place-items: center; color: var(--accent); }
 .sidebar-nav { display: grid; gap: 9px; width: 100%; padding: 28px 15px; }
 .sidebar-link { min-height: 61px; width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 11px; font-weight: 650; transition: background .16s ease, color .16s ease; }
@@ -95,8 +95,54 @@ button, input, select { font: inherit; } button, a, select { -webkit-tap-highlig
 .state-action { color: var(--on-accent); }
 .warning-banner { color: var(--warning-text); border-color: var(--warning-border); background: var(--warning-surface); }
 .detail-backdrop { background: var(--backdrop); }
-.detail-panel { background: var(--panel); box-shadow: -10px 0 32px var(--shadow); }
+.detail-panel { width: min(680px, 94vw); background: var(--panel); box-shadow: -10px 0 32px var(--shadow); }
+.detail-panel__title { display: flex; align-items: center; gap: 8px; } .detail-header-back { display: grid; place-items: center; width: 28px; height: 28px; margin-left: -8px; padding: 0; color: var(--muted); border: 0; border-radius: 6px; background: transparent; } .detail-header-back .icon { transform: rotate(180deg); } .detail-header-back:hover, .detail-header-back:focus-visible { color: var(--ink); background: var(--surface); outline: 0; }
+.topbar { margin-inline: -27px; padding-inline: 27px; }
+
+/* Keep supporting text readable across the dense board layout. */
+body { font-size: 18px; }
+.brand { font-size: 18px; }
+.sidebar-link { font-size: 14px; }
+.breadcrumbs, .top-search input, .readonly-indicator, .view-readonly { font-size: 14px; }
+.segmented-control, .segmented-control button { font-size: 14px; }
+.search-field input, .select-field select, .project-filter { font-size: 14px; }
+.project-filter legend, .project-filter code, .project-label { font-size: 14px; }
+.column-title h2 { font-size: 18px; }
+.column-count { font-size: 14px; }
+.goal-group__header { font-size: 14px; }
+.task-ref, .task-goal, .task-card__footer, .goal-card__footer { font-size: 14px; }
+.task-card h3, .goal-card h3 { font-size: 18px; }
+.verification-label { font-size: 14px; }
+.linked-crs, .linked-crs button, .closed-commit { font-size: 14px; }
+.closed-commit code, .commit-sha { font-size: 14px; }
+.column-empty { font-size: 14px; }
+.column-empty strong { font-size: 18px; }
+.secondary-heading p, .goal-row small, .compact-row__main small, .compact-row__status { font-size: 14px; }
+.compact-row__main strong { font-size: 18px; }
+.back-button, .record-links__header p, .record-link__body strong, .github-unmatched p, .github-pr-row strong { font-size: 14px; }
+.record-prs h3, .github-unmatched h2 { font-size: 18px; }
+.github-pr-row small { font-size: 14px; }
+.markdown-content { font-size: 18px; }
+.markdown-content h1 { font-size: 32px; }
+.markdown-content h2 { font-size: 22px; }
+.markdown-content h3 { font-size: 18px; }
+.markdown-content h4, .markdown-content h5, .markdown-content h6 { font-size: 18px; }
+.markdown-content pre, .markdown-content table { font-size: 14px; }
+.task-list-group h2 { font-size: 18px; }
+.state-panel h2, .filtered-empty h2 { font-size: 20px; }
+.state-panel p, .filtered-empty p, .state-action, .warning-banner { font-size: 14px; }
+.detail-panel__header { font-size: 14px; }
+.status-pill { font-size: 14px; }
+.detail-panel h2 { font-size: 30px; }
+.detail-context { font-size: 14px; }
+.detail-description, .detail-description .markdown-content { font-size: 18px; }
+.detail-meta div, .detail-meta strong, .detail-task-list h3, .detail-task-list button { font-size: 16px; }
+.detail-meta span { font-size: 14px; }
+.detail-external-link { font-size: 14px; }
+.detail-behavior h3 { font-size: 18px; }
+.detail-behavior pre { font-size: 14px; }
 
 @media (max-width: 1150px) { .sidebar { width: 82px; } .main-content { width: calc(100% - 82px); margin-left: 82px; } .sidebar-link span, .brand > span:last-child { display: none; } .board-header { align-items: start; flex-direction: column; } .board-controls { width: 100%; } .search-field { width: min(360px, 100%); } .task-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .main-content { padding: 0 15px 30px; } .topbar { height: 68px; } .top-search { width: min(240px, 42vw); margin-right: 10px; } .docs-button { display: none; } .board-header { padding: 31px 0 22px; } .board-header > div:first-child { align-items: start; flex-direction: column; gap: 11px; } .board-controls { display: grid; grid-template-columns: 1fr auto; } .search-field { width: auto; } .select-field { display: none; } .kanban { grid-template-columns: repeat(4, minmax(260px, 1fr)); overflow-x: auto; margin-right: -15px; padding-right: 15px; padding-bottom: 8px; } .task-list { grid-template-columns: 1fr; } .secondary-view { padding: 34px 0; } }
 @media (max-width: 450px) { .sidebar { inset: 0 auto 0 0; width: 62px; } .main-content { width: calc(100% - 62px); margin-left: 62px; } .sidebar-nav, .sidebar-bottom { padding-inline: 10px; } .readonly-indicator { padding: 8px; font-size: 0; } .readonly-indicator svg { width: 16px; } .topbar-brand strong { font-size: 14px; } }
+@media (max-width: 760px) { .topbar { margin-inline: -15px; padding-inline: 15px; } .brand { height: 68px; flex-basis: 68px; } }

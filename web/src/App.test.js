@@ -204,7 +204,8 @@ describe('board app', () => {
     render(App);
 
     await screen.findByText('Define board data contract');
-    await screen.getByRole('button', { name: 'Open task Define board data contract in clips' }).click();
+    expect(screen.queryByText('Document response shape.')).not.toBeInTheDocument();
+    await screen.getByText('Define board data contract').click();
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     const panel = screen.getByRole('dialog');
@@ -245,6 +246,8 @@ describe('board app', () => {
     expect(within(screen.getByRole('dialog')).getByText('Feature: Local roadmap')).toBeInTheDocument();
     await screen.getByRole('button', { name: 'Define board data contract' }).click();
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Define board data contract' })).toBeInTheDocument();
+    await within(screen.getByRole('dialog')).getByRole('button', { name: 'Back to goal' }).click();
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Local roadmap' })).toBeInTheDocument();
   });
 
   it('opens CRs as a full page with rendered markdown and linked objects', async () => {

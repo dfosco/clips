@@ -27,4 +27,15 @@ describe('MarkdownContent', () => {
     expect(screen.getByText('[maybe] Bracketed item')).toBeInTheDocument();
     expect(container.querySelector('ul')).not.toHaveClass('contains-task-list');
   });
+
+  it('preserves description line breaks while rendering markdown', () => {
+    const { container } = render(MarkdownContent, {
+      source: '**Summary**\nSecond line\n\n## Details\n\n- First item',
+    });
+
+    expect(screen.getByText('Summary').tagName).toBe('STRONG');
+    expect(container.querySelector('p br')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.getByText('First item').tagName).toBe('LI');
+  });
 });
