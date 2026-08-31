@@ -34,6 +34,7 @@ Use `ask_user` for every question. One question per turn. Never bundle questions
 When the user wants to create a goal (gives you a title, says "let's plan this", "new goal", etc.):
 
 **Step 1 — Acknowledge and clarify.** Take the title they gave you and ask 2–3 clarifying questions, one at a time. Focus on:
+  - Whether the goal is `planning` (resolve uncertainty into an ADR) or `building` (deliver work through tasks and CRs)
   - What problem this solves or what outcome they want
   - What the scope is (what's in, what's out)
   - Any constraints, dependencies, or context that matters
@@ -48,13 +49,15 @@ Unless the user explicitly asks not to include behavior, also generate a concise
 
 Present the description and behavior to the user and ask them to confirm, using `ask_user`: _"Does this capture the goal correctly, or would you like to change anything?"_
 
-**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the title, full description, and generated `behavior`. Omit `behavior` only when the user explicitly opted out. Show the user the created goal reference (e.g. `#g001`).
+**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the `type`, title, full description, and generated `behavior`. Omit `behavior` only when the user explicitly opted out. Show the user the created goal reference (e.g. `#g001`).
 
-**Step 4 — Offer task breakdown.** Ask: _"Would you like to break this down into tasks?"_ If yes, move to the Task Breakdown workflow. If no, you're done.
+**Step 4 — Route by type.** For a `planning` goal, never offer task breakdown and never create intermediate tasks that may later become goals. Ask whether the user is ready to draft the ADR; when the decision is complete, create the ADR under `.clips/records/adr/`, attach it with `clips goal attach-adr <goal> <ADR-NNN>`, and then close the goal. For a `building` goal, ask: _"Would you like to break this down into tasks?"_ If yes, move to the Task Breakdown workflow.
 
 ### Breaking Down into Tasks
 
 When the user wants to add tasks (after goal creation, or "break this into tasks", "add tasks to g1"):
+
+First inspect the goal type. Only `building` goals may contain tasks. If the goal is `planning`, do not create tasks; explain that its result is an attached ADR and continue the ADR workflow instead.
 
 **Step 1 — Gather tasks.** Ask the user to list the tasks they have in mind. They may give you rough ideas, single words, or partial descriptions.
 
@@ -91,12 +94,12 @@ When the user asks to implement a task (e.g. "work on t1", "implement the next t
 Use these rules whenever the user asks for a CR, ADR, or asks to document repository work:
 
 1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision.
-2. Do not create a new ADR merely because a task or CR exists. Update an existing record when it still describes the decision. Small bug fixes and feature iterations normally need only a CR.
+2. A planning goal produces one attached ADR. Outside that workflow, do not create a new ADR merely because a task or CR exists; update an existing record when it still describes the decision.
 3. Every non-trivial, reviewable repository diff gets exactly one active CR. A CR may cover one task, several tasks, or a complete small goal. It is not a child item of a goal or task.
 4. Create or update record instances in `.clips/records/<type>/`. Never commit goals, tasks, CRs, ADRs, or other workflow instances. Files under `docs/records/` are template schemas only.
 5. For a stacked CR, set `Parent CR` and record the exact Git basis. Do not create a separate stack record.
 
-When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Only a human may manufacture explicitly human-owned approval states such as `Testing`, `Needs Changes`, and `Ready to Merge`.
+CRs and ADRs share these statuses: `Draft`, `Proposed`, `In Review`, `Accepted`, `Deprecated`, and `Archived`. When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Set `Accepted` only after explicit human acceptance. `Deprecated` retains a record that is no longer current. `Archived` moves the file to `.clips/records/<type>/archived/` and removes it from active discovery. Use `clips record status` rather than editing the field or moving the file manually.
 
 Use the following canonical templates. Preserve the field names and section order unless the user asks for a variant.
 
@@ -108,6 +111,7 @@ Goals are external planning artifacts and are not committed to the source reposi
 # Goal: Outcome title
 
 **Status:** open | in_progress | closed | not_planned | duplicate
+**Type:** planning | building
 
 ## Outcome
 
@@ -140,11 +144,11 @@ Feature: Observable outcome
 Known limits, dependencies, or unresolved questions.
 ````
 
-For the current CLI, map the goal to `clips goal create` with `title`, `description`, `behavior`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief. Omit `behavior` only after an explicit user request.
+For the current CLI, map the goal to `clips goal create` with `type`, `title`, `description`, `behavior`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief. Omit `behavior` only after an explicit user request.
 
 #### Task template
 
-Tasks are external planning artifacts associated with a goal.
+Tasks are external planning artifacts associated only with a building goal. Planning goals never contain tasks.
 
 ```md
 - [ ] Task title beginning with a verb
@@ -154,7 +158,7 @@ Tasks are external planning artifacts associated with a goal.
   - Dependencies: Other task or external dependency, or None.
 ```
 
-For the current CLI, create the task with `title` and optional `description` under the goal. Do not turn each task into a CR unless it produces a repository diff; one CR may cover multiple tasks.
+For the current CLI, create the task with `title` and optional `description` under a building goal. Implementation work for a task must be covered by an active CR; one CR may cover multiple related tasks.
 
 #### CR template
 
@@ -163,7 +167,7 @@ CR instances are local under `.clips/records/cr/CR-NNN-short-title.md`. Start fr
 ```md
 # CR-NNN: Change title
 
-**Status:** Draft | In Review | Accepted | Merged | Rejected | Abandoned
+**Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Type:** Feature | Bugfix | Maintenance | Documentation
 **Branch:** exact-worker-branch
 **Base branch:** main
@@ -206,12 +210,12 @@ List ADRs created or updated, or `None`.
 
 #### ADR template
 
-ADR instances are local under `.clips/records/adr/ADR-NNN-short-title.md`. Start from committed `docs/records/adr/ADR-TEMPLATE.md`. Create one only for a durable architectural decision.
+ADR instances are local under `.clips/records/adr/ADR-NNN-short-title.md`. Start from committed `docs/records/adr/ADR-TEMPLATE.md`. A planning goal produces one attached ADR; outside planning goals, create one only for a durable architectural decision.
 
 ```md
 # ADR-NNN: Decision title
 
-**Status:** Proposed | Accepted | Superseded | Retired
+**Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Date:** YYYY-MM-DD
 **Decision basis:** FULL_COMMIT_ID
 **Supersedes:** ADR-NNN | None
@@ -231,9 +235,9 @@ CRs, goals, tasks, or external references.
 
 ## Concepts
 
-**Goals** are top-level planning items, optionally mirrored as GitHub Issues. Each goal has a title, description, status, and tasks.
+**Goals** are top-level planning items, optionally mirrored as GitHub Issues. A `planning` goal resolves uncertainty into one attached ADR and has no tasks. A `building` goal delivers an outcome through tasks and CR-backed implementation. Persisted goals without a type behave as `building`.
 
-**Tasks** are actionable planning items within a goal. They appear as markdown checkboxes in the GitHub Issue mirror. With `tasks_as_issues: true`, tasks become their own GitHub Issues.
+**Tasks** are actionable planning items within a building goal. They appear as markdown checkboxes in the GitHub Issue mirror. With `tasks_as_issues: true`, tasks become their own GitHub Issues.
 
 **Refs** identify goals and tasks: `#g001`, `#g001#t1`, or shorthand `g1`, `g1 t1`.
 
@@ -288,11 +292,11 @@ Create a new goal (top-level planning item). The current compatibility CLI may c
 **Triggers:** "create a goal", "new issue", "let's track this", "plan a feature", "write up this work"
 
 ```bash
-clips goal create '{"title":"Add authentication","behavior":"Feature: User authentication\n  Scenario: Sign in with valid credentials\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
-clips goal create '{"title":"Fix login bug","description":"Users get 500 on /login","behavior":"Feature: Reliable login\n  Scenario: Open the login page\n    Given the service is available\n    When a user opens /login\n    Then the login page is displayed without a server error"}'
+clips goal create '{"type":"planning","title":"Choose an authentication model","behavior":"Feature: Authentication decision\n  Scenario: Record the selected model\n    Given the constraints are understood\n    When the options are evaluated\n    Then the decision and consequences are recorded in an ADR"}'
+clips goal create '{"type":"building","title":"Add authentication","behavior":"Feature: User authentication\n  Scenario: Sign in with valid credentials\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
 ```
 
-The JSON accepts: `title` (required), `description`, `behavior` (Gherkin-like text), `acceptance_criteria` (array of strings). Generate `behavior` by default; omit it only when the user explicitly asks not to include it.
+The JSON accepts: `title` (required), `type` (`planning` or `building`, default `building`), `description`, `behavior` (Gherkin-like text), and `acceptance_criteria` (array of strings). Generate `behavior` by default; omit it only when the user explicitly asks not to include it.
 
 ---
 
@@ -314,6 +318,8 @@ clips goal status g1 open           # Reopen
 
 Valid statuses: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
 
+A planning goal cannot close until an ADR is attached and its Markdown file exists under `.clips/records/adr/`. A building goal cannot close until it contains at least one task.
+
 ---
 
 ### `clips goal update`
@@ -333,6 +339,18 @@ clips goal update g1 '{"acceptance_criteria":["Users can login","Users can logou
 
 ---
 
+### `clips goal attach-adr`
+
+Attach an existing local ADR as the result of a planning goal. The ADR file must exist under `.clips/records/adr/`.
+
+```bash
+clips goal attach-adr g001 ADR-003
+```
+
+Only planning goals accept ADR attachments. Attach the ADR before closing the goal.
+
+---
+
 ### `clips goal unlink`
 
 Disconnect one or all goals and their tasks from GitHub while preserving local planning history and existing remote issues. Detached goals remain local even when repository collaboration is enabled later.
@@ -349,7 +367,7 @@ Both forms are idempotent. `--all` skips goals that are already local, and futur
 
 ### `clips task create`
 
-Add a single task to a goal. Updates a linked GitHub Issue only when collaboration was explicitly enabled.
+Add a single task to a building goal. Planning goals reject task creation. Updates a linked GitHub Issue only when collaboration was explicitly enabled.
 
 **When to use:** Adding one task to an existing goal.
 
@@ -364,7 +382,7 @@ clips task create g001 '{"title":"Update docs","description":"Add API reference"
 
 ### `clips task create-batch`
 
-Add multiple tasks to a goal at once. Supports JSON argument or `--stdin` for piped input.
+Add multiple tasks to a building goal at once. Planning goals reject task creation. Supports JSON argument or `--stdin` for piped input.
 
 **When to use:** Breaking a goal down into tasks, planning implementation steps, decomposing work.
 
@@ -424,6 +442,21 @@ Reorder tasks within a goal. Only works when the goal is `open` and no tasks hav
 ```bash
 clips task reorder g001 '["t03","t01","t02"]'
 ```
+
+---
+
+### `clips record status`
+
+Update the lifecycle status of a CR or ADR. Record IDs determine the type. Status input is case-insensitive and accepts spaces, hyphens, or underscores.
+
+```bash
+clips record status CR-017 proposed
+clips record status CR-017 in_review
+clips record status ADR-003 accepted
+clips record status CR-017 archived
+```
+
+Valid statuses are `Draft`, `Proposed`, `In Review`, `Accepted`, `Deprecated`, and `Archived`. Setting `Archived` moves the file to `.clips/records/<type>/archived/`. Changing an archived record to another status restores it to `.clips/records/<type>/`.
 
 ---
 
@@ -496,8 +529,10 @@ clips config project_id my-project      # Override the repository-name board ID
     g001.jsonl            # Goal g001 + its tasks (append-only events)
     g002.jsonl            # Goal g002 + its tasks
   records/
-    cr/                   # Local Change Record instances
-    adr/                  # Local Architecture Decision Record instances
+    cr/                   # Active Change Record instances
+      archived/           # Archived Change Records
+    adr/                  # Active Architecture Decision Record instances
+      archived/           # Archived Architecture Decision Records
 ```
 
 Each `.jsonl` file is an append-only event log. State is computed by replaying events. Files are never overwritten.
@@ -509,7 +544,7 @@ Each `.jsonl` file is an append-only event log. State is computed by replaying e
 clips init
 
 # 2. Create a goal
-clips goal create '{"title":"Add user authentication","behavior":"Feature: User authentication\n  Scenario: Sign in\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
+clips goal create '{"type":"building","title":"Add user authentication","behavior":"Feature: User authentication\n  Scenario: Sign in\n    Given a registered user\n    When the user submits valid credentials\n    Then the user is signed in"}'
 # → Creates goal g001, GitHub Issue #1
 
 # 3. Break into tasks

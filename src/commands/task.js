@@ -24,6 +24,10 @@ function createTask(goalId, data) {
     console.error(JSON.stringify({ error: `Goal ${goalId} not found` }));
     process.exit(1);
   }
+  const goal = readGoalWithTasks(goalId);
+  if (goal.type === 'planning') {
+    throw new Error('Planning goals produce an ADR and cannot contain tasks');
+  }
   
   const taskId = generateTaskId(goalId);
   const event = {
@@ -49,6 +53,9 @@ function createTasks(goalId, tasksArray) {
   }
   
   const goal = readGoalWithTasks(goalId);
+  if (goal.type === 'planning') {
+    throw new Error('Planning goals produce an ADR and cannot contain tasks');
+  }
   const existingTasks = goal ? Object.values(goal.tasks) : [];
   const sequentialIds = existingTasks
     .map(t => t.task_id)

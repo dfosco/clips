@@ -6,12 +6,14 @@ import {
   appendEvent,
   readGoalWithTasks,
   getClipsDbDir,
+  getClipsRecordsDir,
   goalExists,
   getOrderedTasks,
   normalizeGoalId,
 } from './core.js';
 import { readConfig, isCollaborationEnabled } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
+import { adrRecordExists, goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
 
@@ -199,6 +201,12 @@ export function buildIssueBody(goal) {
     }
   }
 
+  body += `## Goal Type\n\n\`${goal.type || 'building'}\`\n\n`;
+
+  if (goal.adr_id) {
+    body += `## ADR\n\n\`${goal.adr_id}\`\n\n`;
+  }
+
   if (goal.behavior) {
     body += `## Behavior\n\n${formatBehaviorBlock(goal.behavior)}\n\n`;
   }
@@ -223,7 +231,7 @@ export function buildIssueBody(goal) {
   }
 
   const tasks = getOrderedTasks(goal);
-  if (tasks.length > 0) {
+  if (goal.type !== 'planning' && tasks.length > 0) {
     body += `## Tasks\n\n`;
     for (const task of tasks) {
       const checked = ['closed', 'not_planned', 'duplicate'].includes(task.status) ? 'x' : ' ';
@@ -262,6 +270,25 @@ export function parseTaskList(body) {
     }
   }
   return results;
+}
+
+export function parseGoalMetadata(body = '') {
+  const typeMatch = body.match(/^## Goal Type\s*\n+`([^`]+)`/mi);
+  let type = 'building';
+  let typeExplicit = false;
+  try {
+    type = normalizeGoalType(typeMatch?.[1]?.trim());
+    typeExplicit = Boolean(typeMatch);
+  } catch {
+    type = 'building';
+  }
+
+  const adrMatch = body.match(/^## ADR\s*\n+`([^`]+)`/mi);
+  let adrId = null;
+  if (adrMatch) {
+    try { adrId = normalizeAdrId(adrMatch[1].trim()); } catch { /* ignore invalid remote metadata */ }
+  }
+  return { type, adr_id: adrId, type_explicit: typeExplicit, adr_explicit: Boolean(adrId) };
 }
 
 // ── Lookup ────────────────────────────────────────────────────────
@@ -315,6 +342,7 @@ export function importIssue(issueData) {
   const clippedDesc = maxLen && desc.length > maxLen
     ? desc.slice(0, maxLen) + '…'
     : desc;
+  const metadata = parseGoalMetadata(issueData.body);
 
   // goal_created
   appendEvent(
@@ -326,7 +354,8 @@ export function importIssue(issueData) {
       title: issueData.title,
       description: clippedDesc,
       acceptance_criteria: [],
-      status: issueData.state === 'closed' || issueData.state === 'CLOSED' ? 'closed' : 'open',
+      type: metadata.type,
+      status: 'open',
     },
   );
 
@@ -342,8 +371,17 @@ export function importIssue(issueData) {
     },
   );
 
-  // tasks from body checkboxes
-  const tasks = parseTaskList(issueData.body);
+  if (metadata.type === 'planning' && metadata.adr_id) {
+    appendEvent(goalId, {
+      event: 'adr_attached',
+      goal_id: goalId,
+      timestamp: issueData.createdAt,
+      adr_id: metadata.adr_id,
+    });
+  }
+
+  // Planning issue checkboxes are content, not implementation tasks.
+  const tasks = metadata.type === 'building' ? parseTaskList(issueData.body) : [];
   tasks.forEach((task, idx) => {
     const taskId = `t${String(idx + 1).padStart(2, '0')}`;
     appendEvent(
@@ -371,6 +409,17 @@ export function importIssue(issueData) {
       );
     }
   });
+
+  const remoteClosed = issueData.state === 'closed' || issueData.state === 'CLOSED';
+  const importedGoal = readGoalWithTasks(goalId);
+  if (remoteClosed && !goalCompletionError(importedGoal, { recordsDir: getClipsRecordsDir('adr') })) {
+    appendEvent(goalId, {
+      event: 'status_changed',
+      goal_id: goalId,
+      timestamp: issueData.updatedAt || issueData.createdAt,
+      status: 'closed',
+    });
+  }
 
   return goalId;
 }
@@ -405,14 +454,61 @@ export function pullAllIssues() {
     const existingGoalId = findGoalByIssueNumber(issue.number);
     if (existingGoalId) {
       // Already imported — check if status diverged
-      const goal = readGoalWithTasks(existingGoalId);
+      let goal = readGoalWithTasks(existingGoalId);
       if (!goal) continue;
       if (goal.github_unlinked) continue;
+
+      const metadata = parseGoalMetadata(issue.body);
+      if (goal.status !== 'closed' && metadata.type_explicit && metadata.type !== goal.type) {
+        const candidate = {
+          ...goal,
+          type: metadata.type,
+          adr_id: metadata.type === 'planning' && metadata.adr_explicit ? metadata.adr_id : goal.adr_id,
+        };
+        const hasInvalidArtifacts = metadata.type === 'planning'
+          ? Object.keys(goal.tasks).length > 0
+          : Boolean(goal.adr_id && adrRecordExists(getClipsRecordsDir('adr'), goal.adr_id));
+        const invalidClosedState = goal.status === 'closed'
+          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
+        if (!hasInvalidArtifacts && !invalidClosedState) {
+          appendEvent(existingGoalId, {
+            event: 'updated',
+            goal_id: existingGoalId,
+            timestamp: issue.updatedAt || new Date().toISOString(),
+            type: metadata.type,
+          });
+          if (metadata.type === 'building' && goal.adr_id) {
+            appendEvent(existingGoalId, {
+              event: 'adr_detached',
+              goal_id: existingGoalId,
+              timestamp: issue.updatedAt || new Date().toISOString(),
+              adr_id: goal.adr_id,
+            });
+          }
+          goal = readGoalWithTasks(existingGoalId);
+          updated++;
+        }
+      }
+      if (goal.status !== 'closed' && goal.type === 'planning' && metadata.adr_explicit && metadata.adr_id && metadata.adr_id !== goal.adr_id) {
+        const candidate = { ...goal, adr_id: metadata.adr_id };
+        const invalidClosedState = goal.status === 'closed'
+          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
+        if (!invalidClosedState) {
+          appendEvent(existingGoalId, {
+            event: 'adr_attached',
+            goal_id: existingGoalId,
+            timestamp: issue.updatedAt || new Date().toISOString(),
+            adr_id: metadata.adr_id,
+          });
+          goal = readGoalWithTasks(existingGoalId);
+          updated++;
+        }
+      }
 
       const ghClosed = issue.state === 'CLOSED' || issue.state === 'closed';
       const localClosed = ['closed', 'not_planned', 'duplicate'].includes(goal.status);
 
-      if (ghClosed && !localClosed) {
+      if (ghClosed && !localClosed && !goalCompletionError(goal, { recordsDir: getClipsRecordsDir('adr') })) {
         appendEvent(
           existingGoalId,
           {

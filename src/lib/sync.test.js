@@ -3,6 +3,7 @@ import {
   buildIssueBody,
   buildTaskIssueBody,
   normalizePullRequest,
+  parseGoalMetadata,
   parsePlanningRefs,
 } from './sync.js';
 
@@ -45,6 +46,7 @@ describe('GitHub behavior rendering', () => {
   it('renders goal and task behavior with effective verification modes', () => {
     const body = buildIssueBody({
       goal_id: 'g001',
+      type: 'building',
       description: 'Manage to-dos.',
       behavior: 'Feature: Manage to-dos',
       verification_mode: 'behavior_and_tests',
@@ -62,9 +64,29 @@ describe('GitHub behavior rendering', () => {
     });
 
     expect(body).toContain('## Behavior\n\n```gherkin\nFeature: Manage to-dos');
+    expect(body).toContain('## Goal Type\n\n`building`');
     expect(body).toContain('## Verification Mode\n\n`behavior_and_tests`');
     expect(body).toContain('Verification: `behavior_and_tests`');
     expect(body).toContain('Scenario: Add a to-do');
+  });
+
+  it('renders and parses planning metadata without rendering tasks', () => {
+    const body = buildIssueBody({
+      goal_id: 'g001',
+      type: 'planning',
+      adr_id: 'ADR-004',
+      tasks: { t01: { task_id: 't01', title: 'Invalid planning task', status: 'open' } },
+      _taskOrder: ['t01'],
+    });
+
+    expect(parseGoalMetadata(body)).toEqual({
+      type: 'planning',
+      adr_id: 'ADR-004',
+      type_explicit: true,
+      adr_explicit: true,
+    });
+    expect(body).not.toContain('## Tasks');
+    expect(body).not.toContain('Invalid planning task');
   });
 
   it('renders standalone task issue details using a task override', () => {

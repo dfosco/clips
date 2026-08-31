@@ -40,6 +40,8 @@ describe('readBoardData', () => {
     expect(result.warnings).toEqual([]);
     expect(result.goals).toHaveLength(2);
     expect(result.goals[0].source).toBe('local');
+    expect(result.goals[0].type).toBe('building');
+    expect(result.goals[0].adr_id).toBeNull();
     expect(result.goals[0].tasks[1].column).toBe('closed');
     expect(result.goals[0].tasks[1].closed_commit_sha).toBe('2222222222222222222222222222222222222222');
     expect(result.goals[1].ref).toBe('#dfosco#g002');
@@ -99,6 +101,21 @@ describe('readBoardData', () => {
     expect(goal.tasks[0].effective_verification_mode).toBe('behavior');
   });
 
+  it('exposes planning goal type and attached ADR', () => {
+    const dbDir = makeDb({
+      'g001.jsonl': [
+        JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Choose storage', type: 'planning' }),
+        JSON.stringify({ event: 'adr_attached', goal_id: 'g001', adr_id: 'ADR-004' }),
+      ].join('\n'),
+    });
+
+    expect(readBoardData({ dbDir }).goals[0]).toMatchObject({
+      type: 'planning',
+      adr_id: 'ADR-004',
+      tasks: [],
+    });
+  });
+
   it('links change records to covered goals and tasks', () => {
     const dbDir = makeDb({
       'g001.jsonl': [
@@ -135,6 +152,34 @@ describe('readBoardData', () => {
 
     expect(result.change_records.map((record) => record.id)).toEqual(['CR-009']);
     expect(result.goals[0].linked_crs.map((record) => record.id)).toEqual(['CR-009']);
+  });
+
+  it('excludes CRs moved into the archived folder', () => {
+    const clipsDir = makeDb({
+      'db/g001.jsonl': JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Local goal' }),
+      'records/cr/CR-001-active.md': '# CR-001: Active\n\n**Status:** Accepted\n**Type:** Feature\n**Covers:** #g001',
+      'records/cr/archived/CR-002-archived.md': '# CR-002: Archived\n\n**Status:** Archived\n**Type:** Feature\n**Covers:** #g001',
+    });
+
+    const result = readBoardData({
+      dbDir: path.join(clipsDir, 'db'),
+      recordsDir: path.join(clipsDir, 'records', 'cr'),
+    });
+    expect(result.change_records.map((record) => record.id)).toEqual(['CR-001']);
+    expect(result.goals[0].linked_crs.map((record) => record.id)).toEqual(['CR-001']);
+  });
+
+  it('excludes misplaced CRs whose active file has Archived status', () => {
+    const dbDir = makeDb({
+      'g001.jsonl': JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'Local goal' }),
+    });
+    const recordsDir = makeDb({
+      'CR-002-misplaced.md': '# CR-002: Misplaced\n\n**Status:** Archived\n**Type:** Feature\n**Covers:** #g001',
+    });
+
+    const result = readBoardData({ dbDir, recordsDir });
+    expect(result.change_records).toEqual([]);
+    expect(result.goals[0].linked_crs).toEqual([]);
   });
 
   it('normalizes the closing commit SHA for goals and tasks', () => {

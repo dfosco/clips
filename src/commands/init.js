@@ -167,7 +167,10 @@ export function runInitCommand(args) {
   const cwd = getRepoRoot(process.cwd());
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
-  const clipsRecordDirs = ['cr', 'adr'].map((type) => path.join(cwd, '.clips', 'records', type));
+  const clipsRecordDirs = ['cr', 'adr'].flatMap((type) => [
+    path.join(cwd, '.clips', 'records', type),
+    path.join(cwd, '.clips', 'records', type, 'archived'),
+  ]);
 
   const alreadyInitialized = fs.existsSync(clipsDir);
 
@@ -197,7 +200,7 @@ export function runInitCommand(args) {
   for (const recordDir of clipsRecordDirs) {
     if (!fs.existsSync(recordDir)) fs.mkdirSync(recordDir, { recursive: true });
   }
-  console.log('✓ Ensured .clips/records/{cr,adr}/ directories');
+  console.log('✓ Ensured .clips/records/{cr,adr}/archived/ directories');
 
   // Set up .git/info/exclude with .clips
   if (setupGitExclude(cwd)) {
@@ -273,6 +276,7 @@ export function runInitCommand(args) {
       title: 'Notepad',
       description: 'One-off tasks and quick notes',
       acceptance_criteria: [],
+      type: 'building',
       status: 'open'
     });
     console.log('✓ Created notepad goal for one-off tasks');

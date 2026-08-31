@@ -4,6 +4,7 @@ import path from 'path';
 import { execSync } from 'child_process';
 import { readConfig } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
+import { normalizeGoalType } from './goal-type.js';
 
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
@@ -234,7 +235,7 @@ export function tryGetRepoRoot(cwd = process.cwd(), { requireClips = false } = {
  */
 export function getCurrentCommitSha() {
   try {
-    return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim() || null;
+    return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim() || null;
   } catch {
     return null;
   }
@@ -376,6 +377,12 @@ export function readGoalWithTasks(goalId, username = null) {
         goal.github_prs = goal.github_prs || {};
         goal.github_prs[`${event.repository || ''}#${event.pr_number}`] = event;
         break;
+      case 'adr_attached':
+        goal.adr_id = event.adr_id;
+        break;
+      case 'adr_detached':
+        delete goal.adr_id;
+        break;
       case 'task_created':
         goal.tasks[event.task_id] = {
           task_id: event.task_id,
@@ -414,6 +421,7 @@ export function readGoalWithTasks(goalId, username = null) {
   }
 
   goal.behavior = goal.behavior || '';
+  goal.type = normalizeGoalType(goal.type);
   goal.verification_mode = effectiveVerificationMode(goal.verification_mode);
   for (const task of Object.values(goal.tasks)) {
     task.behavior = task.behavior || '';

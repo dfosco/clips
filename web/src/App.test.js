@@ -37,6 +37,8 @@ const board = {
     title: 'Local roadmap',
     source: 'local',
     status: 'open',
+    type: 'building',
+    adr_id: null,
     behavior: 'Feature: Local roadmap',
     effective_verification_mode: 'behavior_and_tests',
   tasks: [{
@@ -95,6 +97,17 @@ const closedBoard = {
     }],
   }],
   change_records: [],
+};
+
+const planningBoard = {
+  ...board,
+  goals: [{
+    ...board.goals[0],
+    title: 'Choose storage model',
+    type: 'planning',
+    adr_id: 'ADR-004',
+    tasks: [],
+  }],
 };
 
 describe('board app', () => {
@@ -248,6 +261,18 @@ describe('board app', () => {
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Define board data contract' })).toBeInTheDocument();
     await within(screen.getByRole('dialog')).getByRole('button', { name: 'Back to goal' }).click();
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Local roadmap' })).toBeInTheDocument();
+  });
+
+  it('shows the ADR result instead of tasks for a planning goal', async () => {
+    vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify(planningBoard), { status: 200 }));
+    render(App);
+
+    await screen.getByRole('button', { name: 'Show goal cards' }).click();
+    await (await screen.findByRole('button', { name: 'Open goal Choose storage model in clips' })).click();
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText('Planning')).toBeInTheDocument();
+    expect(dialog.getByText('ADR-004')).toBeInTheDocument();
+    expect(dialog.queryByRole('heading', { name: 'Tasks in this goal' })).not.toBeInTheDocument();
   });
 
   it('opens CRs as a full page with rendered markdown and linked objects', async () => {

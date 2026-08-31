@@ -9,6 +9,7 @@ import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runWebCommand } from './commands/web.js';
+import { runRecordCommand } from './commands/record.js';
 import { version } from './version.js';
 
 const [,, command, ...args] = process.argv;
@@ -30,6 +31,7 @@ Commands:
   view [ref]              View goal/task (or list all)
   goal <action> [args]    Manage goals
   task <action> [args]    Manage tasks
+  record <action> [args]  Manage CR and ADR records
   sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration
   web [--host H] [--port P] Start the read-only local or multi-project board
@@ -41,11 +43,14 @@ Options:
 Examples:
   clips init
   clips view
-  clips goal create '{"title":"My Goal","description":"..."}'
+  clips goal create '{"title":"Decide storage model","type":"planning","description":"..."}'
+  clips goal attach-adr g001 ADR-003
+  clips goal create '{"title":"Build import flow","type":"building","description":"..."}'
   clips goal create '{"title":"My Goal","behavior":"Feature: My goal","verification_mode":"behavior_and_tests"}'
   clips goal unlink g001
   clips goal unlink --all
   clips task create-batch g001 '[{"title":"Task 1"},{"title":"Task 2"}]'
+  clips record status CR-017 in_review
   clips view #g001
   clips task status g1 t1 done
   clips sync
@@ -59,6 +64,7 @@ Examples:
 const commands = {
   goal: runGoalCommand,
   task: runTaskCommand,
+  record: runRecordCommand,
   view: runViewCommand,
   config: runConfigCommand,
   init: runInitCommand,

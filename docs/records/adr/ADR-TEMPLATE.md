@@ -1,6 +1,6 @@
 # ADR-NNN: Title
 
-**Status:** Proposed | Accepted | Superseded | Retired
+**Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Date:** YYYY-MM-DD
 **Decision basis:** FULL_COMMIT_ID
 **Supersedes:** ADR-NNN | None

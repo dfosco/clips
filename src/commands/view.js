@@ -77,7 +77,11 @@ function viewGoal(goalId, username = null) {
   console.log(`${BOLD}│${RESET} ${BOLD}${displayRef}${RESET} ${goal.title}`);
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
+  console.log(`${BOLD}│${RESET} Type:   ${goal.type}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
+  if (goal.adr_id) {
+    console.log(`${BOLD}│${RESET} ADR:    ${goal.adr_id}`);
+  }
   if (goal.issue_number) {
     console.log(`${BOLD}│${RESET} GitHub: #${goal.issue_number} ${DIM}${goal.issue_url || ''}${RESET}`);
   }
@@ -311,7 +315,8 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       );
       
       console.log();
-      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${formatVerificationMode(goal.verification_mode)}]${RESET}`);
+      const resultInfo = goal.adr_id ? ` ${DIM}[${goal.adr_id}]${RESET}` : '';
+      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${RESET}${resultInfo}`);
       
       // Hide tasks if goal status is in hideTasksForGoalStatuses
       if (hideTasksForGoalStatuses.includes(goal.status)) continue;

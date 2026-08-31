@@ -1,9 +1,10 @@
 // Goal management commands
 import fs from 'fs';
-import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
+import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getClipsRecordsDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
 import { discoverBoardGoals } from '../lib/board.js';
+import { adrRecordExists, goalCompletionError, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
 
 // Normalize goal ID by stripping # prefix if present
 function normalizeGoalId(goalId) {
@@ -38,6 +39,7 @@ function createGoal(data) {
     title: data.title,
     description: data.description || '',
     acceptance_criteria: data.acceptance_criteria || [],
+    ...goalTypeFields(data, { defaultType: true }),
     ...planningBehaviorFields(data, { defaultMode: true }),
     status: 'open'
   };
@@ -57,15 +59,43 @@ function createGoal(data) {
 
 function updateGoal(goalId, data) {
   const normalizedId = normalizeGoalId(goalId);
+  const goal = readGoalWithTasks(normalizedId);
+  if (!goal) throw new Error(`Goal ${normalizedId} not found`);
+  const allowedFields = new Set(['title', 'description', 'acceptance_criteria', 'behavior', 'verification_mode', 'type']);
+  const unsupportedFields = Object.keys(data).filter((field) => !allowedFields.has(field));
+  if (unsupportedFields.length > 0) throw new Error(`Unsupported goal fields: ${unsupportedFields.join(', ')}`);
+  const typeFields = goalTypeFields(data);
+  if (typeFields.type && typeFields.type !== goal.type) {
+    if (goal.status === 'closed') throw new Error('Cannot change the type of a closed goal');
+    if (typeFields.type === 'planning' && Object.keys(goal.tasks).length > 0) {
+      throw new Error('Cannot change a goal with tasks to planning');
+    }
+    if (typeFields.type === 'building' && goal.adr_id && adrRecordExists(getClipsRecordsDir('adr'), goal.adr_id)) {
+      throw new Error('Cannot change a goal with an attached ADR to building');
+    }
+  }
   const behaviorFields = planningBehaviorFields(data);
+  const updateFields = {};
+  for (const field of ['title', 'description', 'acceptance_criteria']) {
+    if (Object.prototype.hasOwnProperty.call(data, field)) updateFields[field] = data[field];
+  }
   const event = {
     event: 'updated',
     goal_id: normalizedId,
     timestamp: new Date().toISOString(),
-    ...data,
+    ...updateFields,
+    ...typeFields,
     ...behaviorFields,
   };
   appendEvent(normalizedId, event);
+  if (typeFields.type === 'building' && goal.adr_id) {
+    appendEvent(normalizedId, {
+      event: 'adr_detached',
+      goal_id: normalizedId,
+      timestamp: new Date().toISOString(),
+      adr_id: goal.adr_id,
+    });
+  }
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
   console.log(JSON.stringify({ success: true, goal_id: normalizedId }));
 }
@@ -78,6 +108,13 @@ function changeStatus(goalId, status) {
     console.error(JSON.stringify({ error: `Invalid status. Valid: ${validStatuses.join(', ')}` }));
     process.exit(1);
   }
+
+  const goal = readGoalWithTasks(normalizedId);
+  if (!goal) throw new Error(`Goal ${normalizedId} not found`);
+  if (status === 'closed') {
+    const completionError = goalCompletionError(goal, { recordsDir: getClipsRecordsDir('adr') });
+    if (completionError) throw new Error(completionError);
+  }
   
   const event = {
     event: 'status_changed',
@@ -89,6 +126,27 @@ function changeStatus(goalId, status) {
   appendEvent(normalizedId, event);
   try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
   console.log(JSON.stringify({ success: true, goal_id: normalizedId, status: status }));
+}
+
+function attachAdr(goalId, adrId) {
+  const normalizedId = normalizeGoalId(goalId);
+  const goal = readGoalWithTasks(normalizedId);
+  if (!goal) throw new Error(`Goal ${normalizedId} not found`);
+  if (goal.type !== 'planning') throw new Error('ADRs can only be attached to planning goals');
+  if (goal.status === 'closed') throw new Error('Cannot replace the ADR on a closed planning goal');
+
+  const normalizedAdrId = normalizeAdrId(adrId);
+  const recordsDir = getClipsRecordsDir('adr');
+  if (!adrRecordExists(recordsDir, normalizedAdrId)) throw new Error(`${normalizedAdrId} not found in .clips/records/adr`);
+
+  appendEvent(normalizedId, {
+    event: 'adr_attached',
+    goal_id: normalizedId,
+    timestamp: new Date().toISOString(),
+    adr_id: normalizedAdrId,
+  });
+  try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
+  console.log(JSON.stringify({ success: true, goal_id: normalizedId, adr_id: normalizedAdrId }));
 }
 
 function unlinkGoalRecord(goalId, username = null) {
@@ -185,6 +243,9 @@ export function runGoalCommand(args) {
     case 'status':
       changeStatus(rest[0], rest[1]);
       break;
+    case 'attach-adr':
+      attachAdr(rest[0], rest[1]);
+      break;
     case 'unlink':
       if (rest[0] === '--all') unlinkAllGoals();
       else unlinkGoal(rest[0]);
@@ -201,7 +262,11 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
+  attach-adr <id> <adr> Attach an existing ADR to a planning goal
   unlink <id|--all>    Disconnect one or all goals and their tasks from GitHub
+
+Goal fields:
+  type                 planning | building (default: building)
 
 Behavior fields:
   behavior             Optional Gherkin-style behavior text

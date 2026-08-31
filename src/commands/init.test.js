@@ -65,6 +65,8 @@ describe('setupGitExclude', () => {
     expect(config.collaboration).toBe(false);
     expect(fs.existsSync(path.join(cwd, '.clips', 'records', 'cr'))).toBe(true);
     expect(fs.existsSync(path.join(cwd, '.clips', 'records', 'adr'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.clips', 'records', 'cr', 'archived'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.clips', 'records', 'adr', 'archived'))).toBe(true);
     expect(fs.existsSync(markerPath)).toBe(false);
 
     execFileSync(process.execPath, [cliPath, 'goal', 'create', JSON.stringify({ title: 'Local goal' })], { cwd, env });

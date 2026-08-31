@@ -1,6 +1,6 @@
 # CR-NNN: Change title
 
-**Status:** Draft | In Review | Accepted | Merged | Rejected | Abandoned
+**Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Type:** Feature | Bugfix | Maintenance | Documentation
 **Branch:** branch-name
 **Base branch:** main

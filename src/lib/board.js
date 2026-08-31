@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getClipsDbDir, getClipsRecordsDir } from './core.js';
 import { effectiveVerificationMode } from './behavior.js';
+import { normalizeGoalType } from './goal-type.js';
 
 export const BOARD_COLUMNS = [
   { id: 'open', label: 'Open' },
@@ -72,7 +73,7 @@ export function readChangeRecords(recordsDir = getClipsRecordsDir('cr')) {
     const filePath = path.join(recordsDir, file);
     try {
       const record = parseChangeRecord(filePath);
-      if (record) records.push(record);
+      if (record && record.status !== 'Archived') records.push(record);
     } catch (error) {
       warnings.push({ path: filePath, message: error.message });
     }
@@ -163,6 +164,12 @@ export function parseGoalFile(filePath, goalId) {
         goal.github_prs = goal.github_prs || {};
         goal.github_prs[`${event.repository || ''}#${event.pr_number}`] = event;
         break;
+      case 'adr_attached':
+        goal.adr_id = event.adr_id;
+        break;
+      case 'adr_detached':
+        delete goal.adr_id;
+        break;
       case 'task_created':
         goal.tasks[event.task_id] = {
           task_id: event.task_id,
@@ -240,6 +247,8 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
     username,
     title: rawGoal.title || rawGoal.goal_id,
     description: rawGoal.description || '',
+    type: normalizeGoalType(rawGoal.type),
+    adr_id: rawGoal.adr_id || null,
     behavior: rawGoal.behavior || '',
     verification_mode: goalVerificationMode,
     effective_verification_mode: goalVerificationMode,

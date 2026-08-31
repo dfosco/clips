@@ -15,13 +15,21 @@ This keeps planning and review state local while allowing the repository to ship
 
 | Artifact | Role | Lifecycle | Repository location |
 |---|---|---|---|
-| Goal | An outcome or epic | Before and during work | External clips store |
-| Task | An actionable piece of a goal | Before and during work | External clips store |
-| CR | The review packet for a repository change; the local equivalent of a PR | Draft → In Review → Accepted → Merged | `.clips/records/cr/` |
-| ADR | A durable cross-cutting architectural decision | Proposed → Accepted → Superseded | `.clips/records/adr/` |
+| Planning goal | Resolve uncertainty into one attached ADR | Before and during decision work | External clips store |
+| Building goal | Deliver an outcome through tasks | Before and during implementation | External clips store |
+| Task | An actionable piece of a building goal | During implementation | External clips store |
+| CR | The review packet for a repository change; the local equivalent of a PR | Draft → Proposed → In Review → Accepted → Deprecated → Archived | `.clips/records/cr/` |
+| ADR | A durable cross-cutting architectural decision | Draft → Proposed → In Review → Accepted → Deprecated → Archived | `.clips/records/adr/` |
 | Other record | Optional project-defined workflow record | Project-defined | `.clips/records/<type>/` |
 
-Goals and tasks define intended outcomes. CRs explain specific implementation attempts. ADRs preserve rare, cross-cutting architectural decisions for the local workflow. Committed product documentation describes current user-visible behavior.
+Goal type determines the workflow. Planning goals produce an ADR and never contain tasks. Building goals decompose into tasks, and their repository changes are covered by living CRs. Committed product documentation describes current user-visible behavior.
+
+### Goal types
+
+- `planning` resolves uncertainty into one ADR. Do not create tasks as intermediate planning artifacts; that causes the same work to be duplicated when those tasks later become goals. Create the ADR under `.clips/records/adr/`, attach it with `clips goal attach-adr <goal> <ADR-NNN>`, then close the goal.
+- `building` delivers an outcome through tasks. Each task's repository implementation is covered by an active CR, although one CR may cover multiple related tasks.
+
+New goals default to `building` when `type` is omitted. Persisted goals without a type also resolve to `building`. A planning goal cannot close unless its attached ADR Markdown file still exists under `.clips/records/adr/`, and a building goal cannot close without tasks.
 
 ### Behavior descriptions and verification modes
 
@@ -43,6 +51,7 @@ Example:
 ```bash
 clips goal create '{
   "title":"Add Figma task attachments",
+  "type":"building",
   "verification_mode":"behavior_and_tests",
   "behavior":"Feature: Figma task attachments\n  Scenario: Render a valid Figma embed\n    Given a task has a valid Figma embed URL\n    When the attachment is displayed\n    Then the Figma content is rendered as an attachment"
 }'
@@ -54,15 +63,7 @@ clips task create g001 '{
 }'
 ```
 
-There is no fixed one-to-one mapping between planning and record artifacts:
-
-- one CR may cover one task, several tasks, or a small complete goal;
-- a task with no repository change needs no CR;
-- a CR may reference a goal or task, but it is not their child item;
-- one CR may update an existing ADR without creating a new one;
-- an ADR is created only when a durable cross-cutting decision needs a new record.
-
-The hard rule is: every non-trivial, reviewable repository diff is covered by exactly one active CR. A tiny bug fix or iteration still gets a small CR; it does not automatically get a new ADR.
+Planning goals have a one-to-one result relationship with an ADR. Building tasks and CRs need not be one-to-one: one CR may cover multiple related tasks, but every non-trivial, reviewable repository diff is covered by exactly one active CR.
 
 ### Living CR lifecycle
 
@@ -84,6 +85,19 @@ Task, CR, and PR have distinct roles:
 - **PR:** hosted Git diff, checks, discussion, and review workflow.
 
 A Draft CR and Draft PR are counterparts. The CR is local workflow state and preserves rationale; the PR is provider-hosted and exposes the diff and collaboration state. Either can exist without the other.
+
+### Record statuses and archiving
+
+CRs and ADRs share one status set:
+
+- `Draft`: incomplete working record.
+- `Proposed`: complete proposal awaiting review or execution.
+- `In Review`: implementation or decision is ready for review.
+- `Accepted`: approved and current.
+- `Deprecated`: retained for history but no longer current.
+- `Archived`: removed from active discovery and moved to `.clips/records/<type>/archived/`.
+
+Use `clips record status <CR-NNN|ADR-NNN> <status>` for transitions. Changing an archived record to any other status moves it back into the active type directory. Existing records with legacy status text remain readable and move onto the shared lifecycle the next time their status changes.
 
 ### CR metadata and stacked CRs
 
@@ -134,7 +148,7 @@ npx @dfosco/clips --help
 clips init
 ```
 
-`clips init` creates local `.clips/` working state, including `.clips/records/{cr,adr}/`. It does not contact GitHub or import Issues by default.
+`clips init` creates local `.clips/` working state, including `.clips/records/{cr,adr}/archived/`. It does not contact GitHub or import Issues by default.
 
 Non-collaborative mode is the default. Goal/task mutations remain local, and `clips init` plus `clips sync` perform no GitHub Issue or pull-request reads or writes. Clips adds `.clips` to the repository-local `.git/info/exclude`, leaving the shared `.gitignore` unchanged.
 
@@ -153,14 +167,20 @@ Existing repositories that already set `collaboration: true` remain collaborativ
 clips view                          # List all goals with tasks
 clips view #g001                    # View a specific goal
 
-clips goal create '{"title":"..."}'  # Create local goal
-clips goal create '{"title":"...","verification_mode":"behavior_and_tests","behavior":"Feature: ..."}'
+clips goal create '{"type":"planning","title":"Choose storage model"}'
+clips goal attach-adr g1 ADR-003       # Attach the planning result
+clips goal create '{"type":"building","title":"Build import flow"}'
+clips goal create '{"type":"building","title":"...","verification_mode":"behavior_and_tests","behavior":"Feature: ..."}'
 clips goal status g1 closed         # Close local goal
 clips goal unlink g1                # Keep a linked goal local without changing its GitHub issue
 clips goal unlink --all             # Unlink every linked goal in this repository
 
 clips task create-batch g001 '[{"title":"Task A"},{"title":"Task B"}]'
 clips task status g1 t1 closed      # Close local task
+
+clips record status CR-017 in_review
+clips record status ADR-003 accepted
+clips record status CR-017 archived # Moves into cr/archived/
 
 clips sync                           # No-op unless collaboration is explicitly enabled
 clips config                         # View configuration
@@ -198,17 +218,19 @@ npm run web:build
 npm run web:test
 ```
 
-Use committed templates for schemas until record-specific CLI commands are introduced. Create every record instance under `.clips/records/`; never under `docs/records/`.
+Use committed templates when creating record instances under `.clips/records/`; never put instances under `docs/records/`. Use `clips record status` for CR and ADR lifecycle changes and archive moves.
 
 ## Current data model
 
 The compatibility CLI currently represents planning state as append-only JSONL:
 
-- **Goals** are local records mirrored to GitHub Issues.
-- **Tasks** are checklist items within a goal, or sub-issues when configured. Their verification mode inherits from the goal unless overridden.
+- **Goals** have type `planning` or `building`; omitted legacy values resolve to `building`.
+- **Planning goals** contain no tasks and store their result as an attached `adr_id` event.
+- **Building goals** contain tasks, represented as checklist items or sub-issues when configured.
+- **Tasks** inherit verification mode from their building goal unless overridden, and implementation changes are covered by CRs.
 - **Behavior** is optional, uninterpreted Gherkin-style text on a goal or task.
 - **Verification modes** are `behavior` and `behavior_and_tests`; missing legacy values resolve to `behavior`.
-- **Records** are Markdown instances under `.clips/records/<type>/`; board CR discovery reads `.clips/records/cr/`.
+- **Records** are Markdown instances under `.clips/records/<type>/` with a shared six-status lifecycle. Archived files move to `.clips/records/<type>/archived/` and are excluded from active board discovery.
 - **Events** are append-only JSONL lines such as `goal_created` and `status_changed`.
 - **Refs** include `#g001`, `#g001#t1`, and shorthand forms such as `g1 t1`.
 
