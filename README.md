@@ -33,7 +33,7 @@ New goals default to `building` when `type` is omitted. Persisted goals without 
 
 ### Behavior descriptions and verification modes
 
-Goals and tasks may carry an optional Gherkin-style behavior description. Clips stores and displays this text; it does not parse Gherkin, generate tests from it, or require a BDD tool.
+Goals and tasks may carry an optional Gherkin-style behavior description. The packaged workflow uses behavior by default for building goals; planning goals normally express decision criteria through acceptance criteria instead. Clips stores and displays behavior text; it does not parse Gherkin, generate tests from it, or require a BDD tool.
 
 Two modes control the expected evidence:
 
@@ -160,6 +160,14 @@ clips sync
 ```
 
 Existing repositories that already set `collaboration: true` remain collaborative.
+
+### Agent workflow skill pack
+
+`clips init` installs a generic agent workflow pack into the repository's detected agent directory. The main `clips` skill is the entry point. It keeps the engineering principles and artifact invariants inline, classifies the request, and loads only the workflow skill needed for goal framing, decision planning, task breakdown, development, verification, review, or resume.
+
+The workflow inspects repository and Clips state before asking questions. It proceeds on reversible choices, asks only when an irreducible product decision or missing authority blocks progress, and uses CLI commands for goal, task, attachment, status, record-lifecycle, configuration, and synchronization mutations. Record bodies remain Markdown because the CLI does not create CR or ADR content; their lifecycle is still changed through `clips record status`.
+
+The pack is runtime-neutral. It does not prescribe models, agent APIs, browser harnesses, Git hosting, or stack-management tools. Its engineering principles are adapted from Lauren Tan's MIT-licensed [pstack Poteto Mode](https://github.com/cursor/plugins/tree/main/pstack); the required notice ships with the pack in [.agents/skills/clips/THIRD_PARTY_NOTICES.md](.agents/skills/clips/THIRD_PARTY_NOTICES.md).
 
 ## Commands
 

@@ -34,7 +34,7 @@
   "files": [
     "src/**/*.js",
     "!src/**/*.test.js",
-    ".agents/skills/clips/SKILL.md",
+    ".agents/skills/clips*/**/*.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

@@ -115,38 +115,70 @@ function resolveAgentDir(cwd) {
   return path.join(cwd, '.agents');
 }
 
+const BUNDLED_SKILLS = [
+  'clips',
+  'clips-frame-goal',
+  'clips-plan-decision',
+  'clips-break-down-work',
+  'clips-develop-change',
+  'clips-verify-outcome',
+  'clips-review-change',
+  'clips-resume-work',
+];
+
+function listFiles(directory, relative = '') {
+  return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
+    .flatMap((entry) => {
+      const entryPath = path.join(relative, entry.name);
+      return entry.isDirectory() ? listFiles(directory, entryPath) : [entryPath];
+    });
+}
+
 /**
- * Install or update the clips SKILL.md into the target repo's agent directory.
+ * Install or update the Clips router, routed skills, and references in the
+ * target repo's agent directory without touching unrelated skills.
  * Returns { installed: bool, updated: bool, path: string }
  */
 function installSkill(cwd) {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const sourceSkill = path.resolve(__dirname, '..', '..', '.agents', 'skills', 'clips', 'SKILL.md');
+  const sourceRoot = path.resolve(__dirname, '..', '..', '.agents', 'skills');
+  const sourceSkill = path.join(sourceRoot, 'clips', 'SKILL.md');
 
   if (!fs.existsSync(sourceSkill)) {
     return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
   }
 
   const agentDir = resolveAgentDir(cwd);
-  const targetDir = path.join(agentDir, 'skills', 'clips');
-  const targetPath = path.join(targetDir, 'SKILL.md');
+  const targetRoot = path.join(agentDir, 'skills');
+  const targetPath = path.join(targetRoot, 'clips', 'SKILL.md');
+  let installed = false;
+  let updated = false;
 
-  const sourceContent = fs.readFileSync(sourceSkill, 'utf8');
-
-  // Check if already up to date
-  if (fs.existsSync(targetPath)) {
-    const existingContent = fs.readFileSync(targetPath, 'utf8');
-    if (existingContent === sourceContent) {
-      return { installed: false, updated: false, path: targetPath };
-    }
-    // Update existing
-    fs.writeFileSync(targetPath, sourceContent);
-    return { installed: false, updated: true, path: targetPath };
+  const missingSkill = BUNDLED_SKILLS.find((skillName) => !fs.existsSync(path.join(sourceRoot, skillName)));
+  if (missingSkill) {
+    return { installed: false, updated: false, error: `bundled ${missingSkill} skill not found` };
   }
 
-  // Fresh install
-  fs.mkdirSync(targetDir, { recursive: true });
-  fs.writeFileSync(targetPath, sourceContent);
+  for (const skillName of BUNDLED_SKILLS) {
+    const sourceDirectory = path.join(sourceRoot, skillName);
+
+    for (const relativePath of listFiles(sourceDirectory)) {
+      const sourcePath = path.join(sourceDirectory, relativePath);
+      const destinationPath = path.join(targetRoot, skillName, relativePath);
+      const sourceContent = fs.readFileSync(sourcePath);
+
+      if (fs.existsSync(destinationPath)) {
+        if (fs.readFileSync(destinationPath).equals(sourceContent)) continue;
+        fs.writeFileSync(destinationPath, sourceContent);
+        updated = true;
+        continue;
+      }
+
+      fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+      fs.writeFileSync(destinationPath, sourceContent);
+      installed = true;
+    }
+  }
 
   // Persist the detected agent_dir in config so future runs are consistent
   try {
@@ -160,7 +192,7 @@ function installSkill(cwd) {
     // Config write is best-effort during init
   }
 
-  return { installed: true, updated: false, path: targetPath };
+  return { installed, updated, path: targetPath };
 }
 
 export function runInitCommand(args) {
@@ -235,13 +267,13 @@ export function runInitCommand(args) {
   // Install or update skill file
   const skillResult = installSkill(cwd);
   if (skillResult.error) {
-    console.log(`• Could not install skill (${skillResult.error})`);
+    console.log(`• Could not install skill pack (${skillResult.error})`);
   } else if (skillResult.installed) {
-    console.log(`✓ Installed clips skill → ${path.relative(cwd, skillResult.path)}`);
+    console.log(`✓ Installed Clips skill pack → ${path.relative(cwd, skillResult.path)}`);
   } else if (skillResult.updated) {
-    console.log(`✓ Updated clips skill → ${path.relative(cwd, skillResult.path)}`);
+    console.log(`✓ Updated Clips skill pack → ${path.relative(cwd, skillResult.path)}`);
   } else {
-    console.log(`• Clips skill already up to date`);
+    console.log(`• Clips skill pack already up to date`);
   }
 
   // Import existing GitHub Issues

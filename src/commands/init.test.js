@@ -7,6 +7,16 @@ import { setupGitExclude } from './init.js';
 
 const tempDirs = [];
 const cliPath = path.resolve(process.cwd(), 'src', 'cli.js');
+const bundledSkills = [
+  'clips',
+  'clips-frame-goal',
+  'clips-plan-decision',
+  'clips-break-down-work',
+  'clips-develop-change',
+  'clips-verify-outcome',
+  'clips-review-change',
+  'clips-resume-work',
+];
 
 function createGitRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-init-'));
@@ -83,5 +93,26 @@ describe('setupGitExclude', () => {
     );
     execFileSync(process.execPath, [cliPath, 'sync'], { cwd, env });
     expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it('installs and updates the complete routed skill pack', () => {
+    const cwd = createGitRepo();
+    const env = { ...process.env, CLIPS_HOME: path.join(cwd, 'system-clips') };
+
+    execFileSync(process.execPath, [cliPath, 'init'], { cwd, env });
+
+    for (const skill of bundledSkills) {
+      expect(fs.existsSync(path.join(cwd, '.agents', 'skills', skill, 'SKILL.md'))).toBe(true);
+    }
+    expect(fs.existsSync(path.join(cwd, '.agents', 'skills', 'clips', 'references', 'cli.md'))).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.agents', 'skills', 'clips', 'THIRD_PARTY_NOTICES.md'))).toBe(true);
+
+    const routedSkill = path.join(cwd, '.agents', 'skills', 'clips-frame-goal', 'SKILL.md');
+    fs.writeFileSync(routedSkill, 'stale skill\n');
+
+    execFileSync(process.execPath, [cliPath, 'init'], { cwd, env });
+
+    expect(fs.readFileSync(routedSkill, 'utf8')).not.toBe('stale skill\n');
+    expect(fs.readFileSync(routedSkill, 'utf8')).toContain('name: clips-frame-goal');
   });
 });
