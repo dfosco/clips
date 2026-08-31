@@ -17,6 +17,11 @@
       "author": "Daniel Fosco",
       "path": ".agents/skills/release"
     },
+    "ship": {
+      "version": "2026.8.30",
+      "author": "Daniel Fosco",
+      "path": ".agents/skills/ship"
+    },
     "skillz": {
       "version": "2026.8.25",
       "author": "Daniel Fosco",
