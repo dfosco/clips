@@ -1,5 +1,26 @@
 # Clips
 
+## 1.4.0-beta.0
+
+Make Clips planning more rigorous while reducing agent ceremony. This beta introduces typed goal outcomes, shared record lifecycles, and a selectively loaded workflow skill pack grounded in evidence and real verification.
+
+### Features
+
+- **Rigorous workflow router**: Route goal framing, decision planning, task breakdown, development, verification, review, and resume work through focused CLI-backed skills with the adapted pstack principles kept inline (`0053934`)
+- **Typed goal outcomes**: Separate planning goals that produce ADRs from building goals that deliver tasks and CR-backed changes (`924b16f`)
+- **Record lifecycle management**: Manage CR and ADR status and archive transitions through one CLI workflow (`924b16f`)
+- **Complete skill installation**: Install and update the router, routed skills, CLI reference, and third-party notice through `clips init` (`0053934`)
+
+### Fixes
+
+- **Dashboard readability**: Improve goal and record presentation in the local board (`d3b1bbe`)
+- **Publishing command**: Prevent the explicit npm publish command from recursively invoking itself (`4dc4747`)
+
+### Developer workflow
+
+- Generate observable behavior by default for building goals while planning goals use decision criteria (`d0b4468`)
+- Add a repository-local command for running the current Clips CLI during development (`3921ce3`)
+
 ## 1.3.0
 
 Improve local web workflows and simplify local-only planning. This release adds npm-packaged web assets, unlinking goals from GitHub, Markdown task checkboxes, reliable project selection, and corrected dark-mode styling.
