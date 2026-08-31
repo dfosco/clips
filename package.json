@@ -10,6 +10,7 @@
     "test": "vitest run --config web/vitest.config.js",
     "test:all": "npm test && npm run test:package",
     "test:package": "npm run web:build && node scripts/package-smoke.js",
+    "clips": "node src/cli.js",
     "web:dev": "vite --config web/vite.config.js",
     "web:build": "vite build --config web/vite.config.js",
     "web:test": "vitest run --config web/vitest.config.js",
