@@ -1,6 +1,6 @@
 {
   "name": "@dfosco/clips",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Local-first planning and change-record workflow CLI",
   "type": "module",
   "bin": {
