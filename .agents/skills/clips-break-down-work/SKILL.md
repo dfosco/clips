@@ -9,6 +9,8 @@ Tasks are outcome slices, not implementation diaries. Decompose only as far as i
 
 ## Ground the breakdown
 
+This is the default continuation after a building goal is created or refined. Infer the smallest reversible task set and create it without a confirmation round. Ask one question only when an unresolved product choice makes a useful decomposition impossible.
+
 1. Run `clips view <goal>` and confirm the goal type is `building`.
 2. Read the goal behavior, acceptance criteria, constraints, existing tasks, relevant records, and repository conventions.
 3. Identify blocking foundations, independent workstreams, shared write targets, and the smallest units that end in meaningful checks.

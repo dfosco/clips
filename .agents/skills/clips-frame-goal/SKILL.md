@@ -61,6 +61,6 @@ Do not edit `.clips/db` manually. After mutation, run `clips view <goal>` and in
 ## Continue
 
 - Route a planning goal directly to `clips-plan-decision`. Do not ask whether to start the ADR.
-- Route a building goal to `clips-break-down-work` when decomposition is useful. A small outcome still needs at least one task before the goal can close.
+- Route every building goal directly to `clips-break-down-work` after creating or refining it. Create the smallest complete task set without asking whether the user wants a breakdown; a small outcome still needs at least one task before the goal can close.
 
 Return the goal reference, type, outcome, material assumptions, and any single unresolved product choice. Do not repeat the full goal body when the CLI view already makes it available.
