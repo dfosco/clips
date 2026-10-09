@@ -15,6 +15,7 @@
 
   const navigation = [
     { id: 'board', label: 'Board', icon: 'board' },
+    { id: 'tracks', label: 'Tracks', icon: 'target' },
     { id: 'goals', label: 'Goals', icon: 'target' },
     { id: 'tasks', label: 'Tasks', icon: 'tasks' },
     { id: 'changes', label: 'CRs', icon: 'changes' },
@@ -60,7 +61,7 @@
   function applyLocation() {
     const url = new URL(window.location.href);
     const [view, identifier] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    activeView = ['board', 'goals', 'tasks', 'changes', 'github', 'settings'].includes(view) ? view : 'board';
+    activeView = ['board', 'tracks', 'goals', 'tasks', 'changes', 'github', 'settings'].includes(view) ? view : 'board';
     if (view === 'changes' && identifier) activeView = 'change_record';
     search = url.searchParams.get('search') || '';
     sourceFilter = url.searchParams.get('source') || 'all';
@@ -172,6 +173,7 @@
     const query = search.trim().toLowerCase();
     return selectedProjectIds.includes(goal.project_id) && (sourceFilter === 'all' || goal.source === sourceFilter) && (goalFilter === 'all' || goal.ref === goalFilter) && (!query || goalMatches(goal, query));
   }) ?? []);
+  let visibleTracks = $derived(board?.tracks?.filter((track) => selectedProjectIds.includes(track.project_id) && (!search.trim() || [track.title, track.description, track.ref].some((value) => matches(value, search.trim().toLowerCase())))) ?? []);
   let visibleTasksList = $derived.by(() => {
     const query = search.trim().toLowerCase();
     return (board?.goals ?? []).flatMap((goal) => goal.tasks.filter((task) => selectedProjectIds.includes(task.project_id) && (sourceFilter === 'all' || task.source === sourceFilter) && (goalFilter === 'all' || task.goal_ref === goalFilter) && (!query || taskMatches(task, query))));
@@ -355,8 +357,10 @@
           {/each}
         </section>
       {/if}
+    {:else if activeView === 'tracks'}
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Tracks</h1><p>Workstreams and their goals.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleTracks as track}<div class="compact-row"><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{track.title}</strong><small>{track.project_label} · {track.ref} · {track.completed_goal_count}/{track.goal_count} goals closed · {statusLabel(track.status)}</small>{#if track.description}<small>{track.description}</small>{/if}{#each visibleGoalsList.filter((goal) => goal.track_ref === track.ref) as goal}<button type="button" onclick={() => openGoal(goal)}>{goal.ref} {goal.title} · {statusLabel(goal.status)}</button>{/each}</span></div>{/each}{#if visibleGoalsList.some((goal) => !goal.track_ref)}<div class="compact-row"><span class="compact-row__main"><strong>Unassigned goals</strong>{#each visibleGoalsList.filter((goal) => !goal.track_ref) as goal}<button type="button" onclick={() => openGoal(goal)}>{goal.ref} {goal.title}</button>{/each}</span></div>{/if}</div></section>
     {:else if activeView === 'goals'}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>Goals</h1><p>Compact list of planning outcomes.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleGoalsList as goal}<button class="compact-row" type="button" onclick={() => openGoal(goal)}><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · {goal.type === 'planning' ? `Planning · ${goal.adr_id || 'ADR pending'}` : `Building · ${goal.tasks.length} ${goal.tasks.length === 1 ? 'task' : 'tasks'}`} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'}{#if goal.status === 'closed' && goal.closed_commit_sha} · Closed in {goal.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status"><span class="status-dot status-dot--{goalColumn(goal)}"></span>{statusLabel(goal.status)}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleGoalsList.length === 0}<div class="list-empty">No goals match “{search}”.</div>{/if}</div></section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Goals</h1><p>Compact list of planning outcomes.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleGoalsList as goal}<button class="compact-row" type="button" onclick={() => openGoal(goal)}><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · {goal.track_ref || 'Unassigned'} · {goal.type === 'planning' ? `Planning · ${goal.adr_id || 'ADR pending'}` : `Building · ${goal.tasks.length} ${goal.tasks.length === 1 ? 'task' : 'tasks'}`} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'}{#if goal.blocked_by?.length} · Blocked by {goal.blocked_by.join(', ')}{/if}{#if goal.status === 'closed' && goal.closed_commit_sha} · Closed in {goal.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status"><span class="status-dot status-dot--{goalColumn(goal)}"></span>{statusLabel(goal.status)}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleGoalsList.length === 0}<div class="list-empty">No goals match “{search}”.</div>{/if}</div></section>
     {:else if activeView === 'tasks'}
       <section class="secondary-view"><div class="secondary-heading"><div><h1>Tasks</h1><p>Compact list of tasks across all goals.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleTasksList as task}<button class="compact-row" type="button" onclick={() => openTask(task)}><span class="compact-row__icon"><span class="status-dot status-dot--{task.column}"></span></span><span class="compact-row__main"><strong>{task.title}</strong><small>{task.project_label} · {task.ref} · {task.goal_title} · {statusLabel(task.status)}{#if task.status === 'closed' && task.closed_commit_sha} · Closed in {task.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status">{task.source === 'github' ? 'GitHub linked' : 'Local only'}{#if task.linked_crs?.length} · {task.linked_crs.map((record) => record.id).join(', ')}{/if}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleTasksList.length === 0}<div class="list-empty">No tasks match “{search}”.</div>{/if}</div></section>
     {:else if activeView === 'changes'}

@@ -10,9 +10,25 @@ import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runWebCommand } from './commands/web.js';
 import { runRecordCommand } from './commands/record.js';
+import { runTrackCommand } from './commands/track.js';
+import { switchInstallation, dispatchProd } from './lib/installation.js';
 import { version } from './version.js';
 
 const [,, command, ...args] = process.argv;
+
+if (command === 'dev' || command === 'prod') {
+  try { switchInstallation(command, args); }
+  catch (error) { console.error(`clips ${command}: ${error.message}`); process.exit(1); }
+  process.exit(0);
+}
+
+try {
+  const delegatedStatus = dispatchProd(process.argv.slice(2));
+  if (delegatedStatus !== null) process.exit(delegatedStatus);
+} catch (error) {
+  console.error(`clips prod: ${error.message}`);
+  process.exit(1);
+}
 
 // Handle --version flag
 if (command === '--version' || command === '-v') {
@@ -28,8 +44,11 @@ Usage: clips <command> [args]
 
 Commands:
   init                    Initialize local-only clips state
+  dev [--project P]       Use the development checkout and refresh its skills
+  prod [--project P]      Use the saved local npm installation and refresh its skills
   view [ref]              View goal/task (or list all)
   goal <action> [args]    Manage goals
+  track <action> [args]   Manage tracks
   task <action> [args]    Manage tasks
   record <action> [args]  Manage CR and ADR records
   sync [ref]              Sync GitHub only when collaboration is enabled
@@ -42,6 +61,9 @@ Options:
 
 Examples:
   clips init
+  clips dev --project /path/to/repo
+  clips prod --project /path/to/repo
+  clips track r01 add g01 g02 g010
   clips view
   clips goal create '{"title":"Decide storage model","type":"planning","description":"..."}'
   clips goal attach-adr g001 ADR-003
@@ -63,6 +85,7 @@ Examples:
 // Route to command handlers
 const commands = {
   goal: runGoalCommand,
+  track: runTrackCommand,
   task: runTaskCommand,
   record: runRecordCommand,
   view: runViewCommand,

@@ -117,13 +117,6 @@ function resolveAgentDir(cwd) {
 
 const BUNDLED_SKILLS = [
   'clips',
-  'clips-frame-goal',
-  'clips-plan-decision',
-  'clips-break-down-work',
-  'clips-develop-change',
-  'clips-verify-outcome',
-  'clips-review-change',
-  'clips-resume-work',
 ];
 
 function listFiles(directory, relative = '') {

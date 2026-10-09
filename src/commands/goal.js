@@ -5,6 +5,7 @@ import { pushGoal } from '../lib/sync.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
 import { discoverBoardGoals } from '../lib/board.js';
 import { adrRecordExists, goalCompletionError, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
+import { validateTrack, normalizeBlockedBy } from '../lib/tracks.js';
 
 // Normalize goal ID by stripping # prefix if present
 function normalizeGoalId(goalId) {
@@ -39,6 +40,8 @@ function createGoal(data) {
     title: data.title,
     description: data.description || '',
     acceptance_criteria: data.acceptance_criteria || [],
+    track_id: validateTrack(data.track_id),
+    blocked_by: normalizeBlockedBy(data.blocked_by || [], goalId),
     ...goalTypeFields(data, { defaultType: true }),
     ...planningBehaviorFields(data, { defaultMode: true }),
     status: 'open'
@@ -61,7 +64,7 @@ function updateGoal(goalId, data) {
   const normalizedId = normalizeGoalId(goalId);
   const goal = readGoalWithTasks(normalizedId);
   if (!goal) throw new Error(`Goal ${normalizedId} not found`);
-  const allowedFields = new Set(['title', 'description', 'acceptance_criteria', 'behavior', 'verification_mode', 'type']);
+  const allowedFields = new Set(['title', 'description', 'acceptance_criteria', 'behavior', 'verification_mode', 'type', 'track_id', 'blocked_by']);
   const unsupportedFields = Object.keys(data).filter((field) => !allowedFields.has(field));
   if (unsupportedFields.length > 0) throw new Error(`Unsupported goal fields: ${unsupportedFields.join(', ')}`);
   const typeFields = goalTypeFields(data);
@@ -79,6 +82,8 @@ function updateGoal(goalId, data) {
   for (const field of ['title', 'description', 'acceptance_criteria']) {
     if (Object.prototype.hasOwnProperty.call(data, field)) updateFields[field] = data[field];
   }
+  if (Object.hasOwn(data, 'track_id')) updateFields.track_id = validateTrack(data.track_id);
+  if (Object.hasOwn(data, 'blocked_by')) updateFields.blocked_by = normalizeBlockedBy(data.blocked_by, normalizedId);
   const event = {
     event: 'updated',
     goal_id: normalizedId,
@@ -217,7 +222,7 @@ function listGoals() {
     return;
   }
   
-  const files = fs.readdirSync(clipsDbDir).filter(f => f.endsWith('.jsonl'));
+  const files = fs.readdirSync(clipsDbDir).filter(f => /^g\d+\.jsonl$/.test(f));
   const goals = files.map(f => {
     const goalId = f.replace('.jsonl', '');
     const goal = readGoalWithTasks(goalId);
@@ -239,6 +244,9 @@ export function runGoalCommand(args) {
       break;
     case 'update':
       updateGoal(rest[0], JSON.parse(rest[1]));
+      break;
+    case 'assign':
+      updateGoal(rest[0], { track_id: rest[1] === 'null' || rest[1] === 'none' ? null : rest[1] });
       break;
     case 'status':
       changeStatus(rest[0], rest[1]);
@@ -262,11 +270,14 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
+  assign <id> <track|null> Assign or move a goal to a track
   attach-adr <id> <adr> Attach an existing ADR to a planning goal
   unlink <id|--all>    Disconnect one or all goals and their tasks from GitHub
 
 Goal fields:
   type                 planning | building (default: building)
+  track_id             Optional r001 track ref
+  blocked_by           Array of goal refs
 
 Behavior fields:
   behavior             Optional Gherkin-style behavior text

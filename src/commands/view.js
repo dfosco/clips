@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseRef, readGoalWithTasks, getClipsDbDir, getCurrentUsername, formatRef } from '../lib/core.js';
 import { readConfig } from '../lib/config.js';
+import { listTracks } from '../lib/tracks.js';
 
 const STATUS_ICONS = {
   open: '🟢',
@@ -78,6 +79,8 @@ function viewGoal(goalId, username = null) {
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
   console.log(`${BOLD}│${RESET} Type:   ${goal.type}`);
+  if (goal.track_id) console.log(`${BOLD}│${RESET} Track:  #${goal.track_id}`);
+  if (goal.blocked_by?.length) console.log(`${BOLD}│${RESET} Blocked by: ${goal.blocked_by.map((id) => `#${id}`).join(', ')}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
   if (goal.adr_id) {
     console.log(`${BOLD}│${RESET} ADR:    ${goal.adr_id}`);
@@ -243,6 +246,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   
   const allGoals = discoverGoals();
   if (allGoals.length === 0) {
+    for (const track of listTracks()) console.log(`  #${track.track_id} ${track.title} [${track.status}] 0/0 goals closed`);
     console.log(`${DIM}No goals yet. Create one with: clips goal create '{"title":"..."}'${RESET}`);
     return;
   }
@@ -287,6 +291,15 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   console.log();
   console.log(`${BOLD}Goals${RESET}`);
   console.log(`${DIM}═════════════════════════════════════════════════════════════${RESET}`);
+  const tracks = listTracks();
+  if (tracks.length) {
+    console.log(`${BOLD}Tracks${RESET}`);
+    for (const track of tracks) {
+      const members = allGoals.map(({ goalId, username }) => readGoalWithTasks(goalId, username)).filter((goal) => goal?.track_id === track.track_id);
+      console.log(`  #${track.track_id} ${track.title} [${track.status}] ${members.filter((goal) => goal.status === 'closed').length}/${members.length} goals closed`);
+    }
+    console.log();
+  }
   
   for (const userKey of usersToShow) {
     const userGoals = goalsByUser.get(userKey) || [];
@@ -316,7 +329,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       
       console.log();
       const resultInfo = goal.adr_id ? ` ${DIM}[${goal.adr_id}]${RESET}` : '';
-      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${RESET}${resultInfo}`);
+      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${goal.track_id ? ` [#${goal.track_id}]` : ''}${goal.blocked_by?.length ? ` [blocked by ${goal.blocked_by.map((id) => `#${id}`).join(', ')}]` : ''}${RESET}${resultInfo}`);
       
       // Hide tasks if goal status is in hideTasksForGoalStatuses
       if (hideTasksForGoalStatuses.includes(goal.status)) continue;

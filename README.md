@@ -2,7 +2,7 @@
 
 `clips` manages local workflow state without adding it to repository history:
 
-- **Planning state:** goals and tasks under `.clips/db/`, optionally mirrored to GitHub Issues after explicit opt-in.
+- **Planning state:** tracks, goals, and tasks under `.clips/db/`, optionally mirrored to GitHub Issues after explicit opt-in.
 - **Review and decision records:** CRs and ADRs under `.clips/records/`.
 - **Committed schemas:** record templates under `docs/records/`; these are not record instances.
 
@@ -15,6 +15,7 @@ This keeps planning and review state local while allowing the repository to ship
 
 | Artifact | Role | Lifecycle | Repository location |
 |---|---|---|---|
+| Track | A repository workstream containing related goals | Independently managed status | External clips store |
 | Planning goal | Resolve uncertainty into one attached ADR | Before and during decision work | External clips store |
 | Building goal | Deliver an outcome through tasks | Before and during implementation | External clips store |
 | Task | An actionable piece of a building goal | During implementation | External clips store |
@@ -23,6 +24,26 @@ This keeps planning and review state local while allowing the repository to ship
 | Other record | Optional project-defined workflow record | Project-defined | `.clips/records/<type>/` |
 
 Goal type determines the workflow. Planning goals produce an ADR and never contain tasks. Building goals decompose into tasks, and their repository changes are covered by living CRs. Committed product documentation describes current user-visible behavior.
+
+### Tracks and dependencies
+
+A track is a sustained path of work such as a migration. A goal belongs to at most one track; old goals remain unassigned until explicitly moved. Tracks may contain planning and building goals. Their status is set directly, while views show how many member goals are closed.
+
+Use `blocked_by` on goals for concrete dependencies, including dependencies across tracks. Clips rejects missing goals, self-dependencies, and cycles. Blockers are informational and do not change goal status automatically.
+
+```bash
+clips track create '{"title":"TypeScript migration","description":"Migrate the application incrementally"}'
+clips goal create '{"title":"Convert core data types","track_id":"r001"}'
+clips goal assign g002 r001
+clips track r01 add g01 g02 g010 # Assign several existing goals; moves any from another track
+clips goal update g002 '{"blocked_by":["g001"]}'
+clips goal assign g002 none      # Leave goal unassigned
+clips track status r001 in_progress
+clips track show r001
+clips track list
+```
+
+With GitHub collaboration enabled, a track is mirrored as an issue and its goal issues are linked using GitHub's native sub-issue hierarchy. Goal moves are reconciled on sync. Task issue behavior is unchanged.
 
 ### Goal types
 
@@ -141,6 +162,21 @@ Or run it without a global install:
 npx @dfosco/clips --help
 ```
 
+### Switch between local development and installed npm code
+
+`clips dev` links a Clips source checkout as the global command. Before linking, it saves the currently installed npm package under `~/.clips/installations/prod/`. `clips prod` runs that saved package without contacting npm. The global command remains linked to the development checkout as a small dispatcher, so both switch commands stay available even when the saved npm version predates them. Both commands rerun the selected version's `init` in the current repository, updating its skill pack.
+
+The first switch must start from the development checkout because older published CLIs do not have these commands:
+
+```bash
+cd ~/workspace/hypercanvas
+node ~/workspace/clips/src/cli.js dev
+clips prod
+clips dev
+```
+
+Use `--project <repo>` to refresh a different repository and `clips dev --checkout <clips-repo>` to select another development checkout. The selected checkout is remembered under `~/.clips/installation.json`; `CLIPS_HOME` overrides that directory. `prod` uses the npm package found locally at the first switch, or a newer local installation found on a later switch. It never runs `npm install` or downloads a package. `init` copies skills into the project, so these commands refresh the files on every switch. Skills installed by the prior mode but absent from the selected package are removed only when unchanged; locally edited files are retained with a warning. Project-tracked skill files will show as Git changes.
+
 ### Setup
 
 ```bash
@@ -161,13 +197,9 @@ clips sync
 
 Existing repositories that already set `collaboration: true` remain collaborative.
 
-### Agent workflow skill pack
+### Agent skill
 
-`clips init` installs a generic agent workflow pack into the repository's detected agent directory. The main `clips` skill is the entry point. It keeps the engineering principles and artifact invariants inline, classifies the request, and loads only the workflow skill needed for goal framing, decision planning, task breakdown, development, verification, review, or resume.
-
-The workflow inspects repository and Clips state before asking questions. It proceeds on reversible choices, asks only when an irreducible product decision or missing authority blocks progress, and uses CLI commands for goal, task, attachment, status, record-lifecycle, configuration, and synchronization mutations. Record bodies remain Markdown because the CLI does not create CR or ADR content; their lifecycle is still changed through `clips record status`.
-
-The pack is runtime-neutral. It does not prescribe models, agent APIs, browser harnesses, Git hosting, or stack-management tools. Its engineering principles are adapted from Lauren Tan's MIT-licensed [pstack Poteto Mode](https://github.com/cursor/plugins/tree/main/pstack); the required notice ships with the pack in [.agents/skills/clips/THIRD_PARTY_NOTICES.md](.agents/skills/clips/THIRD_PARTY_NOTICES.md).
+`clips init` installs the single `clips` skill into the repository's detected agent directory. It covers local goals, tasks, CRs, ADRs, status, and optional GitHub collaboration. Planning state and record instances stay under `.clips/` and are not committed. GitHub collaboration requires explicit opt-in.
 
 ## Commands
 

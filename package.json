@@ -1,6 +1,6 @@
 {
   "name": "@dfosco/clips",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Local-first planning and change-record workflow CLI",
   "type": "module",
   "bin": {
@@ -34,7 +34,7 @@
   "files": [
     "src/**/*.js",
     "!src/**/*.test.js",
-    ".agents/skills/clips*/**/*.md",
+    ".agents/skills/clips/SKILL.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

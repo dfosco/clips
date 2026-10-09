@@ -53,19 +53,7 @@ try {
   assert(paths.includes('src/cli.js'), 'tarball is missing the CLI');
   assert(paths.includes('dist/web/index.html'), 'tarball is missing board assets');
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
-  for (const skill of [
-    'clips-frame-goal',
-    'clips-plan-decision',
-    'clips-break-down-work',
-    'clips-develop-change',
-    'clips-verify-outcome',
-    'clips-review-change',
-    'clips-resume-work',
-  ]) {
-    assert(paths.includes(`.agents/skills/${skill}/SKILL.md`), `tarball is missing ${skill}`);
-  }
-  assert(paths.includes('.agents/skills/clips/references/cli.md'), 'tarball is missing the Clips CLI reference');
-  assert(paths.includes('.agents/skills/clips/THIRD_PARTY_NOTICES.md'), 'tarball is missing the pstack license notice');
+  assert(!paths.some((file) => file.startsWith('.agents/skills/clips-')), 'tarball contains routed Clips skills');
   assert(paths.includes('CHANGELOG.md'), 'tarball is missing the changelog');
   assert(!paths.some((file) => file.endsWith('.test.js')), 'tarball contains source tests');
   assert(!paths.some((file) => file.startsWith('.agents/plans/')), 'tarball contains local agent plans');
@@ -78,6 +66,8 @@ try {
   const cli = path.join(extractedRoot, 'src', 'cli.js');
   const version = execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim();
   assert.equal(version, `clips v${manifest.version}`);
+  assert.match(execFileSync(process.execPath, [cli, 'dev', '--help'], { encoding: 'utf8' }), /Usage: clips dev/);
+  assert.match(execFileSync(process.execPath, [cli, 'prod', '--help'], { encoding: 'utf8' }), /Usage: clips prod/);
 
   const initializedProject = path.join(tempRoot, 'initialized-project');
   fs.mkdirSync(initializedProject);
@@ -87,24 +77,9 @@ try {
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
     stdio: 'pipe',
   });
-  for (const skill of [
-    'clips',
-    'clips-frame-goal',
-    'clips-plan-decision',
-    'clips-break-down-work',
-    'clips-develop-change',
-    'clips-verify-outcome',
-    'clips-review-change',
-    'clips-resume-work',
-  ]) {
-    assert(
-      fs.existsSync(path.join(initializedProject, '.agents', 'skills', skill, 'SKILL.md')),
-      `packaged init did not install ${skill}`,
-    );
-  }
   assert(
-    fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'THIRD_PARTY_NOTICES.md')),
-    'packaged init did not install the pstack license notice',
+    fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
+    'packaged init did not install the Clips skill',
   );
 
   board = spawn(process.execPath, [cli, 'web', '--port', '0'], {

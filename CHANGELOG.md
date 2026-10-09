@@ -1,5 +1,19 @@
 # Clips
 
+## 1.5.0
+
+Organize related goals into tracks, switch between a local development checkout and a saved npm installation, and return to a single Clips agent skill.
+
+### Features
+
+- Add tracks for grouping goals, reporting progress, and mirroring workstreams to GitHub when collaboration is enabled.
+- Add goal dependencies and show track membership and blockers in the CLI and board.
+- Add `clips dev` and `clips prod` to switch locally between the development checkout and the saved npm package, refreshing project skills in either mode.
+
+### Changes
+
+- Replace the routed workflow skill pack with the single Clips skill from 1.3.2. Remove the Poteto-derived guidance and extra installed skills.
+
 ## 1.4.0-beta.0
 
 Make Clips planning more rigorous while reducing agent ceremony. This beta introduces typed goal outcomes, shared record lifecycles, and a selectively loaded workflow skill pack grounded in evidence and real verification.

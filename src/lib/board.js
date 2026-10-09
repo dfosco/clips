@@ -3,6 +3,7 @@ import path from 'node:path';
 import { getClipsDbDir, getClipsRecordsDir } from './core.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
+import { listTracks } from './tracks.js';
 
 export const BOARD_COLUMNS = [
   { id: 'open', label: 'Open' },
@@ -249,6 +250,8 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
     description: rawGoal.description || '',
     type: normalizeGoalType(rawGoal.type),
     adr_id: rawGoal.adr_id || null,
+    track_id: rawGoal.track_id || null,
+    blocked_by: rawGoal.blocked_by || [],
     behavior: rawGoal.behavior || '',
     verification_mode: goalVerificationMode,
     effective_verification_mode: goalVerificationMode,
@@ -315,7 +318,11 @@ export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = getClipsRe
     goal.linked_prs = [...new Map(goal.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
     for (const task of goal.tasks) task.linked_prs = [...new Map(task.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
   }
-  return { version: 1, generated_at: new Date().toISOString(), goals, change_records: records, github_prs: uniquePrs, warnings };
+  const tracks = listTracks(dbDir).map((track) => {
+    const members = goals.filter((goal) => goal.track_id === track.track_id);
+    return { ...track, ref: `#${track.track_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
+  });
+  return { version: 1, generated_at: new Date().toISOString(), tracks, goals, change_records: records, github_prs: uniquePrs, warnings };
 }
 
 function qualifyRef(projectId, ref) {
@@ -348,6 +355,8 @@ export function readProjectBoard(project) {
     return {
       ...goal,
       ref,
+      track_ref: goal.track_id ? qualifyRef(project.id, `#${goal.track_id}`) : null,
+      blocked_by: goal.blocked_by.map((id) => qualifyRef(project.id, `#${id}`)),
       project_id: project.id,
       project_label: project.label,
       linked_crs: (goal.linked_crs || []).map((record) => qualifyRecordSummary(project, record)),
@@ -365,6 +374,7 @@ export function readProjectBoard(project) {
   });
 
   return {
+    tracks: localBoard.tracks.map((track) => ({ ...track, ref: qualifyRef(project.id, track.ref), project_id: project.id, project_label: project.label, goal_refs: track.goal_refs.map((ref) => qualifyRef(project.id, ref)) })),
     goals,
     change_records: localBoard.change_records.map((record) => qualifyRecord(project, record)),
     github_prs: localBoard.github_prs.map((pr) => ({ ...pr, project_id: project.id, project_label: project.label })),
@@ -385,6 +395,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
     projects: availableProjects.map(({ id, label }) => ({ id, label })),
     default_project_ids: projects.map((project) => project.id),
     goals: [],
+    tracks: [],
     change_records: [],
     github_prs: [],
     warnings: [...warnings],
@@ -394,6 +405,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
     try {
       const projectBoard = readProjectBoard(project);
       board.goals.push(...projectBoard.goals);
+      board.tracks.push(...projectBoard.tracks);
       board.change_records.push(...projectBoard.change_records);
       board.github_prs.push(...projectBoard.github_prs);
       board.warnings.push(...projectBoard.warnings);

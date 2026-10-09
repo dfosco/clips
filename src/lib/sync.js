@@ -14,6 +14,7 @@ import {
 import { readConfig, isCollaborationEnabled } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { adrRecordExists, goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
+import { appendTrackEvent, listTracks, readTrack } from './tracks.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
 
@@ -193,6 +194,8 @@ export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
 export function buildIssueBody(goal) {
   const config = readConfig();
   let body = '';
+  if (goal.track_id) body += `Track: #${goal.track_id}\n\n`;
+  if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => `#${id}`).join(', ')}\n\n`;
 
   if (goal.description) {
     const desc = formatDescription(goal.description);
@@ -451,6 +454,7 @@ export function pullAllIssues() {
   let updated = 0;
 
   for (const issue of issues) {
+    if (issue.body?.includes('<!-- clips-track:')) continue;
     const existingGoalId = findGoalByIssueNumber(issue.number);
     if (existingGoalId) {
       // Already imported — check if status diverged
@@ -593,6 +597,66 @@ export function pullAllGithub() {
 }
 
 // ── Push ──────────────────────────────────────────────────────────
+
+function ghJson(args, input) {
+  const result = spawnSync('gh', args, { input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  if (result.status !== 0) throw new Error(result.stderr || `gh ${args.join(' ')} failed`);
+  return result.stdout.trim() ? JSON.parse(result.stdout) : null;
+}
+
+function issueId(number, repository) {
+  return ghJson(['api', `repos/${repository}/issues/${number}`]).id;
+}
+
+export function pushTrack(trackId) {
+  if (!isCollaborationEnabled()) return { skipped: true };
+  const track = readTrack(trackId);
+  if (!track) throw new Error(`Track ${trackId} not found`);
+  const repository = repositoryFromRemote();
+  if (!repository) throw new Error('GitHub origin remote is required to sync tracks');
+  const body = [`<!-- clips-track: ${track.track_id} -->`, track.description || '',
+    track.acceptance_criteria?.length ? `## Acceptance criteria\n\n${track.acceptance_criteria.map((item) => `- ${item}`).join('\n')}` : ''].filter(Boolean).join('\n\n');
+  const title = `[Track] ${track.title}`;
+  if (!track.issue_number) {
+    const result = spawnSync('gh', ['issue', 'create', '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    if (result.status !== 0) throw new Error(result.stderr || 'gh issue create failed');
+    const issueUrl = result.stdout.trim();
+    const number = Number(issueUrl.split('/').pop());
+    if (!Number.isInteger(number)) throw new Error('Could not read created track issue number');
+    appendTrackEvent(trackId, { event: 'track_github_synced', issue_number: number, issue_url: issueUrl });
+  } else {
+    const result = spawnSync('gh', ['issue', 'edit', String(track.issue_number), '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    if (result.status !== 0) throw new Error(result.stderr || 'gh issue edit failed');
+  }
+  const current = readTrack(trackId);
+  const action = ['closed', 'not_planned', 'duplicate'].includes(current.status) ? 'close' : 'reopen';
+  const state = ghJson(['api', `repos/${repository}/issues/${current.issue_number}`]).state;
+  if ((action === 'close' && state !== 'closed') || (action === 'reopen' && state === 'closed')) {
+    const result = spawnSync('gh', ['issue', action, String(current.issue_number)], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    if (result.status !== 0) throw new Error(result.stderr || `gh issue ${action} failed`);
+  }
+  return current;
+}
+
+export function reconcileGoalParent(goalId) {
+  if (!isCollaborationEnabled()) return { skipped: true };
+  const goal = readGoalWithTasks(goalId);
+  if (!goal?.issue_number || goal.github_unlinked) return { skipped: true };
+  const repository = repositoryFromRemote();
+  if (!repository) return { skipped: true, reason: 'no GitHub origin' };
+  const desired = goal.track_id ? pushTrack(goal.track_id) : null;
+  const result = spawnSync('gh', ['api', `repos/${repository}/issues/${goal.issue_number}/parent`], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  if (result.status !== 0 && !/404|Not Found/i.test(result.stderr)) throw new Error(result.stderr || 'Could not read goal parent');
+  const parent = result.status === 0 ? JSON.parse(result.stdout) : null;
+  if (parent?.number === desired?.issue_number) return { unchanged: true };
+  if (parent && !desired && !listTracks().some((track) => track.issue_number === parent.number)) return { unchanged: true, reason: 'external parent' };
+  if (parent && !desired) {
+    ghJson(['api', '-X', 'DELETE', `repos/${repository}/issues/${parent.number}/sub_issues`, '-F', `sub_issue_id=${issueId(goal.issue_number, repository)}`]);
+  } else if (desired) {
+    ghJson(['api', '-X', 'POST', `repos/${repository}/issues/${desired.issue_number}/sub_issues`, '-F', `sub_issue_id=${issueId(goal.issue_number, repository)}`, '-F', `replace_parent=${parent ? 'true' : 'false'}`]);
+  }
+  return { changed: true };
+}
 
 export function pushGoal(goalId) {
   if (!isCollaborationEnabled()) {
@@ -740,6 +804,8 @@ export function pushGoal(goalId) {
   } catch (error) {
     console.error(`sync: push failed for ${goalId}: ${error.message}`);
   }
+  try { reconcileGoalParent(goalId); }
+  catch (error) { console.error(`sync: parent link failed for ${goalId}: ${error.message}`); }
 }
 
 // ── Sync single goal ──────────────────────────────────────────────
@@ -775,6 +841,11 @@ export function syncAll() {
 
   const pullResult = pullAllGithub();
 
+  for (const track of listTracks()) {
+    try { pushTrack(track.track_id); }
+    catch (error) { pullResult.warnings.push({ source: 'tracks', message: `${track.track_id}: ${error.message}` }); }
+  }
+
   const dbDir = getClipsDbDir();
   let pushed = 0;
 
@@ -783,7 +854,7 @@ export function syncAll() {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
           scanGoals(path.join(dir, entry.name));
-        } else if (entry.name.endsWith('.jsonl') && entry.name !== GITHUB_CACHE_FILE) {
+        } else if (/^g\d+\.jsonl$/.test(entry.name)) {
           const gId = entry.name.replace('.jsonl', '');
           const goal = readGoalWithTasks(gId);
           if (goal && !goal.github_unlinked) {

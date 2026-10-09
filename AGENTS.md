@@ -6,9 +6,8 @@ Skills are detailed guides that describe how and when to use specific tools and 
 
 | Skill | Path | Description |
 |-------|------|-------------|
-| **clips** | `.agents/skills/clips/SKILL.md` | Rigorous local workflow router for goals, tasks, CRs, ADRs, implementation, verification, review, and resume. It loads CLI-backed workflow skills only as needed and optionally syncs GitHub after opt-in. |
+| **clips** | `.agents/skills/clips/SKILL.md` | Local workflow guide for goals, tasks, CRs, ADRs, and optional GitHub synchronization. |
 
-The routed workflow skills live under `.agents/skills/clips-*/SKILL.md`. Start with `clips`; do not load every routed skill by default.
 
 ## Quick Reference
 

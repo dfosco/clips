@@ -111,6 +111,23 @@ const planningBoard = {
 };
 
 describe('board app', () => {
+  it('shows tracks, their goals, and unassigned goals', async () => {
+    mockColorScheme(false);
+    vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      ...board,
+      tracks: [{ track_id: 'r001', ref: 'clips#r001', title: 'TypeScript migration', project_id: 'clips', project_label: 'clips', status: 'open', goal_count: 1, completed_goal_count: 0 }],
+      goals: [
+        { ...board.goals[0], title: 'Convert Core', track_ref: 'clips#r001', blocked_by: [] },
+        { ...board.goals[0], goal_id: 'g002', ref: 'clips#g002', title: 'Unassigned maintenance', track_ref: null, blocked_by: [], tasks: [] },
+      ],
+    }), { status: 200 }));
+    render(App);
+    await screen.getByRole('button', { name: 'Tracks' }).click();
+    expect(await screen.findByText('TypeScript migration')).toBeInTheDocument();
+    expect(screen.getByText('Unassigned goals')).toBeInTheDocument();
+    expect(screen.getByText(/0\/1 goals closed/)).toBeInTheDocument();
+  });
+
   it('follows the system theme until the user chooses an override', async () => {
     const colorScheme = mockColorScheme(true);
     vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify(board), { status: 200 }));
