@@ -16,10 +16,33 @@ function workspace() {
 }
 
 function run(root, ...args) {
-  return JSON.parse(execFileSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8' }));
+  return JSON.parse(execFileSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } }));
 }
 
 describe('tracks', () => {
+  it('shows track descriptions and structured goal membership in view', () => {
+    const root = workspace();
+    try {
+      run(root, 'track', 'create', '{"title":"Migration","description":"Move modules incrementally","acceptance_criteria":["Modules compile"]}');
+      const empty = execFileSync(process.execPath, [cli, 'view', '#r001'], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+      expect(empty).toContain('Move modules incrementally');
+      expect(empty).toContain('Modules compile');
+      expect(empty).toContain('Goals (0)');
+      expect(empty).toContain('None yet');
+      run(root, 'goal', 'create', '{"title":"Convert core","track_id":"r001"}');
+      const detail = execFileSync(process.execPath, [cli, 'view', '#r001'], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+      expect(detail).toContain('Goals (1)');
+      expect(detail).toContain('#g001');
+      expect(detail).toContain('Convert core');
+      const overview = execFileSync(process.execPath, [cli, 'view'], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+      expect(overview).toContain('Move modules incrementally');
+      expect(overview).toContain('Goals (1)');
+      const missing = spawnSync(process.execPath, [cli, 'view', '#r999'], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+      expect(missing.status).not.toBe(0);
+      expect(missing.stderr).toContain('Track #r999 not found');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('adds shorthand goal refs in bulk, skips repeats, and moves goals between tracks', () => {
     const root = workspace();
     try {
@@ -49,7 +72,7 @@ describe('tracks', () => {
       const eventPath = path.join(root, '.clips', 'db', 'g001.jsonl');
       const before = fs.readFileSync(eventPath, 'utf8');
       for (const invalid of ['g999', 'bad']) {
-        const result = spawnSync(process.execPath, [cli, 'track', 'r1', 'add', 'g1', invalid], { cwd: root, encoding: 'utf8' });
+        const result = spawnSync(process.execPath, [cli, 'track', 'r1', 'add', 'g1', invalid], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
         expect(result.status).not.toBe(0);
         expect(fs.readFileSync(eventPath, 'utf8')).toBe(before);
       }
@@ -81,7 +104,7 @@ describe('tracks', () => {
       run(root, 'goal', 'update', 'g002', '{"blocked_by":["g001"]}');
       for (const refs of [['g999'], ['g001'], ['g002']]) {
         const target = refs[0] === 'g001' ? 'g001' : 'g001';
-        const result = spawnSync(process.execPath, [cli, 'goal', 'update', target, JSON.stringify({ blocked_by: refs })], { cwd: root, encoding: 'utf8' });
+        const result = spawnSync(process.execPath, [cli, 'goal', 'update', target, JSON.stringify({ blocked_by: refs })], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
         expect(result.status).not.toBe(0);
       }
     } finally { fs.rmSync(root, { recursive: true, force: true }); }

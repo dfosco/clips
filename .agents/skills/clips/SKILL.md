@@ -260,6 +260,7 @@ Display goals and tasks in a human-readable terminal format with status icons (ð
 ```bash
 clips view                  # List all goals with tasks
 clips view #g001            # View a specific goal with details
+clips view #r001            # View a track's description and member goals
 clips view #g001#t1         # View a specific task
 clips view all              # Include hidden statuses
 clips view --all-users      # Show all users' goals

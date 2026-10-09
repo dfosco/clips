@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { parseRef, readGoalWithTasks, getClipsDbDir, getCurrentUsername, formatRef } from '../lib/core.js';
 import { readConfig } from '../lib/config.js';
-import { listTracks } from '../lib/tracks.js';
+import { listTracks, normalizeTrackId, readTrack } from '../lib/tracks.js';
 
 const STATUS_ICONS = {
   open: '🟢',
@@ -223,7 +223,7 @@ function discoverGoals() {
     } else if (entry.isDirectory() && !entry.name.startsWith('.')) {
       // User namespace directory (e.g., dfosco/)
       const userDir = path.join(clipsDbDir, entry.name);
-      const userFiles = fs.readdirSync(userDir).filter(f => f.endsWith('.jsonl'));
+      const userFiles = fs.readdirSync(userDir).filter(f => /^g\d+\.jsonl$/.test(f));
       for (const file of userFiles) {
         goals.push({
           username: entry.name,
@@ -237,6 +237,50 @@ function discoverGoals() {
   return goals;
 }
 
+function trackGoals(trackId) {
+  return discoverGoals()
+    .map(({ goalId, username }) => ({ goal: readGoalWithTasks(goalId, username), username }))
+    .filter(({ goal }) => goal?.track_id === trackId);
+}
+
+function printTrackGoals(members) {
+  console.log(`  Goals (${members.length})`);
+  if (!members.length) {
+    console.log(`    ${DIM}None yet${RESET}`);
+    return;
+  }
+  for (const { goal, username } of members) {
+    const ref = formatRef({ username, goalId: goal.goal_id }, { includeUsername: !!username });
+    console.log(`    ${formatStatus(goal.status)} ${BOLD}${ref}${RESET} ${goal.title}`);
+  }
+}
+
+function viewTrack(ref) {
+  const id = normalizeTrackId(ref);
+  const track = readTrack(id);
+  if (!track) {
+    console.error(`Error: Track #${id} not found`);
+    process.exit(1);
+  }
+  const members = trackGoals(id);
+  console.log();
+  console.log(`${BOLD}#${id} ${track.title}${RESET}`);
+  console.log(`Status: ${formatStatus(track.status)}`);
+  console.log(`Progress: ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
+  if (track.issue_number) console.log(`GitHub: #${track.issue_number} ${DIM}${track.issue_url || ''}${RESET}`);
+  console.log();
+  console.log(`${BOLD}Description${RESET}`);
+  console.log(track.description ? wrapText(track.description, 60) : `${DIM}No description${RESET}`);
+  if (track.acceptance_criteria?.length) {
+    console.log();
+    console.log(`${BOLD}Acceptance Criteria${RESET}`);
+    for (const criterion of track.acceptance_criteria) console.log(`  • ${criterion}`);
+  }
+  console.log();
+  printTrackGoals(members);
+  console.log();
+}
+
 function listAllGoals(showAll = false, showAllUsers = false) {
   const clipsDbDir = getClipsDbDir();
   if (!fs.existsSync(clipsDbDir)) {
@@ -246,7 +290,17 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   
   const allGoals = discoverGoals();
   if (allGoals.length === 0) {
-    for (const track of listTracks()) console.log(`  #${track.track_id} ${track.title} [${track.status}] 0/0 goals closed`);
+    const tracks = listTracks();
+    if (tracks.length) {
+      console.log();
+      console.log(`${BOLD}Tracks${RESET}`);
+      for (const track of tracks) {
+        console.log(`  #${track.track_id} ${track.title} [${track.status}] 0/0 goals closed`);
+        console.log(`    ${track.description || 'No description'}`);
+        printTrackGoals([]);
+      }
+      console.log();
+    }
     console.log(`${DIM}No goals yet. Create one with: clips goal create '{"title":"..."}'${RESET}`);
     return;
   }
@@ -295,8 +349,10 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   if (tracks.length) {
     console.log(`${BOLD}Tracks${RESET}`);
     for (const track of tracks) {
-      const members = allGoals.map(({ goalId, username }) => readGoalWithTasks(goalId, username)).filter((goal) => goal?.track_id === track.track_id);
-      console.log(`  #${track.track_id} ${track.title} [${track.status}] ${members.filter((goal) => goal.status === 'closed').length}/${members.length} goals closed`);
+      const members = trackGoals(track.track_id);
+      console.log(`  #${track.track_id} ${track.title} [${track.status}] ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
+      console.log(`    ${track.description || 'No description'}`);
+      printTrackGoals(members);
     }
     console.log();
   }
@@ -388,6 +444,8 @@ export function runViewCommand(args) {
     listAllGoals(false, showAllUsers);
   } else if (ref === 'all') {
     listAllGoals(true, showAllUsers);
+  } else if (/^#?r\d+$/i.test(ref)) {
+    viewTrack(ref);
   } else {
     const parsed = parseRef(ref);
     if (!parsed) {

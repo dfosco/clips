@@ -27,7 +27,7 @@ Goal type determines the workflow. Planning goals produce an ADR and never conta
 
 ### Tracks and dependencies
 
-A track is a sustained path of work such as a migration. A goal belongs to at most one track; old goals remain unassigned until explicitly moved. Tracks may contain planning and building goals. Their status is set directly, while views show how many member goals are closed.
+A track is a sustained path of work such as a migration. Give each track a description that explains its outcome. A goal belongs to at most one track; old goals remain unassigned until explicitly moved. Tracks may contain planning and building goals. Their status is set directly. `clips view` lists each track's description and member goals, including empty tracks; `clips view #r001` shows one track's details.
 
 Use `blocked_by` on goals for concrete dependencies, including dependencies across tracks. Clips rejects missing goals, self-dependencies, and cycles. Blockers are informational and do not change goal status automatically.
 
@@ -206,6 +206,7 @@ Existing repositories that already set `collaboration: true` remain collaborativ
 ```bash
 clips view                          # List all goals with tasks
 clips view #g001                    # View a specific goal
+clips view #r001                    # View a track and its member goals
 
 clips goal create '{"type":"planning","title":"Choose storage model"}'
 clips goal attach-adr g1 ADR-003       # Attach the planning result

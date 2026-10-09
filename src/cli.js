@@ -46,7 +46,7 @@ Commands:
   init                    Initialize local-only clips state
   dev [--project P]       Use the development checkout and refresh its skills
   prod [--project P]      Use the saved local npm installation and refresh its skills
-  view [ref]              View goal/task (or list all)
+  view [ref]              View track/goal/task (or list all)
   goal <action> [args]    Manage goals
   track <action> [args]   Manage tracks
   task <action> [args]    Manage tasks
@@ -74,6 +74,7 @@ Examples:
   clips task create-batch g001 '[{"title":"Task 1"},{"title":"Task 2"}]'
   clips record status CR-017 in_review
   clips view #g001
+  clips view #r001
   clips task status g1 t1 done
   clips sync
   clips web
