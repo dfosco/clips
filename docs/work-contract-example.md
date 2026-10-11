@@ -6,12 +6,55 @@ no workspace feature or verification run is claimed by this document.
 
 ## Contents
 
+- [Optional strategic Lane](#optional-strategic-lane)
 - [Feature and component boundaries](#feature-and-component-boundaries)
 - [Goal with plan and decisions](#goal-with-plan-and-decisions)
 - [Task requests](#task-requests)
 - [The same tasks after execution](#the-same-tasks-after-execution)
 - [Goal acceptance](#goal-acceptance)
 - [Revisions and extensions](#revisions-and-extensions)
+
+## Optional strategic Lane
+
+A small feature does not need a Lane merely because Lanes exist. Use one when
+the feature belongs to a sustained product frame that will contain multiple
+engineering outcomes.
+
+For example, this goal could be one part of:
+
+### `#l1` Workspace continuity
+
+**Description:** Make returning to the product feel continuous across reloads,
+workspace switching, and later session-restoration work.
+
+**Product goals:**
+
+- Users return to the right working context quickly.
+- Context restoration feels predictable rather than magical or lossy.
+
+The Lane can contain `#g1` below plus future independent goals. Those goals
+retain their own plans, criteria, verification, and acceptance. Merely sharing
+`#l1` does not make them dependent on one another.
+
+If the strategic workstream later closes, the Lane stores a retrospective such
+as:
+
+```json
+{
+  "summary": "Workspace continuity now covers reload and switching.",
+  "decision_log": "We standardized restoration on stable workspace IDs and kept the workspace list authoritative.",
+  "system_overview": "Workspace preference persists the ID; workspace selection validates and consumes it.",
+  "product_goals_achieved": [
+    "Users return to their intended working context after reload"
+  ],
+  "media": [
+    {"src":"screenshots/workspace-restored.png","caption":"Workspace restored after reload"}
+  ]
+}
+```
+
+That closure is a product/system narrative, not a second engineering acceptance
+receipt.
 
 ## Feature and component boundaries
 
