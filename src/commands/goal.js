@@ -1,16 +1,73 @@
 // Goal management commands
 import fs from 'fs';
-import { CLIPS_DB_DIR, appendEvent, readGoalWithTasks, getClipsDbDir, getClipsRecordsDir, getCurrentCommitSha, parseRef } from '../lib/core.js';
+import { appendEvent, readGoalWithTasks, getClipsDbDir, getClipsRecordsDir, getGoalFilePath, getCurrentCommitSha, normalizeGoalId as canonicalGoalId, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
 import { discoverBoardGoals } from '../lib/board.js';
-import { adrRecordExists, goalCompletionError, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
-import { validateTrack, normalizeBlockedBy } from '../lib/tracks.js';
+import { adrRecordExists, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
+import { validateTrack } from '../lib/tracks.js';
+import { laneToTrackId, trackToLaneId, validateLane } from '../lib/lanes.js';
+import { acceptanceFields, invalidateAcceptanceFields, referenceList, requestSnapshot, validateWorkInput, workFields } from '../lib/work-fields.js';
+import { readJsonInput } from '../lib/json-input.js';
+import { resolveComponentBasis } from '../lib/component-basis.js';
 
-// Normalize goal ID by stripping # prefix if present
-function normalizeGoalId(goalId) {
-  const parsed = parseRef(goalId);
-  return parsed ? parsed.goalId : goalId;
+function goalTarget(ref, { write = false } = {}) {
+  const parsed = parseRef(ref);
+  if (!parsed?.goalId || parsed.taskId || parsed.componentId || parsed.criterionId) throw new Error('Provide a goal reference');
+  if (write && parsed.revision != null) throw new Error('Historical goal revisions are read-only; use expected_revision on an update');
+  return { goalId: parsed.goalId, username: parsed.username || null, revision: parsed.revision };
+}
+
+function goalDependencies(refs, target) {
+  const parseDependency = (ref, context) => {
+    const parsed = goalTarget(ref);
+    const username = parsed.username || context.username || null;
+    return { ...parsed, username, goalId: canonicalGoalId(parsed.goalId, username) };
+  };
+  const parsedRefs = referenceList(refs, 'blocked_by').map((ref) => parseDependency(ref, target));
+  const key = ({ goalId, username }) => getGoalFilePath(goalId, username);
+  const keys = parsedRefs.map(key);
+  if (new Set(keys).size !== keys.length) throw new Error('Duplicate goal dependency');
+  for (const dependency of parsedRefs) {
+    if (dependency.revision != null) throw new Error('Dependencies must refer to current goals, not historical revisions');
+    if (key(dependency) === key(target)) throw new Error('A goal cannot block itself');
+    if (!readGoalWithTasks(dependency.goalId, dependency.username)) throw new Error(`Blocking goal ${dependency.goalId} not found`);
+    const seen = new Set();
+    const visit = (current) => {
+      if (key(current) === key(target)) throw new Error('Goal dependency cycle');
+      if (seen.has(key(current))) return;
+      seen.add(key(current));
+      for (const upstream of readGoalWithTasks(current.goalId, current.username)?.blocked_by || []) visit(parseDependency(upstream, current));
+    };
+    visit(dependency);
+  }
+  return parsedRefs.map(({ goalId, username }) => username ? `#${username}#${goalId}` : goalId);
+}
+
+function expectedRevision(data, current) {
+  if (Object.hasOwn(data, 'expected_revision') && (!Number.isSafeInteger(data.expected_revision) || data.expected_revision < 0)) {
+    throw new Error('expected_revision must be a non-negative integer');
+  }
+  return data.expected_revision ?? current?.revision ?? 0;
+}
+
+function syncGoal(goalId, username) {
+  // Explicit other-user records must not accidentally synchronize a local goal
+  // with the same numeric ID. The sync command owns namespaced synchronization.
+  if (!username) try { pushGoal(goalId); } catch (error) { /* best effort */ }
+}
+
+function goalLaneFields(data) {
+  if (Object.hasOwn(data, 'lane_id')) {
+    if (data.lane_id == null) return { lane_id: null, track_id: null };
+    const laneId = validateLane(data.lane_id);
+    return { lane_id: laneId, track_id: laneToTrackId(laneId) };
+  }
+  if (Object.hasOwn(data, 'track_id')) {
+    const trackId = validateTrack(data.track_id);
+    return { track_id: trackId, lane_id: trackId ? trackToLaneId(trackId) : null };
+  }
+  return {};
 }
 
 function generateId() {
@@ -19,9 +76,8 @@ function generateId() {
     return 'g001';
   }
   
-  const files = fs.readdirSync(clipsDbDir).filter(f => f.endsWith('.jsonl'));
-  const sequentialIds = files
-    .map(f => f.replace('.jsonl', ''))
+  const sequentialIds = discoverBoardGoals(clipsDbDir)
+    .map(({ goalId }) => goalId)
     .filter(id => /^g\d+$/.test(id))
     .map(id => parseInt(id.replace('g', ''), 10));
   
@@ -31,17 +87,16 @@ function generateId() {
 }
 
 function createGoal(data) {
+  validateWorkInput(data, { kind: 'goal' });
   const clipsDbDir = getClipsDbDir();
   const goalId = generateId();
   const event = {
     event: 'goal_created',
     goal_id: goalId,
     timestamp: new Date().toISOString(),
-    title: data.title,
-    description: data.description || '',
-    acceptance_criteria: data.acceptance_criteria || [],
-    track_id: validateTrack(data.track_id),
-    blocked_by: normalizeBlockedBy(data.blocked_by || [], goalId),
+    ...workFields(data, {}, { kind: 'goal', creating: true }),
+    ...goalLaneFields(data),
+    blocked_by: goalDependencies(Object.hasOwn(data, 'blocked_by') ? data.blocked_by : [], { goalId, username: null }),
     ...goalTypeFields(data, { defaultType: true }),
     ...planningBehaviorFields(data, { defaultMode: true }),
     status: 'open'
@@ -51,7 +106,7 @@ function createGoal(data) {
     fs.mkdirSync(clipsDbDir, { recursive: true });
   }
   
-  appendEvent(goalId, event);
+  appendEvent(goalId, event, { expectedRevision: expectedRevision(data, null) });
   try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
   const synced = readGoalWithTasks(goalId);
   const result = { success: true, goal_id: goalId };
@@ -61,52 +116,29 @@ function createGoal(data) {
 }
 
 function updateGoal(goalId, data) {
-  const normalizedId = normalizeGoalId(goalId);
-  const goal = readGoalWithTasks(normalizedId);
+  const { goalId: normalizedId, username } = goalTarget(goalId, { write: true });
+  const goal = readGoalWithTasks(normalizedId, username);
   if (!goal) throw new Error(`Goal ${normalizedId} not found`);
-  const allowedFields = new Set(['title', 'description', 'acceptance_criteria', 'behavior', 'verification_mode', 'type', 'track_id', 'blocked_by']);
-  const unsupportedFields = Object.keys(data).filter((field) => !allowedFields.has(field));
-  if (unsupportedFields.length > 0) throw new Error(`Unsupported goal fields: ${unsupportedFields.join(', ')}`);
+  validateWorkInput(data, { kind: 'goal' });
   const typeFields = goalTypeFields(data);
-  if (typeFields.type && typeFields.type !== goal.type) {
-    if (goal.status === 'closed') throw new Error('Cannot change the type of a closed goal');
-    if (typeFields.type === 'planning' && Object.keys(goal.tasks).length > 0) {
-      throw new Error('Cannot change a goal with tasks to planning');
-    }
-    if (typeFields.type === 'building' && goal.adr_id && adrRecordExists(getClipsRecordsDir('adr'), goal.adr_id)) {
-      throw new Error('Cannot change a goal with an attached ADR to building');
-    }
-  }
   const behaviorFields = planningBehaviorFields(data);
-  const updateFields = {};
-  for (const field of ['title', 'description', 'acceptance_criteria']) {
-    if (Object.prototype.hasOwnProperty.call(data, field)) updateFields[field] = data[field];
-  }
-  if (Object.hasOwn(data, 'track_id')) updateFields.track_id = validateTrack(data.track_id);
-  if (Object.hasOwn(data, 'blocked_by')) updateFields.blocked_by = normalizeBlockedBy(data.blocked_by, normalizedId);
+  const updateFields = { ...workFields(data, goal, { kind: 'goal' }), ...typeFields, ...behaviorFields };
+  Object.assign(updateFields, goalLaneFields(data));
+  if (Object.hasOwn(data, 'blocked_by')) updateFields.blocked_by = goalDependencies(data.blocked_by, { goalId: normalizedId, username });
   const event = {
     event: 'updated',
     goal_id: normalizedId,
     timestamp: new Date().toISOString(),
     ...updateFields,
-    ...typeFields,
-    ...behaviorFields,
+    ...invalidateAcceptanceFields(goal, updateFields, { kind: 'goal' }),
   };
-  appendEvent(normalizedId, event);
-  if (typeFields.type === 'building' && goal.adr_id) {
-    appendEvent(normalizedId, {
-      event: 'adr_detached',
-      goal_id: normalizedId,
-      timestamp: new Date().toISOString(),
-      adr_id: goal.adr_id,
-    });
-  }
-  try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
+  appendEvent(normalizedId, event, { username, expectedRevision: expectedRevision(data, goal) });
+  syncGoal(normalizedId, username);
   console.log(JSON.stringify({ success: true, goal_id: normalizedId }));
 }
 
 function changeStatus(goalId, status) {
-  const normalizedId = normalizeGoalId(goalId);
+  const { goalId: normalizedId, username } = goalTarget(goalId, { write: true });
   const validStatuses = ['open', 'in_progress', 'closed', 'not_planned', 'duplicate'];
   
   if (!validStatuses.includes(status)) {
@@ -114,12 +146,8 @@ function changeStatus(goalId, status) {
     process.exit(1);
   }
 
-  const goal = readGoalWithTasks(normalizedId);
+  const goal = readGoalWithTasks(normalizedId, username);
   if (!goal) throw new Error(`Goal ${normalizedId} not found`);
-  if (status === 'closed') {
-    const completionError = goalCompletionError(goal, { recordsDir: getClipsRecordsDir('adr') });
-    if (completionError) throw new Error(completionError);
-  }
   
   const event = {
     event: 'status_changed',
@@ -127,18 +155,18 @@ function changeStatus(goalId, status) {
     timestamp: new Date().toISOString(),
     status: status,
     commit_sha: status === 'closed' ? getCurrentCommitSha() : null,
+    ...(status !== 'closed' ? invalidateAcceptanceFields(goal, {}, { kind: 'goal', force: true, reason: `Status changed to ${status}` }) : {}),
   };
-  appendEvent(normalizedId, event);
-  try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
+  event.status = status;
+  appendEvent(normalizedId, event, { username, expectedRevision: goal.revision });
+  syncGoal(normalizedId, username);
   console.log(JSON.stringify({ success: true, goal_id: normalizedId, status: status }));
 }
 
 function attachAdr(goalId, adrId) {
-  const normalizedId = normalizeGoalId(goalId);
-  const goal = readGoalWithTasks(normalizedId);
+  const { goalId: normalizedId, username } = goalTarget(goalId, { write: true });
+  const goal = readGoalWithTasks(normalizedId, username);
   if (!goal) throw new Error(`Goal ${normalizedId} not found`);
-  if (goal.type !== 'planning') throw new Error('ADRs can only be attached to planning goals');
-  if (goal.status === 'closed') throw new Error('Cannot replace the ADR on a closed planning goal');
 
   const normalizedAdrId = normalizeAdrId(adrId);
   const recordsDir = getClipsRecordsDir('adr');
@@ -149,9 +177,47 @@ function attachAdr(goalId, adrId) {
     goal_id: normalizedId,
     timestamp: new Date().toISOString(),
     adr_id: normalizedAdrId,
-  });
-  try { pushGoal(normalizedId); } catch (e) { /* sync is best-effort */ }
+  }, { username, expectedRevision: goal.revision });
+  syncGoal(normalizedId, username);
   console.log(JSON.stringify({ success: true, goal_id: normalizedId, adr_id: normalizedAdrId }));
+}
+
+function acceptGoal(goalRef, receipt) {
+  const { goalId, username } = goalTarget(goalRef, { write: true });
+  const goal = readGoalWithTasks(goalId, username);
+  if (!goal) throw new Error(`Goal ${goalId} not found`);
+  const fields = acceptanceFields(goal, receipt, { kind: 'goal' });
+  fields.acceptance.component_basis = resolveComponentBasis(goal);
+  const tasks = Object.values(goal.tasks || {});
+  const unresolved = tasks.filter((task) => !['closed', 'not_planned', 'duplicate'].includes(task.status));
+  if (unresolved.length) throw new Error(`Cannot accept goal with unresolved tasks: ${unresolved.map((task) => task.task_id).join(', ')}`);
+  const waivedTasks = tasks.filter((task) => ['not_planned', 'duplicate'].includes(task.status));
+  const accounted = new Set();
+  for (const exception of fields.acceptance.exceptions || []) {
+    const parsed = parseRef(exception.ref);
+    const referencedFile = parsed?.goalId ? getGoalFilePath(parsed.goalId, parsed.username || username) : getGoalFilePath(goalId, username);
+    if (!parsed?.taskId || parsed.criterionId || parsed.revision != null || referencedFile !== getGoalFilePath(goalId, username)) {
+      throw new Error(`Goal exception must identify one of its waived tasks: ${exception.ref}`);
+    }
+    if (!waivedTasks.some((task) => task.task_id === parsed.taskId)) throw new Error(`Exception ${exception.ref} is not a not_planned or duplicate task`);
+    if (accounted.has(parsed.taskId)) throw new Error(`Duplicate exception for ${parsed.taskId}`);
+    accounted.add(parsed.taskId);
+  }
+  const missing = waivedTasks.filter((task) => !accounted.has(task.task_id));
+  if (missing.length) throw new Error(`Explicit exceptions are required for: ${missing.map((task) => task.task_id).join(', ')}`);
+  fields.acceptance.task_basis = tasks.map((task) => ({
+    task_id: task.task_id,
+    revision: task.revision || 0,
+    status: task.status,
+    request_snapshot: requestSnapshot(task),
+    acceptance: task.acceptance || null,
+  }));
+  appendEvent(goalId, {
+    event: 'updated', goal_id: goalId, timestamp: new Date().toISOString(),
+    ...fields, closed_commit_sha: null,
+  }, { username, expectedRevision: expectedRevision(receipt, goal) });
+  syncGoal(goalId, username);
+  console.log(JSON.stringify({ success: true, goal_id: goalId, status: 'closed', accepted: true }));
 }
 
 function unlinkGoalRecord(goalId, username = null) {
@@ -164,14 +230,12 @@ function unlinkGoalRecord(goalId, username = null) {
     timestamp: new Date().toISOString(),
     issue_number: goal.issue_number,
     issue_url: goal.issue_url || '',
-  }, { username });
+  }, { username, expectedRevision: goal.revision });
   return { goal_id: goalId, username, issue_number: goal.issue_number };
 }
 
 function unlinkGoal(goalRef) {
-  const parsed = parseRef(goalRef);
-  const normalizedId = parsed?.goalId || normalizeGoalId(goalRef);
-  const username = parsed?.username || null;
+  const { goalId: normalizedId, username } = goalTarget(goalRef, { write: true });
   const goal = readGoalWithTasks(normalizedId, username);
   if (!goal) {
     console.error(JSON.stringify({ error: 'Goal not found' }));
@@ -204,8 +268,8 @@ function unlinkAllGoals() {
 }
 
 function showGoal(goalId) {
-  const normalizedId = normalizeGoalId(goalId);
-  const goal = readGoalWithTasks(normalizedId);
+  const { goalId: normalizedId, username, revision } = goalTarget(goalId);
+  const goal = readGoalWithTasks(normalizedId, username, revision == null ? {} : { revision });
   if (!goal) {
     console.error(JSON.stringify({ error: 'Goal not found' }));
     process.exit(1);
@@ -240,13 +304,16 @@ export function runGoalCommand(args) {
   
   switch (command) {
     case 'create':
-      createGoal(JSON.parse(rest[0]));
+      createGoal(readJsonInput(rest));
       break;
     case 'update':
-      updateGoal(rest[0], JSON.parse(rest[1]));
+      updateGoal(rest[0], readJsonInput(rest.slice(1)));
+      break;
+    case 'accept':
+      acceptGoal(rest[0], readJsonInput(rest.slice(1)));
       break;
     case 'assign':
-      updateGoal(rest[0], { track_id: rest[1] === 'null' || rest[1] === 'none' ? null : rest[1] });
+      updateGoal(rest[0], { lane_id: rest[1] === 'null' || rest[1] === 'none' ? null : rest[1] });
       break;
     case 'status':
       changeStatus(rest[0], rest[1]);
@@ -270,18 +337,35 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
-  assign <id> <track|null> Assign or move a goal to a track
-  attach-adr <id> <adr> Attach an existing ADR to a planning goal
+  assign <id> <lane|null>  Assign or move a goal to a strategic lane
+  accept <id> <json>   Accept an outcome with artifact and criterion evidence
+  attach-adr <id> <adr> Attach a legacy ADR reference (optional)
   unlink <id|--all>    Disconnect one or all goals and their tasks from GitHub
 
 Goal fields:
-  type                 planning | building (default: building)
-  track_id             Optional r001 track ref
+  plan, decisions      Markdown plan and durable design decisions
+  scope, components    Scope text and affected component refs
+  acceptance_criteria  Strings or {id: "A1", description: "..."} entries
+  owner, acceptance_owner  Work and acceptance responsibility
+  record               Markdown outcome/change record
+  sections, extensions Additional Markdown sections and custom JSON
+  expected_revision    Reject an update based on a stale record revision
+  type                 Legacy planning | building label (default: building)
+  lane_id              Optional l001 strategic lane ref
+  track_id             Legacy r001 Track ref (read/write compatibility)
   blocked_by           Array of goal refs
 
 Behavior fields:
   behavior             Optional Gherkin-style behavior text
   verification_mode    behavior | behavior_and_tests
+
+JSON input: one argument, --file <path>, or --stdin.
+Acceptance receipt: artifact, accepted_by, summary, criteria [{id, status,
+evidence, reason?}]; status is satisfied or waived (waivers need a reason).
+Goal acceptance requires resolved tasks and explicit exceptions for any
+not_planned/duplicate children. Status closure alone is administrative.
+Declared component refs are resolved to pinned revisions in the receipt.
+Pin refs before work when a negotiated baseline must remain fixed.
 
 Internal (prefer 'clips view' for browsing):
   status <id> <status> Change goal status

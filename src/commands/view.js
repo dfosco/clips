@@ -3,7 +3,9 @@ import fs from 'fs';
 import path from 'path';
 import { parseRef, readGoalWithTasks, getClipsDbDir, getCurrentUsername, formatRef } from '../lib/core.js';
 import { readConfig } from '../lib/config.js';
-import { listTracks, normalizeTrackId, readTrack } from '../lib/tracks.js';
+import { readComponent } from '../lib/components.js';
+import { renderComponent } from './component.js';
+import { listLanes, normalizeLaneId, readLane } from '../lib/lanes.js';
 
 const STATUS_ICONS = {
   open: '🟢',
@@ -54,8 +56,8 @@ function wrapText(text, width, indent = '') {
   return lines.map((line, i) => (i === 0 ? '' : indent) + line).join('\n');
 }
 
-function viewGoal(goalId, username = null) {
-  const goal = readGoalWithTasks(goalId, username);
+function viewGoal(goalId, username = null, options = {}) {
+  const goal = readGoalWithTasks(goalId, username, options);
   if (!goal) {
     const refStr = username ? `#${username}#${goalId}` : `#${goalId}`;
     console.error(`Error: Goal ${refStr} not found`);
@@ -78,9 +80,9 @@ function viewGoal(goalId, username = null) {
   console.log(`${BOLD}│${RESET} ${BOLD}${displayRef}${RESET} ${goal.title}`);
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
-  console.log(`${BOLD}│${RESET} Type:   ${goal.type}`);
-  if (goal.track_id) console.log(`${BOLD}│${RESET} Track:  #${goal.track_id}`);
-  if (goal.blocked_by?.length) console.log(`${BOLD}│${RESET} Blocked by: ${goal.blocked_by.map((id) => `#${id}`).join(', ')}`);
+  console.log(`${BOLD}│${RESET} Revision: r${goal.revision}`);
+  if (goal.lane_id) console.log(`${BOLD}│${RESET} Lane:   #${goal.lane_id}`);
+  if (goal.blocked_by?.length) console.log(`${BOLD}│${RESET} Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
   if (goal.adr_id) {
     console.log(`${BOLD}│${RESET} ADR:    ${goal.adr_id}`);
@@ -103,9 +105,11 @@ function viewGoal(goalId, username = null) {
     console.log(`${BOLD}Acceptance Criteria${RESET}`);
     console.log(`${DIM}─────────────────────────────────────────${RESET}`);
     for (const criterion of goal.acceptance_criteria) {
-      console.log(`  • ${criterion}`);
+      console.log(`  ${displayRef}#${criterion.id}: ${criterion.description}`);
     }
   }
+
+  printWorkFields(goal, displayRef, { criteria: false });
 
   if (goal.behavior) {
     console.log();
@@ -150,8 +154,8 @@ function viewGoal(goalId, username = null) {
   console.log();
 }
 
-function viewTask(goalId, taskId, username = null) {
-  const goal = readGoalWithTasks(goalId, username);
+function viewTask(goalId, taskId, username = null, options = {}) {
+  const goal = readGoalWithTasks(goalId, username, { taskId, taskRevision: options.revision });
   if (!goal) {
     const refStr = username ? `#${username}#${goalId}` : `#${goalId}`;
     console.error(`Error: Goal ${refStr} not found`);
@@ -175,6 +179,7 @@ function viewTask(goalId, taskId, username = null) {
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(task.status)}`);
   console.log(`${BOLD}│${RESET} Goal:   ${DIM}${goalRef} ${goal.title}${RESET}`);
+  console.log(`${BOLD}│${RESET} Revision: r${task.revision}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(task.effective_verification_mode)}`);
   if (task.issue_number) {
     console.log(`${BOLD}│${RESET} GitHub: #${task.issue_number}`);
@@ -187,6 +192,8 @@ function viewTask(goalId, taskId, username = null) {
     console.log(`${DIM}─────────────────────────────────────────${RESET}`);
     console.log(wrapText(task.description, 60));
   }
+
+  printWorkFields(task, taskRef);
 
   if (task.behavior) {
     console.log();
@@ -237,13 +244,13 @@ function discoverGoals() {
   return goals;
 }
 
-function trackGoals(trackId) {
+function laneGoals(laneId) {
   return discoverGoals()
     .map(({ goalId, username }) => ({ goal: readGoalWithTasks(goalId, username), username }))
-    .filter(({ goal }) => goal?.track_id === trackId);
+    .filter(({ goal }) => goal?.lane_id === laneId);
 }
 
-function printTrackGoals(members) {
+function printLaneGoals(members) {
   console.log(`  Goals (${members.length})`);
   if (!members.length) {
     console.log(`    ${DIM}None yet${RESET}`);
@@ -255,29 +262,44 @@ function printTrackGoals(members) {
   }
 }
 
-function viewTrack(ref) {
-  const id = normalizeTrackId(ref);
-  const track = readTrack(id);
-  if (!track) {
-    console.error(`Error: Track #${id} not found`);
+function viewLane(ref) {
+  const match = String(ref || '').match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
+  if (!match) throw new Error(`Invalid lane ref: ${ref}`);
+  const id = normalizeLaneId(match[1]);
+  const lane = readLane(id, undefined, { revision: match[2] ? Number(match[2]) : undefined });
+  if (!lane) {
+    console.error(`Error: Lane #${id} not found`);
     process.exit(1);
   }
-  const members = trackGoals(id);
+  const members = laneGoals(id);
   console.log();
-  console.log(`${BOLD}#${id} ${track.title}${RESET}`);
-  console.log(`Status: ${formatStatus(track.status)}`);
+  console.log(`${BOLD}#${id} ${lane.title}${RESET}`);
+  console.log(`Status: ${formatStatus(lane.status)}`);
+  console.log(`Revision: r${lane.revision}`);
   console.log(`Progress: ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
-  if (track.issue_number) console.log(`GitHub: #${track.issue_number} ${DIM}${track.issue_url || ''}${RESET}`);
+  if (lane.issue_number) console.log(`GitHub: #${lane.issue_number} ${DIM}${lane.issue_url || ''}${RESET}`);
   console.log();
   console.log(`${BOLD}Description${RESET}`);
-  console.log(track.description ? wrapText(track.description, 60) : `${DIM}No description${RESET}`);
-  if (track.acceptance_criteria?.length) {
+  console.log(lane.description ? wrapText(lane.description, 60) : `${DIM}No description${RESET}`);
+  if (lane.product_goals?.length) {
     console.log();
-    console.log(`${BOLD}Acceptance Criteria${RESET}`);
-    for (const criterion of track.acceptance_criteria) console.log(`  • ${criterion}`);
+    console.log(`${BOLD}Product goals${RESET}`);
+    for (const item of lane.product_goals) console.log(`  • ${item}`);
+  }
+  if (lane.closure) {
+    console.log();
+    console.log(`${BOLD}Lane closure${RESET}`);
+    console.log(lane.closure.summary);
+    console.log(`Product goals achieved: ${lane.closure.product_goals_achieved?.length || 0}`);
+    console.log(`Components: ${lane.closure.components?.join(', ') || 'None recorded'}`);
+    console.log(`Media: ${lane.closure.media?.length || 0} item(s)`);
+  } else if (lane.legacy_acceptance_criteria?.length) {
+    console.log();
+    console.log(`${BOLD}Legacy Track criteria${RESET}`);
+    for (const criterion of lane.legacy_acceptance_criteria) console.log(`  • ${criterion}`);
   }
   console.log();
-  printTrackGoals(members);
+  printLaneGoals(members);
   console.log();
 }
 
@@ -290,14 +312,14 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   
   const allGoals = discoverGoals();
   if (allGoals.length === 0) {
-    const tracks = listTracks();
-    if (tracks.length) {
+    const lanes = listLanes();
+    if (lanes.length) {
       console.log();
-      console.log(`${BOLD}Tracks${RESET}`);
-      for (const track of tracks) {
-        console.log(`  #${track.track_id} ${track.title} [${track.status}] 0/0 goals closed`);
-        console.log(`    ${track.description || 'No description'}`);
-        printTrackGoals([]);
+      console.log(`${BOLD}Lanes${RESET}`);
+      for (const lane of lanes) {
+        console.log(`  #${lane.lane_id} ${lane.title} [${lane.status}] 0/0 goals closed`);
+        console.log(`    ${lane.description || 'No description'}`);
+        printLaneGoals([]);
       }
       console.log();
     }
@@ -345,14 +367,14 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   console.log();
   console.log(`${BOLD}Goals${RESET}`);
   console.log(`${DIM}═════════════════════════════════════════════════════════════${RESET}`);
-  const tracks = listTracks();
-  if (tracks.length) {
-    console.log(`${BOLD}Tracks${RESET}`);
-    for (const track of tracks) {
-      const members = trackGoals(track.track_id);
-      console.log(`  #${track.track_id} ${track.title} [${track.status}] ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
-      console.log(`    ${track.description || 'No description'}`);
-      printTrackGoals(members);
+  const lanes = listLanes();
+  if (lanes.length) {
+    console.log(`${BOLD}Lanes${RESET}`);
+    for (const lane of lanes) {
+      const members = laneGoals(lane.lane_id);
+      console.log(`  #${lane.lane_id} ${lane.title} [${lane.status}] ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
+      console.log(`    ${lane.description || 'No description'}`);
+      printLaneGoals(members);
     }
     console.log();
   }
@@ -385,7 +407,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       
       console.log();
       const resultInfo = goal.adr_id ? ` ${DIM}[${goal.adr_id}]${RESET}` : '';
-      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${goal.track_id ? ` [#${goal.track_id}]` : ''}${goal.blocked_by?.length ? ` [blocked by ${goal.blocked_by.map((id) => `#${id}`).join(', ')}]` : ''}${RESET}${resultInfo}`);
+      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${goal.lane_id ? ` [#${goal.lane_id}]` : ''}${goal.blocked_by?.length ? ` [blocked by ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}]` : ''}${RESET}${resultInfo}`);
       
       // Hide tasks if goal status is in hideTasksForGoalStatuses
       if (hideTasksForGoalStatuses.includes(goal.status)) continue;
@@ -434,29 +456,90 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   }
 }
 
-export function runViewCommand(args) {
-  // Parse flags
-  const showAllUsers = args.includes('--all-users') || args.includes('-u');
-  const filteredArgs = args.filter(a => !a.startsWith('-'));
-  const [ref] = filteredArgs;
-  
-  if (!ref) {
-    listAllGoals(false, showAllUsers);
-  } else if (ref === 'all') {
-    listAllGoals(true, showAllUsers);
-  } else if (/^#?r\d+$/i.test(ref)) {
-    viewTrack(ref);
-  } else {
-    const parsed = parseRef(ref);
-    if (!parsed) {
-      console.error('Error: Invalid reference. Use #goal_id, #goal_id#task_id, or #username#goal_id');
-      process.exit(1);
-    }
-    
-    if (parsed.taskId) {
-      viewTask(parsed.goalId, parsed.taskId, parsed.username);
-    } else {
-      viewGoal(parsed.goalId, parsed.username);
-    }
+function printWorkFields(record, ref, { criteria = true } = {}) {
+  for (const [label, name] of [['Scope', 'scope'], ['Plan', 'plan'], ['Decisions', 'decisions'], ['Change record', 'record']]) {
+    if (record[name]) console.log(`\n${BOLD}${label}${RESET}\n${record[name]}`);
   }
+  if (record.owner) console.log(`Owner: ${record.owner}`);
+  if (record.acceptance_owner) console.log(`Acceptance owner: ${record.acceptance_owner}`);
+  if (record.components?.length) console.log(`Components: ${record.components.join(', ')}`);
+  if (record.blocked_by?.length) console.log(`Blocked by: ${record.blocked_by.join(', ')}`);
+  if (criteria && record.acceptance_criteria?.length) {
+    console.log(`\n${BOLD}Acceptance criteria${RESET}`);
+    for (const item of record.acceptance_criteria) console.log(`${ref}#${item.id}: ${item.description}`);
+  }
+  if (record.acceptance) {
+    console.log(`\n${BOLD}Acceptance${RESET}`);
+    console.log(JSON.stringify(record.acceptance, null, 2));
+  } else if (record.status === 'closed') console.log('\nClosed administratively; no acceptance receipt recorded.');
+  for (const [heading, markdown] of Object.entries(record.sections || {})) console.log(`\n${BOLD}${heading}${RESET}\n${markdown}`);
+  if (Object.keys(record.extensions || {}).length) console.log(`\nExtensions\n${JSON.stringify(record.extensions, null, 2)}`);
+}
+
+export function resolveViewRecord(parsed) {
+  let record;
+  if (parsed.componentId) {
+    record = readComponent(parsed.componentId, parsed.username, { revision: parsed.revision });
+  } else {
+    if (!parsed.goalId) throw new Error('A task reference needs a goal. Use #g1#t1 or add --goal #g1.');
+    const goal = readGoalWithTasks(parsed.goalId, parsed.username, parsed.taskId
+      ? { taskId: parsed.taskId, taskRevision: parsed.revision }
+      : { revision: parsed.revision });
+    record = parsed.taskId ? goal?.tasks[parsed.taskId] : goal;
+  }
+  if (!record) throw new Error(`Record ${formatRef(parsed)} not found`);
+  const ref = formatRef(parsed);
+  if (parsed.criterionId) {
+    const criterion = record.acceptance_criteria?.find((item) => item.id === parsed.criterionId);
+    if (!criterion) throw new Error(`Acceptance criterion ${ref} not found`);
+    return { ...criterion, ref, record_revision: record.revision,
+      acceptance: record.acceptance?.criteria?.find((item) => item.id === parsed.criterionId) || null,
+    };
+  }
+  return { ...record, ref };
+}
+
+export function runViewCommand(args) {
+  const showAllUsers = args.includes('--all-users') || args.includes('-u');
+  const json = args.includes('--json');
+  const goalIndex = args.indexOf('--goal');
+  const goalContext = goalIndex >= 0 ? parseRef(args[goalIndex + 1]) : null;
+  if (goalIndex >= 0 && (!goalContext?.goalId || goalContext.taskId || goalContext.revision || goalContext.criterionId)) throw new Error('--goal requires a current goal reference');
+  const filteredArgs = args.filter((arg, index) => index !== goalIndex && (goalIndex < 0 || index !== goalIndex + 1) && !arg.startsWith('-'));
+  const [ref] = filteredArgs;
+  if (!ref || ref === 'all') {
+    if (json) {
+      const currentUser = getCurrentUsername();
+      const goals = discoverGoals().filter((entry) => showAllUsers || !currentUser || !entry.username || entry.username === currentUser)
+        .map((entry) => ({ ...readGoalWithTasks(entry.goalId, entry.username), ref: formatRef(entry) }));
+      console.log(JSON.stringify(goals, null, 2));
+    } else listAllGoals(ref === 'all', showAllUsers);
+    return;
+  }
+  if (/^#?[lr]\d+(?:#r\d+)?$/i.test(ref)) {
+    const match = String(ref).match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
+    const lane = readLane(normalizeLaneId(match[1]), undefined, { revision: match[2] ? Number(match[2]) : undefined });
+    if (!lane) throw new Error(`${/^#?r/i.test(ref) ? 'Track' : 'Lane'} ${ref} not found`);
+    if (json) console.log(JSON.stringify(lane, null, 2));
+    else viewLane(ref);
+    return;
+  }
+  const parsed = parseRef(ref);
+  if (!parsed) throw new Error('Invalid reference. Use #l1, #g1, #g1#t1, #c1, or a nested #rN / #A1 reference.');
+  if (parsed.taskId && !parsed.goalId && goalContext) {
+    parsed.goalId = goalContext.goalId;
+    parsed.username = goalContext.username;
+  }
+  if (json || parsed.criterionId || parsed.componentId) {
+    const record = resolveViewRecord(parsed);
+    if (json) console.log(JSON.stringify(record, null, 2));
+    else if (parsed.componentId) console.log(renderComponent(record));
+    else {
+      console.log(`${record.ref}: ${record.description}\nRecord revision: r${record.record_revision}`);
+      if (record.acceptance) console.log(JSON.stringify(record.acceptance, null, 2));
+    }
+  } else if (parsed.taskId) {
+    if (!parsed.goalId) throw new Error('Use a full goal/task reference, or --goal #g1 for a contextual task reference');
+    viewTask(parsed.goalId, parsed.taskId, parsed.username, { revision: parsed.revision });
+  } else viewGoal(parsed.goalId, parsed.username, { revision: parsed.revision });
 }

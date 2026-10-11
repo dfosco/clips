@@ -1,523 +1,289 @@
 ---
 name: clips
-description: Local-first planning and repository-record workflow. Use when creating goals, tasks, CRs, ADRs, and tracking progress.
+description: >-
+  Plan and track repository work with strategic Clips Lanes, goals, atomic task
+  change requests and records, system components, acceptance evidence, and
+  record history. Use
+  when framing an outcome, negotiating scope or interfaces, assigning work,
+  reviewing completion, resuming tracked work, or managing existing CRs, ADRs,
+  and optional GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.3.28"
+  version: "2026.10.11.1"
 ---
 
-# Skill: clips — Planning and Records
-
-clips is a local-first workflow tool that can mirror goals and tasks to GitHub Issues after explicit opt-in. Planning events live in `.clips/db/`; CR and ADR record instances live in `.clips/records/`. All are local workflow state and must not be committed. Committed `docs/records/` files are templates only.
-
-## Triggers
-
-- "create an issue", "track this work", "let's plan this", "write a goal"
-- "break this down into tasks", "add tasks to the goal"
-- "create a CR", "write a change record", "update the CR", "stack this CR"
-- "write an ADR", "record this architectural decision", "update the ADR"
-- "what's the status?", "show me the issues", "what are we tracking?"
-- "mark it done", "close that task", "update the status"
-- "sync with github", "pull latest issues", "push to github"
-- "set up clips", "initialize issue tracking"
-
----
-
-## Conversational Workflows
-
-These workflows are **mandatory**. When a user triggers goal creation, task breakdown, or task implementation, you MUST follow the multi-step conversation described below. Do NOT skip steps or collapse the workflow into a single response.
-
-Use `ask_user` for every question. One question per turn. Never bundle questions.
-
-### Creating a Goal
-
-When the user wants to create a goal (gives you a title, says "let's plan this", "new goal", etc.):
-
-**Step 1 — Acknowledge and clarify.** Take the title they gave you and ask 2–3 clarifying questions, one at a time. Focus on:
-  - What problem this solves or what outcome they want
-  - What the scope is (what's in, what's out)
-  - Any constraints, dependencies, or context that matters
-
-**Step 2 — Draft the goal description.** After you have enough context, write a 3–4 paragraph description of the problem/goal. This should read like a well-written GitHub Issue body:
-  - Paragraph 1: The problem or motivation — why this work matters
-  - Paragraph 2: What the solution looks like at a high level
-  - Paragraph 3: Scope boundaries — what's included and what's explicitly not
-  - Paragraph 4 (optional): Technical considerations, constraints, or open questions
-
-Present this to the user and ask them to confirm, using `ask_user`: _"Does this capture the goal correctly, or would you like to change anything?"_
-
-**Step 3 — Create the goal.** Once confirmed, run `clips goal create` with the title and the full description. Show the user the created goal reference (e.g. `#g001`).
-
-**Step 4 — Offer task breakdown.** Ask: _"Would you like to break this down into tasks?"_ If yes, move to the Task Breakdown workflow. If no, you're done.
-
-### Breaking Down into Tasks
-
-When the user wants to add tasks (after goal creation, or "break this into tasks", "add tasks to g1"):
-
-**Step 1 — Gather tasks.** Ask the user to list the tasks they have in mind. They may give you rough ideas, single words, or partial descriptions.
-
-**Step 2 — Refine titles.** Take what they gave you and refine each into a clear, descriptive task title. Task titles should:
-  - Be long enough to be self-explanatory (someone reading just the title should know what to do)
-  - Be short enough to scan in a list (one line, no more than ~15 words)
-  - Start with a verb when possible ("Add…", "Implement…", "Update…", "Remove…")
-  - Not duplicate information already in the goal title
-
-Present the refined list and ask the user to confirm or adjust, using `ask_user`.
-
-**Step 3 — Create the tasks.** Once confirmed, run `clips task create-batch` with the final titles. Show the result.
-
-**Step 4 — Offer continuation.** Ask if they want to add more tasks or if the breakdown is complete.
-
-### Implementing a Task
-
-When the user asks to implement a task (e.g. "work on t1", "implement the next task", "let's do g1 t2"):
-
-**Step 1 — Recontextualize.** Before writing any code, gather context silently (don't narrate each step to the user, just do it):
-  1. Run `clips view` to get the current state of all goals and tasks
-  2. Run `git --no-pager log --oneline -10` to see recent commits
-  3. Check the relevant files in the repo that the task will touch
-  4. Review which tasks are already closed to understand what's been done
-
-**Step 2 — Pad out the plan.** Based on the context gathered, write a brief implementation plan for this specific task: what files to touch, what changes to make, what order to do them in. Present this to the user and confirm before proceeding.
-
-**Step 3 — Execute.** Implement the task. When done, run `clips task status <goal> <task> closed` to mark it complete.
-
-**Step 4 — Next task.** After completing the task, show the updated goal status with `clips view <goal>` and ask if they want to continue with the next task.
-
-### Creating or Updating Repository Records
-
-Use these rules whenever the user asks for a CR, ADR, or asks to document repository work:
-
-1. Determine the record type from the requested outcome. A CR records a repository change; an ADR records a durable cross-cutting architectural decision.
-2. Do not create a new ADR merely because a task or CR exists. Update an existing record when it still describes the decision. Small bug fixes and feature iterations normally need only a CR.
-3. Every non-trivial, reviewable repository diff gets exactly one active CR. A CR may cover one task, several tasks, or a complete small goal. It is not a child item of a goal or task.
-4. Create or update record instances in `.clips/records/<type>/`. Never commit goals, tasks, CRs, ADRs, or other workflow instances. Files under `docs/records/` are template schemas only.
-5. For a stacked CR, set `Parent CR` and record the exact Git basis. Do not create a separate stack record.
-
-When a repository change starts, create the CR as `Draft`. When implementation and verification are complete, update it to `In Review`. Only a human may manufacture explicitly human-owned approval states such as `Testing`, `Needs Changes`, and `Ready to Merge`.
-
-Use the following canonical templates. Preserve the field names and section order unless the user asks for a variant.
-
-#### Goal template
-
-Goals are external planning artifacts and are not committed to the source repository.
-
-```md
-# Goal: Outcome title
-
-**Status:** open | in_progress | closed | not_planned | duplicate
-
-## Outcome
-
-What outcome should exist when this goal is complete?
-
-## Problem and context
-
-Why is this work needed?
-
-## Scope
-
-What is included and explicitly excluded?
-
-## Acceptance criteria
-
-- Observable condition that proves the outcome exists.
-
-## Constraints and dependencies
-
-Known limits, dependencies, or unresolved questions.
-```
-
-For the current CLI, map the goal to `clips goal create` with `title`, `description`, and `acceptance_criteria`. Keep the description concise enough to serve as the planning brief.
-
-#### Task template
-
-Tasks are external planning artifacts associated with a goal.
-
-```md
-- [ ] Task title beginning with a verb
-  - Goal: #g001
-  - Outcome: What this task produces.
-  - Done when: Observable completion condition.
-  - Dependencies: Other task or external dependency, or None.
-```
-
-For the current CLI, create the task with `title` and optional `description` under the goal. Do not turn each task into a CR unless it produces a repository diff; one CR may cover multiple tasks.
-
-#### CR template
-
-CR instances are local under `.clips/records/cr/CR-NNN-short-title.md`. Start from committed `docs/records/cr/CR-TEMPLATE.md`, but never place instances beside the template.
-
-```md
-# CR-NNN: Change title
-
-**Status:** Draft | In Review | Accepted | Merged | Rejected | Abandoned
-**Type:** Feature | Bugfix | Maintenance | Documentation
-**Branch:** exact-worker-branch
-**Base branch:** main
-**Base commit:** FULL_COMMIT_ID
-**Parent CR:** CR-NNN | None
-**Covers:** #g001, #g001#t1 | Untracked
-
-## Why
-
-## What changed
-
-## Behavior
-
-## Files changed
-
-| File | Semantic role |
-|---|---|
-| `path/to/file` | Role |
-
-## Test plan
-
-- [ ] Exact command and result
-
-## Compatibility and operations
-
-## Documentation and records
-
-List ADRs created or updated, or `None`.
-
-## Review
-
-- [ ] Changed files inspected
-- [ ] Regression coverage reviewed
-- [ ] CR branch and base verified
-- [ ] Stacked dependency reviewed, if applicable
-- [ ] Ready to merge
-```
-
-`Parent CR` expresses a stacked review dependency, not a planning hierarchy. The branch, base branch, and base commit must describe the exact change being reviewed.
-
-#### ADR template
-
-ADR instances are local under `.clips/records/adr/ADR-NNN-short-title.md`. Start from committed `docs/records/adr/ADR-TEMPLATE.md`. Create one only for a durable architectural decision.
-
-```md
-# ADR-NNN: Decision title
-
-**Status:** Proposed | Accepted | Superseded | Retired
-**Date:** YYYY-MM-DD
-**Decision basis:** FULL_COMMIT_ID
-**Supersedes:** ADR-NNN | None
-
-## Context
-
-## Decision
-
-## Consequences
-
-## Related
-
-CRs, goals, tasks, or external references.
-```
-
----
-
-## Concepts
-
-**Goals** are top-level planning items, optionally mirrored as GitHub Issues. Each goal has a title, description, status, and tasks.
-
-**Tasks** are actionable planning items within a goal. They appear as markdown checkboxes in the GitHub Issue mirror. With `tasks_as_issues: true`, tasks become their own GitHub Issues.
-
-**Refs** identify goals and tasks: `#g001`, `#g001#t1`, or shorthand `g1`, `g1 t1`.
-
-**Statuses** mirror GitHub: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
-
-**Record boundary**: Goals, tasks, CRs, and ADRs are local workflow state under `.clips/` and are never committed. Every non-trivial repository diff gets one active local CR. Committed product documentation holds user-visible truth; committed `docs/records/` files are schemas only. A CR can cover one task, several tasks, or a small complete goal, and may update an existing ADR.
-
-**CR basis**: Every CR records `Branch`, `Base branch`, `Base commit`, and optional `Parent CR`. `Parent CR` expresses a stacked review dependency; it is not a task hierarchy.
-
----
-
-## Commands
-
-### `clips init`
-
-Set up clips in the current repo. Creates local `.clips/` state with collaboration disabled. It does not contact GitHub or import Issues by default.
-
-**When to use:** First time using clips in a repo, or when a repo has existing GitHub Issues you want to track locally.
-
-**Triggers:** "set up clips", "initialize tracking", "start using clips", "import issues"
+# Clips
+
+Use a small set of durable work identities: strategic Lanes, goals, tasks, and
+system components.
+Make each task the agent's work contract before execution and its change record
+afterward. Add detail when it helps another agent act or accept the result.
+
+## Establish context and capabilities
+
+Read the current request, prior scope decisions, repository instructions, relevant
+source, and existing Clips state. Reuse information already supplied. Make
+reasonable implementation decisions within the user's authorization; ask only
+when a material unknown prevents progress. Goal creation, task breakdown, and
+continuation do not require a fixed interview or repeated confirmation.
+
+Inspect the installed CLI's help before relying on unfamiliar commands. This
+skill describes the work-contract implementation, which adds components,
+structured acceptance, and revision views beyond the published 1.6.0 baseline.
+The skill version is not a promise that these features are installed. Check
+`clips --help`, `clips lane --help`, `clips goal --help`, and
+`clips task --help`; use supported syntax.
+
+With an older CLI, preserve the same concepts in named Markdown sections of the
+existing goal/task descriptions. Record acceptance evidence there and treat
+status closure as administrative. Do not invent a structured receipt, resolvable
+revision, or new command. Explain a missing capability when it materially limits
+the task; do not upgrade or migrate solely to begin work. If an old command
+requires a legacy closure artifact, preserve truthful completion evidence and
+report the administrative limitation instead of inventing an ADR or task merely
+to satisfy that gate.
+
+## Use the core model
+
+| Record | Responsibility | Typical content |
+|---|---|---|
+| Lane `#l1` | Strategic frame across related goals | Product direction, narrative, goal set, product goals, and eventual strategic retrospective |
+| Goal `#g1` | One engineering outcome and how the work is organized | Context, scope, plan, architectural decisions, task relationships, outcome acceptance |
+| Task `#g1#t1` | One independently reviewable and acceptable change | Request, affected components, boundaries, owner, criteria, amendments, actual result, evidence, acceptance |
+| Component `#c1` | A persistent system responsibility and behavioral boundary | Responsibility, interface or behavior contract, constraints, implementation/specification references, dependencies |
+
+Use a Lane when multiple goals belong to one sustained product or strategic
+workstream. Lanes are deliberately less formal than goals: they do not own
+technical acceptance criteria, test evidence, or an acceptance owner. Read a
+goal's Lane for strategic context, but do not assume sibling goals are in scope
+or dependent merely because they share a Lane.
+
+Closing a Lane is retrospective, not engineering acceptance. Capture a concise
+summary, the cross-goal decision log, a system overview with components worked
+on, product goals achieved, and product media/screenshots when useful. Goal and
+task acceptance remain the evidence-bearing engineering records.
+
+Keep plan and decisions in the goal. The plan describes the current route to the
+outcome; the decisions explain choices, rationale, and consequences. Update the
+plan as work changes and retain useful decision history. Link the relevant goal
+decision from a component when it remains part of that component's rationale.
+An independent ADR remains useful when the project needs one, but is optional.
+
+Define a component when work needs a stable shared boundary. It must have a
+coherent responsibility, an observable contract another part of the system can
+rely on, and identifiable implementation or specification references. A planned
+component can initially name its intended implementation. Keep its identity
+through moves or internal refactors while the responsibility remains coherent.
+Unqualified components are shared across the repository: changing the configured
+agent username does not retarget `#c1`. Use an explicit namespace such as
+`#alice#c1` only when a separate catalog is intentional.
+Do not equate components mechanically with files, classes, packages, or agents.
+
+Express task scope as the selected components and the particular changes and
+constraints. A task may span components when the change is accepted as a unit.
+Split work into another task when it can be assigned and accepted independently.
+Use ordinary lists for implementation steps; do not create a step ID namespace
+or use `#t1.1` to imply a separately tracked task.
+
+Keep contracts, constraints, and decisions in named sections or link their
+authoritative source/schema/specification. Avoid duplicating every API detail in
+Clips. Do not create numbered invariant, interface, or decision artifacts merely
+because the model could support them.
+
+Use the optional fields that improve coordination. Add `sections` for named
+Markdown sections and `extensions` for project-defined JSON metadata or
+relationships. Define an extension's meaning and owner where another agent needs
+to rely on it. Preserve unfamiliar extension content during updates. Keep
+authority, acceptance, and source identity explicit rather than hiding altered
+semantics in an extension. There is no required section count or universal
+template that every task must fill. Section updates merge by heading; extension
+objects merge recursively. In either container, `null` removes a key. Put changed
+obligations in the request, scope, or criteria as well: note and extension edits
+do not automatically invalidate acceptance.
+
+## Keep identities stable
+
+- Use `#l1`, `#g1`, `#g1#t1`, and `#c1` for current records. The CLI may display padded
+  forms such as `#g001#t01`. Use the full goal/task reference outside its context.
+- Use `#g1#A1` and `#g1#t1#A1` for acceptance criteria. Within an identified goal,
+  `#t1#A1` is a contextual shorthand. Store criteria as objects with stable IDs;
+  preserve IDs when reordering or rewording the same condition. Retired IDs must
+  not be reused for different conditions. Evidence belongs to the criterion.
+- Use `#l1#r1`, `#c1#r1`, `#g1#r1`, or `#g1#t1#r1` to cite a recoverable record snapshot.
+  Use current refs for navigation and pinned revisions when a dependency or
+  acceptance discussion requires a particular agreement. A criterion within a
+  pinned task snapshot is `#g1#t1#r1#A1`. Use the same history mechanism for all
+  records; do not invent separate agreement-version systems.
+- Treat a revision as record history, not the identity of the code or artifact
+  checked. Preserve a commit, tree/diff identity, or immutable artifact reference
+  with verification evidence. A HEAD commit alone does not identify dirty work.
+
+Quote refs beginning with `#` in shell commands so the shell does not treat them
+as comments. Historical Tracks and standalone `#r001` refs remain compatibility aliases;
+current strategic grouping uses Lanes and `#l001`. A nested `#r1` identifies
+record history, so `#l1#r2` means Lane 1 revision 2.
+
+## Negotiate and execute a task
+
+1. Find or create the goal from the requested outcome. If it belongs to an
+   existing Lane, read that Lane for strategic context; create a Lane when this
+   work is part of a sustained multi-goal product frame rather than a one-off
+   outcome. Add the goal plan and decisions at the level needed for coordination. Create task requests from the available
+   context, without asking the user to author the breakdown.
+2. Make the task understandable before assignment: state the intended change in
+   `description`, identify affected `components`, describe `scope`, and define
+   observable `acceptance_criteria`. Add `owner`, `acceptance_owner`, dependencies,
+   and verification details when they affect execution.
+3. Read the relevant component contracts and source. Resolve a consequential
+   disagreement before dependent work commits to it. An agreed interface can
+   enable parallel implementation; integrated acceptance still needs the real
+   provider and consumer where their interaction is part of the criterion.
+4. Mark the task `in_progress` when execution begins. Keep meaningful discoveries
+   and amendments in its named sections. Update the request when the agreement
+   changes, recording why; history preserves the prior agreement. Do not quietly
+   reduce scope or weaken criteria to make a partial result appear complete.
+5. Consolidate the actual change in `record`, including behavior, compatibility
+   impact, relevant decisions, and evidence. Keep the request available. Capture
+   reviewable reasoning and outcomes, not a microstep diary or private reasoning.
+6. Verify the actual candidate against each criterion. Then record acceptance
+   through the supported command and continue other authorized work.
+
+Distinguish component `dependencies` from task `blocked_by`. The former describe
+system relationships; the latter describe required work ordering. Do not turn
+every runtime dependency into a serial implementation schedule. Treat declared
+blockers as coordination data, not proof that a scheduler enforces them.
+
+## Accept outcomes with evidence
+
+Use `goal accept` or `task accept` to record a receipt for a checked outcome.
+Include the actual `artifact`, the real `accepted_by` identity, a concise
+`summary`, and an assessment for each live criterion. Each assessment names its
+`id`, provides `evidence`, and has status `satisfied` or `waived`; a waiver also
+needs its reason and the applicable authorization. Never claim human acceptance
+on the basis of an agent's own verification. When `acceptance_owner` is set,
+`accepted_by` must match it; this is responsibility metadata, not authentication.
+
+The CLI captures the request snapshot with the receipt and preserves prior
+history. Its validation confirms record structure, not that tests ran or that
+the actor has human authority. Inspect the source, results, and authorization
+before writing the receipt. Changes to the agreed request can invalidate current
+acceptance; recheck affected outcomes and preserve prior evidence as history.
+
+Acceptance also generates `component_basis`, pinning each declared component to
+a recoverable revision. An explicit component pin is honored; a current ref is
+resolved at acceptance time, and missing declared components prevent acceptance.
+Pin the agreed component revision before assignment when the negotiated baseline
+must stay fixed. Later component edits do not automatically reopen tasks across
+their separate journals; reconcile affected agreements and evidence explicitly.
+The receipt's `artifact` identifies the checked result. Explicit acceptance clears
+the legacy `closed_commit_sha`; administrative closure still records HEAD.
+
+Honor the inherited `verification_mode`. In `behavior`, check relevant observable
+behavior using methods appropriate to the repository and change. In
+`behavior_and_tests`, include relevant automated test evidence. Do not change the
+mode to excuse missing evidence. Optional `behavior` text can describe scenarios;
+Clips does not execute Gherkin or choose a test framework.
+
+Treat `status closed` as an administrative operation. It records neither a
+verification result nor an approval. For whole-goal completion, assess the goal's
+outcome and required tasks against the integrated result. For selected-task
+scope, accept those tasks without closing unrelated remaining work. Preserve
+`not_planned` and `duplicate` as their true dispositions; report authorized
+waivers separately from delivered work. Goal acceptance requires terminal child
+tasks and an explicit `exceptions` entry with the task ref and reason for each
+`not_planned` or `duplicate` child. Existing closed tasks need no fabricated receipt.
+
+## Command patterns
+
+Prefer a JSON file or stdin for substantial Markdown and receipts. Keep JSON
+metadata types intact. Verify supported flags against local help. If batch
+creation fails or is interrupted, reconcile created IDs before retrying; a batch
+is not an all-or-nothing transaction.
 
 ```bash
 clips init
-```
-
----
-
-### `clips view`
-
-Display goals and tasks in a human-readable terminal format with status icons (🟢 open, 🟠 in_progress, 🟣 closed, ⚪ not_planned/duplicate).
-
-**When to use:** To see what's being tracked, check progress, review task lists before making changes.
-
-**Triggers:** "show issues", "what are we working on", "list goals", "show progress", "what's open", "view tasks"
-
-```bash
-clips view                  # List all goals with tasks
-clips view #g001            # View a specific goal with details
-clips view #r001            # View a track's description and member goals
-clips view #g001#t1         # View a specific task
-clips view all              # Include hidden statuses
-clips view --all-users      # Show all users' goals
-```
-
----
-
-### `clips goal create`
-
-Create a new goal (top-level planning item). The current compatibility CLI may create or update a GitHub Issue mirror.
-
-**When to use:** Starting new work, planning a feature, tracking a bug, defining a milestone.
-
-**Triggers:** "create a goal", "new issue", "let's track this", "plan a feature", "write up this work"
-
-```bash
-clips goal create '{"title":"Add authentication"}'
-clips goal create '{"title":"Fix login bug","description":"Users get 500 on /login"}'
-```
-
-The JSON accepts: `title` (required), `description`, `acceptance_criteria` (array of strings).
-
----
-
-### `clips goal status`
-
-Change a goal's status. A linked GitHub Issue changes only when collaboration was explicitly enabled.
-
-**When to use:** When work begins, completes, or is cancelled.
-
-**Triggers:** "start working on", "mark as done", "close the goal", "this is a duplicate", "won't fix"
-
-```bash
-clips goal status g1 in_progress    # Work started
-clips goal status g1 closed         # Completed
-clips goal status g1 not_planned    # Won't do
-clips goal status g1 duplicate      # Duplicate of another
-clips goal status g1 open           # Reopen
-```
-
-Valid statuses: `open`, `in_progress`, `closed`, `not_planned`, `duplicate`.
-
----
-
-### `clips goal update`
-
-Update a goal's title, description, or acceptance criteria. Pushes to a linked GitHub Issue only when collaboration was explicitly enabled.
-
-**When to use:** Refining scope, correcting a title, adding details after creation.
-
-**Triggers:** "update the goal", "change the title", "edit the description", "add acceptance criteria"
-
-```bash
-clips goal update g1 '{"title":"New title"}'
-clips goal update g1 '{"description":"Updated scope description"}'
-clips goal update g1 '{"acceptance_criteria":["Users can login","Users can logout"]}'
-```
-
----
-
-### `clips goal unlink`
-
-Disconnect one or all goals and their tasks from GitHub while preserving local planning history and existing remote issues. Detached goals remain local even when repository collaboration is enabled later.
-
-```bash
-clips goal unlink g1
-clips goal unlink #g001
-clips goal unlink --all
-```
-
-Both forms are idempotent. `--all` skips goals that are already local, and future local mutations or `clips sync` do not recreate, edit, or import detached issues.
-
----
-
-### `clips task create`
-
-Add a single task to a goal. Updates a linked GitHub Issue only when collaboration was explicitly enabled.
-
-**When to use:** Adding one task to an existing goal.
-
-**Triggers:** "add a task", "one more thing to do"
-
-```bash
-clips task create g001 '{"title":"Write unit tests"}'
-clips task create g001 '{"title":"Update docs","description":"Add API reference"}'
-```
-
----
-
-### `clips task create-batch`
-
-Add multiple tasks to a goal at once. Supports JSON argument or `--stdin` for piped input.
-
-**When to use:** Breaking a goal down into tasks, planning implementation steps, decomposing work.
-
-**Triggers:** "break this down", "add tasks", "decompose into steps", "plan the tasks", "create a task list"
-
-```bash
-clips task create-batch g001 '[{"title":"Design schema"},{"title":"Write migrations"},{"title":"Add API endpoints"}]'
-
-# Or pipe from stdin (avoids shell escaping)
-echo '[{"title":"Task 1"},{"title":"Task 2"}]' | clips task create-batch g001 --stdin
-```
-
----
-
-### `clips task status`
-
-Change a task's status. Updates the checkbox in the GitHub Issue body.
-
-**When to use:** Marking a task as started, done, or cancelled.
-
-**Triggers:** "mark task done", "complete this task", "close the task", "start working on task", "skip this task"
-
-```bash
-clips task status g1 t1 closed          # Task complete
-clips task status g1 t1 in_progress     # Working on it
-clips task status #g001#t1 not_planned  # Won't do
-clips task status g1 t1 open            # Reopen
-```
-
-Flexible ID formats: `g1 t1`, `g001 t01`, `#g001#t1` all work.
-
----
-
-### `clips task update`
-
-Update a task's title or description.
-
-**When to use:** Correcting a task name, adding implementation details.
-
-**Triggers:** "rename the task", "update task description", "edit task"
-
-```bash
-clips task update g001 t01 '{"title":"Renamed task"}'
-clips task update g1 t1 '{"description":"Added details"}'
-```
-
----
-
-### `clips task reorder`
-
-Reorder tasks within a goal. Only works when the goal is `open` and no tasks have been started.
-
-**When to use:** Prioritizing tasks, changing implementation order.
-
-**Triggers:** "reorder tasks", "change task order", "prioritize", "rearrange tasks"
-
-```bash
-clips task reorder g001 '["t03","t01","t02"]'
-```
-
----
-
-### `clips sync`
-
-Bidirectional sync between local JSONL and GitHub Issues, available only after explicit opt-in with `clips config collaboration true`. With collaboration disabled, this command performs no GitHub reads or writes.
-
-**When to use:** After external changes on GitHub (someone edited an issue in the UI), to ensure local and remote are consistent, or as a periodic reconciliation.
-
-**Triggers:** "sync issues", "pull from github", "push to github", "reconcile", "refresh issues", "update from remote"
-
-```bash
-clips sync              # Sync all goals ↔ GitHub Issues
-clips sync #g001        # Sync a specific goal
-clips sync g12          # Shorthand
-```
-
----
-
-### `clips web`
-
-Start the read-only kanban board. Inside an initialized Clips repository it opens that project; from any other directory it opens all projects registered by `clips init`. The board exposes only `GET /api/board` and cannot create, edit, reorder, or synchronize planning data.
-
-**When to use:** Reviewing one project or combining goals and tasks from multiple initialized repositories in a visual board.
-
-**Triggers:** "open the board", "show the kanban board", "start the local board", "view planning board"
-
-```bash
-clips web                              # Current project, or all registered projects elsewhere
-clips web --host 127.0.0.1 --port 4173
-```
-
-Open the printed local URL. The installed package includes the board assets and does not require Vite or project-local dependencies. The project selector supports combining registered projects; qualified references use `project#g001#t01`.
-
----
-
-### `clips config`
-
-View or change clips configuration.
-
-**When to use:** Checking current settings or enabling sub-issues for tasks. The legacy `auto_commit` setting does not change the repository-record boundary.
-
-**Triggers:** "show config", "change settings", "enable sub-issues"
-
-```bash
-clips config                            # Show all config
-clips config tasks_as_issues            # Show specific key
-clips config tasks_as_issues true       # Enable task sub-issues
-clips config collaboration false        # Solo mode (no git sync)
-clips config project_id my-project      # Override the repository-name board ID
-```
-
-**Config keys:**
-- `default_branch` — Git branch (default: `main`)
-- `username` — GitHub username
-- `collaboration` — Enable GitHub reads and writes during init, sync, and goal/task mutations (default: `false`; explicit opt-in)
-- `auto_commit` — Legacy compatibility setting; planning state should move to the external workflow store
-- `tasks_as_issues` — Create tasks as separate GitHub Issues (default: `false`)
-- `agent_dir` — Agent directory name for skill file (auto-detected; e.g. `.agents`, `.claude`, `.github`)
-- `project_id` — Unique cross-project board ID (defaults to the repository directory name)
-
----
-
-## Data Storage
-
-```
-.clips/
-  clips.config.json       # Configuration
-  db/
-    g001.jsonl            # Goal g001 + its tasks (append-only events)
-    g002.jsonl            # Goal g002 + its tasks
-  records/
-    cr/                   # Local Change Record instances
-    adr/                  # Local Architecture Decision Record instances
-```
-
-Each `.jsonl` file is an append-only event log. State is computed by replaying events. Files are never overwritten.
-
-## Workflow Example
-
-```bash
-# 1. Initialize in a repo
-clips init
-
-# 2. Create a goal
-clips goal create '{"title":"Add user authentication"}'
-# → Creates goal g001, GitHub Issue #1
-
-# 3. Break into tasks
-clips task create-batch g001 '[
-  {"title":"Design auth schema"},
-  {"title":"Implement JWT middleware"},
-  {"title":"Add login/logout endpoints"},
-  {"title":"Write integration tests"}
-]'
-# → Updates Issue #1 body with checkboxes
-
-# 4. Work through tasks
+clips lane create '{"title":"Workspace experience","description":"Make returning to work continuous","product_goals":["Users return to the right workspace quickly"]}'
+clips view '#l1'
+clips view all
+clips view '#g1' --json
+clips view '#g1#t1#A1' --json
+clips view '#c1#r1' --json
+clips history '#g1#t1' --json
+
+clips component create '{"title":"Workspace preference","responsibility":"Persist the selected workspace ID","contract":"Read returns an ID or no preference; storage failures do not block startup","source_refs":["src/workspace-preference.js"]}'
+clips component update c1 '{"sections":{"Failure behavior":"Treat unavailable storage as no preference"}}'
+clips component list
+clips component history c1
+
+clips goal create '{"title":"Restore the selected workspace","lane_id":"l1","description":"Reopen the last available workspace after reload","components":["#c1"],"plan":"Implement persistence, then integrate selection","decisions":"Store an ID and validate it against current workspaces","acceptance_criteria":[{"id":"A1","description":"Reload restores the last available workspace"}]}'
+clips task create g1 '{"title":"Persist workspace preference","description":"Read and write the selected workspace ID","components":["#c1"],"scope":"Persistence boundary and its failure behavior","acceptance_criteria":[{"id":"A1","description":"A stored ID can be read back"},{"id":"A2","description":"Unavailable storage does not throw"}]}'
 clips task status g1 t1 in_progress
-clips task status g1 t1 closed
-clips task status g1 t2 in_progress
-
-# 5. Check progress
-clips view #g001
-
-# 6. Complete the goal
-clips goal status g1 closed
-# → Closes Issue #1
+clips task update g1 t1 --file task-result.json
+clips task accept g1 t1 --file task-acceptance.json
+clips goal accept g1 --file goal-acceptance.json
+clips lane close l1 --file lane-closure.json
 ```
+
+For example, a task result file may contain `{"record":"Implemented the reader
+and writer. Evidence and compatibility notes follow..."}`. A receipt has this
+shape; replace illustrative values with observed facts before recording it:
+
+```json
+{
+  "artifact": "immutable source or artifact identity",
+  "accepted_by": "actual authorized reviewer or agent",
+  "summary": "What was checked and accepted",
+  "criteria": [
+    {"id":"A1","status":"satisfied","evidence":"Check, observed result, and evidence location"},
+    {"id":"A2","status":"satisfied","evidence":"Failure-path check and observed result"}
+  ]
+}
+```
+
+Goal/task JSON also supports existing behavior, verification, and collaboration
+fields. Acceptance criteria supplied as legacy strings remain readable; prefer
+explicit IDs for later edits. Use named sections or `extensions` for optional
+notes, risk descriptions, migration details, or project-specific relationships.
+
+## Preserve workflow state and coordinate writers
+
+Keep record instances in the resolved `.clips/` store. Goals and tasks use
+append-only events under `.clips/db/`; components and optional legacy records
+also remain local workflow state. Do not commit `.clips/` instances. Committed
+product docs and source remain authoritative for shipped behavior; committed
+`docs/records/` files are templates only.
+
+Worktrees share Clips state through the common repository root. Default to one
+coordinator writing shared records; workers return results, evidence, and proposed
+updates. Separate worktrees do not isolate the workflow store. Use revision
+checks when supported, but do not treat append locks or optimistic checks as a
+distributed scheduler, lease, or full multiwriter workflow.
+
+Keep execution state in task status, owner, and blocker information; keep
+cross-task coordination in the goal plan and cross-goal strategic context in the
+Lane. Use an existing squad log or session
+handoff for transient context. Do not require a separate execution-note artifact.
+On resume, reconcile those records with current source, workers, and user input.
+
+## Preserve optional and legacy workflows
+
+Keep existing Track journals, `#r001` refs, and `track_id` fields readable as
+legacy Lane aliases without rewriting them. New work uses `clips lane`,
+`#l001`, and `lane_id`.
+
+Keep existing `planning`/`building` type labels and attached ADRs readable without
+using them to prohibit tasks or require an ADR. The goal can hold both planning
+and implementation work. Keep existing CR/ADR files and links; do not create a
+parallel CR for every task. Use an independent record when the user or project
+has a concrete reason, and link the authoritative task instead of duplicating it.
+
+Use `clips record status` for existing CR/ADR lifecycle changes. Valid statuses
+are `Draft`, `Proposed`, `In Review`, `Accepted`, `Deprecated`, and `Archived`.
+Instances live under `.clips/records/{cr,adr}/`; archiving moves them into the
+type's `archived/` directory. Copy committed templates only when needed.
+
+Keep GitHub collaboration opt-in. `clips init` is local and `clips sync` performs
+no GitHub work while collaboration is disabled. Enable it only when authorized
+with `clips config collaboration true`. Use `clips goal unlink <ref>` or `--all`
+to keep local history while leaving existing remote issues unchanged. Use `clips web` for the read-only board and Lane summaries. The legacy
+`clips track` command remains only for compatibility. These optional surfaces do not change task acceptance.

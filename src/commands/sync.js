@@ -1,11 +1,13 @@
 // CLI command: clips sync
-import { syncAll, syncGoal } from '../lib/sync.js';
+import { pushTrack, syncAll, syncGoal } from '../lib/sync.js';
+import { laneToTrackId, normalizeLaneId, readLane } from '../lib/lanes.js';
 import { parseRef, readGoalWithTasks } from '../lib/core.js';
 
 const USAGE = `Usage: clips sync [ref]
 
   clips sync          Pull and push GitHub data when collaboration is enabled
   clips sync #g001    Pull all GitHub data; push only this goal
+  clips sync #l001    Push this strategic Lane
 
 GitHub sync is disabled by default. Enable explicitly with:
   clips config collaboration true
@@ -13,7 +15,8 @@ GitHub sync is disabled by default. Enable explicitly with:
 Examples:
   clips sync
   clips sync g001
-  clips sync #g12`;
+  clips sync #g12
+  clips sync '#l1'`;
 
 export function runSyncCommand(args) {
   if (args.includes('--help') || args.includes('-h')) {
@@ -39,10 +42,19 @@ export function runSyncCommand(args) {
     return;
   }
 
+  if (/^#?[lr]\\d+$/i.test(ref)) {
+    const laneId = normalizeLaneId(ref);
+    if (!readLane(laneId)) throw new Error(`Lane ${laneId} not found`);
+    const result = pushTrack(laneToTrackId(laneId));
+    if (result?.skipped) console.log('• GitHub sync disabled. Enable with: clips config collaboration true');
+    else console.log(`✅ Synced Lane #${laneId}`);
+    return;
+  }
+
   const parsed = parseRef(ref);
   if (!parsed || !parsed.goalId) {
     console.error(`❌ Invalid ref: ${ref}`);
-    console.error('   Use a goal ref like #g001 or g12');
+    console.error('   Use a goal ref like #g001 or a Lane ref like #l1');
     process.exit(1);
   }
 

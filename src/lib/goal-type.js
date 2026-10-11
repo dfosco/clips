@@ -38,18 +38,9 @@ export function adrRecordExists(recordsDir, adrId) {
   ));
 }
 
-export function goalCompletionError(goal, { recordsDir } = {}) {
-  const type = normalizeGoalType(goal?.type);
-  if (type === 'planning') {
-    if (!goal?.adr_id) return 'Cannot close a planning goal until an ADR is attached';
-    if (recordsDir && !adrRecordExists(recordsDir, goal.adr_id)) {
-      return `Cannot close a planning goal because ${goal.adr_id} is missing from .clips/records/adr`;
-    }
-    return null;
-  }
-
-  const taskCount = Array.isArray(goal?.tasks)
-    ? goal.tasks.length
-    : Object.keys(goal?.tasks || {}).length;
-  return taskCount > 0 ? null : 'Cannot close a building goal without tasks';
+// Type and ADR metadata are retained for old records. Neither imposes a workflow
+// gate: every goal can contain its plan, decisions and tasks. Administrative
+// status changes (including GitHub mirrors) are distinct from explicit acceptance.
+export function goalCompletionError() {
+  return null;
 }

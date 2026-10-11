@@ -13,8 +13,9 @@ import {
 } from './core.js';
 import { readConfig, isCollaborationEnabled } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
-import { adrRecordExists, goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
+import { goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
 import { appendTrackEvent, listTracks, readTrack } from './tracks.js';
+import { trackToLaneId } from './lanes.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
 
@@ -182,10 +183,34 @@ function formatBehaviorBlock(behavior, indent = '') {
   return `${indent}\`\`\`gherkin\n${lines}\n${indent}\`\`\``;
 }
 
+function workDetails(record, ref, { criteria = true } = {}) {
+  const sections = [];
+  for (const [label, field] of [['Scope', 'scope'], ['Plan', 'plan'], ['Decisions', 'decisions'], ['Change record', 'record']]) {
+    if (record[field]) sections.push(`## ${label}\n\n${record[field]}`);
+  }
+  if (record.components?.length) sections.push(`## Components\n\n${record.components.join(', ')}`);
+  if (record.owner) sections.push(`Owner: ${record.owner}`);
+  if (record.acceptance_owner) sections.push(`Acceptance owner: ${record.acceptance_owner}`);
+  if (criteria && record.acceptance_criteria?.length) {
+    sections.push(`## Acceptance criteria\n\n${record.acceptance_criteria.map((item, index) => {
+      const id = typeof item === 'string' ? `A${index + 1}` : item.id || `A${index + 1}`;
+      return `- ${ref}#${id}: ${typeof item === 'string' ? item : item.description || item.text}`;
+    }).join('\n')}`);
+  }
+  if (record.acceptance) {
+    const { accepted_by, summary, artifact, criteria: assessments } = record.acceptance;
+    sections.push(`## Acceptance\n\nAccepted by: ${accepted_by}\n\n${summary}\n\nArtifact: ${typeof artifact === 'string' ? artifact : JSON.stringify(artifact)}\n\n${(assessments || []).map((item) => `- ${ref}#${item.id}: ${item.status}${item.reason ? ` (${item.reason})` : ''}${item.evidence ? ` — ${typeof item.evidence === 'string' ? item.evidence : JSON.stringify(item.evidence)}` : ''}`).join('\n')}`);
+  }
+  for (const [heading, markdown] of Object.entries(record.sections || {})) sections.push(`## ${heading}\n\n${markdown}`);
+  return sections.join('\n\n');
+}
+
 export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
   const sections = [];
   if (parentIssueNumber) sections.push(`Sub-issue of #${parentIssueNumber}`);
   if (task.description) sections.push(formatDescription(task.description));
+  const details = workDetails(task, `#${goal?.goal_id || 'goal'}#${task.task_id || 'task'}`);
+  if (details) sections.push(details);
   if (task.behavior) sections.push(`## Behavior\n\n${formatBehaviorBlock(task.behavior)}`);
   sections.push(`## Verification Mode\n\n\`${effectiveVerificationMode(goal?.verification_mode, task.verification_mode)}\``);
   return sections.join('\n\n').trim();
@@ -194,8 +219,8 @@ export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
 export function buildIssueBody(goal) {
   const config = readConfig();
   let body = '';
-  if (goal.track_id) body += `Track: #${goal.track_id}\n\n`;
-  if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => `#${id}`).join(', ')}\n\n`;
+  if (goal.track_id) body += `Lane: #${trackToLaneId(goal.track_id)}\n\n`;
+  if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}\n\n`;
 
   if (goal.description) {
     const desc = formatDescription(goal.description);
@@ -227,14 +252,17 @@ export function buildIssueBody(goal) {
           typeof criterion === 'string'
             ? criterion
             : criterion.text || criterion.description || JSON.stringify(criterion);
-        body += `- ${text}\n`;
+        body += `- ${typeof criterion === 'object' && criterion.id ? `#${goal.goal_id}#${criterion.id}: ` : ''}${text}\n`;
       }
       body += '\n';
     }
   }
 
+  const details = workDetails(goal, `#${goal.goal_id}`, { criteria: false });
+  if (details) body += `${details}\n\n`;
+
   const tasks = getOrderedTasks(goal);
-  if (goal.type !== 'planning' && tasks.length > 0) {
+  if (tasks.length > 0) {
     body += `## Tasks\n\n`;
     for (const task of tasks) {
       const checked = ['closed', 'not_planned', 'duplicate'].includes(task.status) ? 'x' : ' ';
@@ -245,6 +273,8 @@ export function buildIssueBody(goal) {
         if (task.description) {
           body += `${String(task.description).split(/\r?\n/).map((line) => `  ${line}`).join('\n')}\n`;
         }
+        const details = workDetails(task, `#${goal.goal_id}#${task.task_id}`);
+        if (details) body += details.split('\n').map((line) => `  ${line}`).join('\n') + '\n';
         body += `  - Verification: \`${effectiveVerificationMode(goal.verification_mode, task.verification_mode)}\`\n`;
         if (task.behavior) {
           body += `  - Behavior:\n\n${formatBehaviorBlock(task.behavior, '    ')}\n`;
@@ -374,7 +404,7 @@ export function importIssue(issueData) {
     },
   );
 
-  if (metadata.type === 'planning' && metadata.adr_id) {
+  if (metadata.adr_id) {
     appendEvent(goalId, {
       event: 'adr_attached',
       goal_id: goalId,
@@ -383,8 +413,10 @@ export function importIssue(issueData) {
     });
   }
 
-  // Planning issue checkboxes are content, not implementation tasks.
-  const tasks = metadata.type === 'building' ? parseTaskList(issueData.body) : [];
+  // Legacy planning checkboxes outside an explicit Tasks section remain prose.
+  // Both old type labels can now contain an explicitly declared task list.
+  const taskSection = issueData.body?.match(/^## Tasks\s*\n([\s\S]*?)(?=^## |^---|$(?![\s\S]))/m)?.[1];
+  const tasks = parseTaskList(taskSection ?? (metadata.type === 'planning' ? '' : issueData.body));
   tasks.forEach((task, idx) => {
     const taskId = `t${String(idx + 1).padStart(2, '0')}`;
     appendEvent(
@@ -454,7 +486,7 @@ export function pullAllIssues() {
   let updated = 0;
 
   for (const issue of issues) {
-    if (issue.body?.includes('<!-- clips-track:')) continue;
+    if (issue.body?.includes('<!-- clips-track:') || issue.body?.includes('<!-- clips-lane:')) continue;
     const existingGoalId = findGoalByIssueNumber(issue.number);
     if (existingGoalId) {
       // Already imported — check if status diverged
@@ -463,50 +495,21 @@ export function pullAllIssues() {
       if (goal.github_unlinked) continue;
 
       const metadata = parseGoalMetadata(issue.body);
-      if (goal.status !== 'closed' && metadata.type_explicit && metadata.type !== goal.type) {
-        const candidate = {
-          ...goal,
-          type: metadata.type,
-          adr_id: metadata.type === 'planning' && metadata.adr_explicit ? metadata.adr_id : goal.adr_id,
-        };
-        const hasInvalidArtifacts = metadata.type === 'planning'
-          ? Object.keys(goal.tasks).length > 0
-          : Boolean(goal.adr_id && adrRecordExists(getClipsRecordsDir('adr'), goal.adr_id));
-        const invalidClosedState = goal.status === 'closed'
-          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
-        if (!hasInvalidArtifacts && !invalidClosedState) {
-          appendEvent(existingGoalId, {
-            event: 'updated',
-            goal_id: existingGoalId,
-            timestamp: issue.updatedAt || new Date().toISOString(),
-            type: metadata.type,
-          });
-          if (metadata.type === 'building' && goal.adr_id) {
-            appendEvent(existingGoalId, {
-              event: 'adr_detached',
-              goal_id: existingGoalId,
-              timestamp: issue.updatedAt || new Date().toISOString(),
-              adr_id: goal.adr_id,
-            });
-          }
-          goal = readGoalWithTasks(existingGoalId);
-          updated++;
-        }
+      if (metadata.type_explicit && metadata.type !== goal.type) {
+        appendEvent(existingGoalId, {
+          event: 'updated', goal_id: existingGoalId,
+          timestamp: issue.updatedAt || new Date().toISOString(), type: metadata.type,
+        });
+        goal = readGoalWithTasks(existingGoalId);
+        updated++;
       }
-      if (goal.status !== 'closed' && goal.type === 'planning' && metadata.adr_explicit && metadata.adr_id && metadata.adr_id !== goal.adr_id) {
-        const candidate = { ...goal, adr_id: metadata.adr_id };
-        const invalidClosedState = goal.status === 'closed'
-          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
-        if (!invalidClosedState) {
-          appendEvent(existingGoalId, {
-            event: 'adr_attached',
-            goal_id: existingGoalId,
-            timestamp: issue.updatedAt || new Date().toISOString(),
-            adr_id: metadata.adr_id,
-          });
-          goal = readGoalWithTasks(existingGoalId);
-          updated++;
-        }
+      if (metadata.adr_explicit && metadata.adr_id && metadata.adr_id !== goal.adr_id) {
+        appendEvent(existingGoalId, {
+          event: 'adr_attached', goal_id: existingGoalId,
+          timestamp: issue.updatedAt || new Date().toISOString(), adr_id: metadata.adr_id,
+        });
+        goal = readGoalWithTasks(existingGoalId);
+        updated++;
       }
 
       const ghClosed = issue.state === 'CLOSED' || issue.state === 'closed';
@@ -611,19 +614,36 @@ function issueId(number, repository) {
 export function pushTrack(trackId) {
   if (!isCollaborationEnabled()) return { skipped: true };
   const track = readTrack(trackId);
-  if (!track) throw new Error(`Track ${trackId} not found`);
+  if (!track) throw new Error(`Lane ${trackId} not found`);
   const repository = repositoryFromRemote();
-  if (!repository) throw new Error('GitHub origin remote is required to sync tracks');
-  const body = [`<!-- clips-track: ${track.track_id} -->`, track.description || '',
-    track.acceptance_criteria?.length ? `## Acceptance criteria\n\n${track.acceptance_criteria.map((item) => `- ${item}`).join('\n')}` : ''].filter(Boolean).join('\n\n');
-  const title = `[Track] ${track.title}`;
+  if (!repository) throw new Error('GitHub origin remote is required to sync lanes');
+  const laneId = trackToLaneId(track.track_id);
+  const sections = [`<!-- clips-lane: ${laneId} -->`, track.description || ''];
+  if (track.product_goals?.length) sections.push(`## Product goals\n\n${track.product_goals.map((item) => `- ${item}`).join('\n')}`);
+  if (track.legacy_acceptance_criteria?.length || track.acceptance_criteria?.length) {
+    const criteria = track.legacy_acceptance_criteria || track.acceptance_criteria;
+    sections.push(`## Legacy Track criteria\n\n${criteria.map((item) => `- ${item}`).join('\n')}`);
+  }
+  if (track.closure) {
+    sections.push(`## Closure summary\n\n${track.closure.summary || ''}`);
+    if (track.closure.product_goals_achieved?.length) sections.push(`## Product goals achieved\n\n${track.closure.product_goals_achieved.map((item) => `- ${item}`).join('\n')}`);
+    if (track.closure.decision_log) sections.push(`## Decision log\n\n${track.closure.decision_log}`);
+    if (track.closure.system_overview) sections.push(`## System overview\n\n${track.closure.system_overview}`);
+    if (track.closure.components?.length) sections.push(`## Components worked on\n\n${track.closure.components.map((item) => `- ${item}`).join('\n')}`);
+    if (track.closure.media?.length) sections.push(`## Product media\n\n${track.closure.media.map((item) => {
+      const media = typeof item === 'string' ? { src: item } : item;
+      return media.caption ? `- [${media.caption}](${media.src})` : `- ${media.src}`;
+    }).join('\n')}`);
+  }
+  const body = sections.filter(Boolean).join('\n\n');
+  const title = `[Lane] ${track.title}`;
   if (!track.issue_number) {
     const result = spawnSync('gh', ['issue', 'create', '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     if (result.status !== 0) throw new Error(result.stderr || 'gh issue create failed');
     const issueUrl = result.stdout.trim();
     const number = Number(issueUrl.split('/').pop());
-    if (!Number.isInteger(number)) throw new Error('Could not read created track issue number');
-    appendTrackEvent(trackId, { event: 'track_github_synced', issue_number: number, issue_url: issueUrl });
+    if (!Number.isInteger(number)) throw new Error('Could not read created lane issue number');
+    appendTrackEvent(trackId, { event: 'lane_github_synced', lane_id: laneId, issue_number: number, issue_url: issueUrl });
   } else {
     const result = spawnSync('gh', ['issue', 'edit', String(track.issue_number), '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     if (result.status !== 0) throw new Error(result.stderr || 'gh issue edit failed');
@@ -843,7 +863,7 @@ export function syncAll() {
 
   for (const track of listTracks()) {
     try { pushTrack(track.track_id); }
-    catch (error) { pullResult.warnings.push({ source: 'tracks', message: `${track.track_id}: ${error.message}` }); }
+    catch (error) { pullResult.warnings.push({ source: 'lanes', message: `#${trackToLaneId(track.track_id)}: ${error.message}` }); }
   }
 
   const dbDir = getClipsDbDir();

@@ -5,6 +5,8 @@
   import MarkdownContent from './lib/MarkdownContent.svelte';
   import TaskCard from './lib/TaskCard.svelte';
   import GoalCard from './lib/GoalCard.svelte';
+  import WorkDetails from './lib/WorkDetails.svelte';
+  import EvidenceValue from './lib/EvidenceValue.svelte';
 
   const columns = [
     { id: 'open', label: 'Open', color: 'green' },
@@ -18,7 +20,8 @@
     { id: 'tracks', label: 'Tracks', icon: 'target' },
     { id: 'goals', label: 'Goals', icon: 'target' },
     { id: 'tasks', label: 'Tasks', icon: 'tasks' },
-    { id: 'changes', label: 'CRs', icon: 'changes' },
+    { id: 'components', label: 'Components', icon: 'layers' },
+    { id: 'changes', label: 'Legacy CRs', icon: 'changes' },
     { id: 'github', label: 'GitHub', icon: 'github' },
   ];
 
@@ -40,8 +43,10 @@
   let requestedProjectIds = $state(null);
 
   function routePath() {
-    if (selectedItem?.type === 'goal') return `/goals/${encodeURIComponent(selectedItem.item.ref)}`;
-    if (selectedItem?.type === 'task') return `/tasks/${encodeURIComponent(selectedItem.item.ref)}`;
+    const selectedRef = selectedItem?.item?.ref || selectedItem?.ref;
+    if (selectedItem?.type === 'goal') return `/goals/${encodeURIComponent(selectedRef)}`;
+    if (selectedItem?.type === 'task') return `/tasks/${encodeURIComponent(selectedRef)}`;
+    if (selectedItem?.type === 'component') return `/components/${encodeURIComponent(selectedRef)}`;
     if (activeView === 'change_record' && activeRecord) return `/changes/${encodeURIComponent(activeRecord.id)}`;
     return activeView === 'board' ? '/board' : `/${activeView}`;
   }
@@ -61,7 +66,7 @@
   function applyLocation() {
     const url = new URL(window.location.href);
     const [view, identifier] = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    activeView = ['board', 'tracks', 'goals', 'tasks', 'changes', 'github', 'settings'].includes(view) ? view : 'board';
+    activeView = ['board', 'tracks', 'goals', 'tasks', 'components', 'changes', 'github', 'settings'].includes(view) ? view : 'board';
     if (view === 'changes' && identifier) activeView = 'change_record';
     search = url.searchParams.get('search') || '';
     sourceFilter = url.searchParams.get('source') || 'all';
@@ -74,15 +79,19 @@
     activeRecord = null;
     if (identifier && view === 'goals') selectedItem = { type: 'goal', ref: identifier };
     if (identifier && view === 'tasks') selectedItem = { type: 'task', ref: identifier };
+    if (identifier && view === 'components') selectedItem = { type: 'component', ref: identifier };
     if (identifier && view === 'changes') activeRecord = { id: identifier };
   }
 
   function resolveRouteObjects() {
-    if (selectedItem?.ref) {
+    const selectedRef = selectedItem?.ref || selectedItem?.item?.ref;
+    if (selectedRef) {
       const item = selectedItem.type === 'goal'
-        ? board?.goals?.find((goal) => goal.ref === selectedItem.ref)
-        : board?.goals?.flatMap((goal) => goal.tasks).find((task) => task.ref === selectedItem.ref);
-      selectedItem = item ? { type: selectedItem.type, item } : null;
+        ? board?.goals?.find((goal) => goal.ref === selectedRef)
+        : selectedItem.type === 'component'
+          ? board?.components?.find((component) => component.ref === selectedRef)
+          : board?.goals?.flatMap((goal) => goal.tasks).find((task) => task.ref === selectedRef);
+      selectedItem = item ? { ...selectedItem, ref: undefined, item } : null;
     }
     if (activeRecord?.id && !activeRecord.markdown) activeRecord = board?.change_records?.find((record) => record.id === activeRecord.id) || null;
   }
@@ -107,15 +116,15 @@
   }
 
   function matches(value, query) {
-    return value?.toLowerCase().includes(query);
+    return typeof value === 'string' && value.toLowerCase().includes(query);
   }
 
   function goalMatches(goal, query) {
-    return [goal.title, goal.description, goal.behavior, goal.type, goal.adr_id, goal.effective_verification_mode, goal.ref, goal.project_id, goal.project_label].some((value) => matches(value, query));
+    return [goal.title, goal.description, goal.scope, goal.plan, goal.decisions, goal.record, goal.behavior, goal.type, goal.adr_id, goal.effective_verification_mode, goal.ref, goal.project_id, goal.project_label].some((value) => matches(value, query));
   }
 
   function taskMatches(task, query) {
-    return [task.title, task.description, task.behavior, task.effective_verification_mode, task.goal_title, task.ref, task.project_id, task.project_label].some((value) => matches(value, query));
+    return [task.title, task.description, task.scope, task.record, task.behavior, task.effective_verification_mode, task.goal_title, task.ref, task.project_id, task.project_label].some((value) => matches(value, query));
   }
 
   function recordMatches(record, query) {
@@ -178,6 +187,7 @@
     const query = search.trim().toLowerCase();
     return (board?.goals ?? []).flatMap((goal) => goal.tasks.filter((task) => selectedProjectIds.includes(task.project_id) && (sourceFilter === 'all' || task.source === sourceFilter) && (goalFilter === 'all' || task.goal_ref === goalFilter) && (!query || taskMatches(task, query))));
   });
+  let visibleComponents = $derived(board?.components?.filter((component) => selectedProjectIds.includes(component.project_id) && [component.title, component.responsibility, component.contract, component.ref, component.project_label].some((value) => matches(value, search.trim().toLowerCase()))) ?? []);
   let visibleRecords = $derived(board?.change_records?.filter((record) => selectedProjectIds.includes(record.project_id) && recordMatches(record, search.trim().toLowerCase())) ?? []);
   let scopeLabel = $derived(selectedProjectIds.length === 1 ? board?.projects?.find((project) => project.id === selectedProjectIds[0])?.label || 'Project' : `${selectedProjectIds.length} projects`);
 
@@ -209,6 +219,11 @@
 
   function openGoal(goal) {
     selectedItem = { type: 'goal', item: goal };
+    updateUrl();
+  }
+
+  function openComponent(component) {
+    selectedItem = { type: 'component', item: component };
     updateUrl();
   }
 
@@ -292,7 +307,7 @@
 
 <svelte:head>
   <title>Clips · {activeView === 'board' ? scopeLabel : activeView === 'change_record' ? activeRecord?.id || 'Change record' : navigation.find((item) => item.id === activeView)?.label}</title>
-  <meta name="description" content="Read-only local board for Clips goals and tasks." />
+  <meta name="description" content="Read-only local board for Clips goals, tasks, and system components." />
 </svelte:head>
 
 <div class:dark-mode={darkMode} class:light-mode={themeOverride === false} class="app-shell">
@@ -360,14 +375,29 @@
     {:else if activeView === 'tracks'}
       <section class="secondary-view"><div class="secondary-heading"><div><h1>Tracks</h1><p>Workstreams and their goals.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleTracks as track}<div class="compact-row"><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{track.title}</strong><small>{track.project_label} · {track.ref} · {track.completed_goal_count}/{track.goal_count} goals closed · {statusLabel(track.status)}</small>{#if track.description}<small>{track.description}</small>{/if}{#each visibleGoalsList.filter((goal) => goal.track_ref === track.ref) as goal}<button type="button" onclick={() => openGoal(goal)}>{goal.ref} {goal.title} · {statusLabel(goal.status)}</button>{/each}</span></div>{/each}{#if visibleGoalsList.some((goal) => !goal.track_ref)}<div class="compact-row"><span class="compact-row__main"><strong>Unassigned goals</strong>{#each visibleGoalsList.filter((goal) => !goal.track_ref) as goal}<button type="button" onclick={() => openGoal(goal)}>{goal.ref} {goal.title}</button>{/each}</span></div>{/if}</div></section>
     {:else if activeView === 'goals'}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>Goals</h1><p>Compact list of planning outcomes.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleGoalsList as goal}<button class="compact-row" type="button" onclick={() => openGoal(goal)}><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · {goal.track_ref || 'Unassigned'} · {goal.type === 'planning' ? `Planning · ${goal.adr_id || 'ADR pending'}` : `Building · ${goal.tasks.length} ${goal.tasks.length === 1 ? 'task' : 'tasks'}`} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'}{#if goal.blocked_by?.length} · Blocked by {goal.blocked_by.join(', ')}{/if}{#if goal.status === 'closed' && goal.closed_commit_sha} · Closed in {goal.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status"><span class="status-dot status-dot--{goalColumn(goal)}"></span>{statusLabel(goal.status)}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleGoalsList.length === 0}<div class="list-empty">No goals match “{search}”.</div>{/if}</div></section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Goals</h1><p>Compact list of planning outcomes.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleGoalsList as goal}<button class="compact-row" type="button" onclick={() => openGoal(goal)}><span class="compact-row__icon"><Icon name="target" size={18} /></span><span class="compact-row__main"><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · {goal.track_ref || 'Unassigned'} · {goal.tasks.length} {goal.tasks.length === 1 ? 'task' : 'tasks'} · {goal.source === 'github' ? 'GitHub linked' : 'Local only'}{#if goal.blocked_by?.length} · Blocked by {goal.blocked_by.join(', ')}{/if}{#if goal.status === 'closed' && goal.closed_commit_sha} · Closed in {goal.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status"><span class="status-dot status-dot--{goalColumn(goal)}"></span>{statusLabel(goal.status)}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleGoalsList.length === 0}<div class="list-empty">No goals match “{search}”.</div>{/if}</div></section>
     {:else if activeView === 'tasks'}
       <section class="secondary-view"><div class="secondary-heading"><div><h1>Tasks</h1><p>Compact list of tasks across all goals.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleTasksList as task}<button class="compact-row" type="button" onclick={() => openTask(task)}><span class="compact-row__icon"><span class="status-dot status-dot--{task.column}"></span></span><span class="compact-row__main"><strong>{task.title}</strong><small>{task.project_label} · {task.ref} · {task.goal_title} · {statusLabel(task.status)}{#if task.status === 'closed' && task.closed_commit_sha} · Closed in {task.closed_commit_sha.slice(0, 7)}{/if}</small></span><span class="compact-row__status">{task.source === 'github' ? 'GitHub linked' : 'Local only'}{#if task.linked_crs?.length} · {task.linked_crs.map((record) => record.id).join(', ')}{/if}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleTasksList.length === 0}<div class="list-empty">No tasks match “{search}”.</div>{/if}</div></section>
+    {:else if activeView === 'components'}
+      <section class="secondary-view">
+        <div class="secondary-heading"><div><h1>System components</h1><p>Responsibilities, contracts, and dependencies that persist across changes.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>
+        {#if board?.warnings?.length}<div class="warning-banner" role="status">{board.warnings.length} record{board.warnings.length === 1 ? '' : 's'} could not be read.</div>{/if}
+        <div class="compact-list">
+          {#each visibleComponents as component}
+            <button class="compact-row" type="button" onclick={() => openComponent(component)}>
+              <span class="compact-row__icon"><Icon name="layers" size={18} /></span>
+              <span class="compact-row__main"><strong>{component.title}</strong><small>{component.project_label} · {component.ref} · r{component.revision}</small>{#if component.responsibility}<small>{component.responsibility}</small>{/if}</span>
+              <span class="compact-row__status">{component.status}</span><Icon name="chevron-right" size={17} />
+            </button>
+          {/each}
+          {#if visibleComponents.length === 0}<div class="list-empty">{search ? `No components match “${search}”.` : 'No system components recorded yet.'}</div>{/if}
+        </div>
+      </section>
     {:else if activeView === 'changes'}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>Change records</h1><p>Committed review packets linked to planning work.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleRecords as record}<button class="compact-row" type="button" onclick={() => openChangeRecord(record)}><span class="compact-row__icon"><Icon name="changes" size={18} /></span><span class="compact-row__main"><strong>{record.id}: {record.title}</strong><small>{record.project_label} · {record.type} · {record.status} · {record.covers.length} linked refs{#if record.linked_prs?.length} · {record.linked_prs.length} linked PR{record.linked_prs.length === 1 ? '' : 's'}{/if}</small></span><span class="compact-row__status">{record.status}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleRecords.length === 0}<div class="list-empty">No change records match “{search}”.</div>{/if}</div>{#if (board?.github_prs || []).filter((pr) => selectedProjectIds.includes(pr.project_id) && !pr.cr_ids?.length && !pr.covers?.length).length}<div class="github-unmatched"><h2>Unassociated GitHub changes</h2><p>Pull requests without explicit Clips references.</p>{#each (board?.github_prs || []).filter((pr) => selectedProjectIds.includes(pr.project_id) && !pr.cr_ids?.length && !pr.covers?.length) as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.project_label} · {pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}</section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Legacy change records</h1><p>Optional local CRs retained alongside task change records.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="compact-list">{#each visibleRecords as record}<button class="compact-row" type="button" onclick={() => openChangeRecord(record)}><span class="compact-row__icon"><Icon name="changes" size={18} /></span><span class="compact-row__main"><strong>{record.id}: {record.title}</strong><small>{record.project_label} · {record.type} · {record.status} · {record.covers.length} linked refs{#if record.linked_prs?.length} · {record.linked_prs.length} linked PR{record.linked_prs.length === 1 ? '' : 's'}{/if}</small></span><span class="compact-row__status">{record.status}</span><Icon name="chevron-right" size={17} /></button>{/each}{#if visibleRecords.length === 0}<div class="list-empty">No legacy change records match “{search}”.</div>{/if}</div>{#if (board?.github_prs || []).filter((pr) => selectedProjectIds.includes(pr.project_id) && !pr.cr_ids?.length && !pr.covers?.length).length}<div class="github-unmatched"><h2>Unassociated GitHub changes</h2><p>Pull requests without explicit Clips references.</p>{#each (board?.github_prs || []).filter((pr) => selectedProjectIds.includes(pr.project_id) && !pr.cr_ids?.length && !pr.covers?.length) as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.project_label} · {pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}</section>
     {:else if activeView === 'change_record' && activeRecord}
       <section class="record-page">
-        <div class="record-page__topbar"><button class="back-button" type="button" onclick={() => openView('changes')}><Icon name="chevron-right" size={16} /> Back to change records</button><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>
+        <div class="record-page__topbar"><button class="back-button" type="button" onclick={() => openView('changes')}><Icon name="chevron-right" size={16} /> Back to legacy change records</button><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>
         <div class="record-page__layout">
           <article class="record-document">
             <div class="record-document__eyebrow"><span class="task-ref">{activeRecord.id}</span><span class="source-label">{activeRecord.project_label}</span><span class="source-label">{activeRecord.status}</span></div>
@@ -384,19 +414,19 @@
         </div>
       </section>
     {:else if activeView === 'github'}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>GitHub</h1><p>Planning data linked to GitHub Issues.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>{#if linkedGoals.length}<div class="goal-list">{#each linkedGoals as goal}<button class="goal-row" type="button" onclick={() => { goalFilter = goal.ref; sourceFilter = 'github'; openView('board'); }}><span class="goal-row__icon"><Icon name="github" size={18} /></span><span><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · Issue #{goal.issue_number ?? '—'} · {goal.type === 'planning' ? `Planning · ${goal.adr_id || 'ADR pending'}` : `Building · ${goal.tasks.length} tasks`}</small></span><Icon name="chevron-right" size={17} /></button>{/each}</div>{:else}<div class="state-panel"><div class="state-icon"><Icon name="github" size={21} /></div><h2>No GitHub-linked goals</h2><p>Local-only goals appear in the board.</p></div>{/if}</section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>GitHub</h1><p>Planning data linked to GitHub Issues.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div>{#if linkedGoals.length}<div class="goal-list">{#each linkedGoals as goal}<button class="goal-row" type="button" onclick={() => { goalFilter = goal.ref; sourceFilter = 'github'; openView('board'); }}><span class="goal-row__icon"><Icon name="github" size={18} /></span><span><strong>{goal.title}</strong><small>{goal.project_label} · {goal.ref} · Issue #{goal.issue_number ?? '—'} · {goal.tasks.length} tasks{#if goal.adr_id} · {goal.adr_id}{/if}</small></span><Icon name="chevron-right" size={17} /></button>{/each}</div>{:else}<div class="state-panel"><div class="state-icon"><Icon name="github" size={21} /></div><h2>No GitHub-linked goals</h2><p>Local-only goals appear in the board.</p></div>{/if}</section>
     {:else}
-      <section class="secondary-view"><div class="secondary-heading"><div><h1>Settings</h1><p>Local board preferences and limits.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="settings-list"><div><strong>Data source</strong><span>Local .clips/db JSONL records</span></div><div><strong>Mutations</strong><span>Disabled in this first iteration</span></div><div><strong>GitHub sync</strong><span>Not triggered by the web app</span></div><div><strong>Color theme</strong><button type="button" onclick={toggleTheme}>{themeLabel}</button></div></div></section>
+      <section class="secondary-view"><div class="secondary-heading"><div><h1>Settings</h1><p>Local board preferences and limits.</p></div><span class="view-readonly"><Icon name="lock" size={13} /> Read-only</span></div><div class="settings-list"><div><strong>Data source</strong><span>Local goals, tasks, components, and optional legacy records</span></div><div><strong>Mutations</strong><span>Disabled in this first iteration</span></div><div><strong>GitHub sync</strong><span>Not triggered by the web app</span></div><div><strong>Color theme</strong><button type="button" onclick={toggleTheme}>{themeLabel}</button></div></div></section>
     {/if}
   </main>
 
-  {#if selectedItem}
+  {#if selectedItem?.item}
     <div class="detail-backdrop" role="presentation" onclick={(event) => event.target === event.currentTarget && closePanel()}>
       <dialog open class="detail-panel" aria-labelledby="detail-title">
         <header class="detail-panel__header">
           <div class="detail-panel__title">
             {#if selectedItem.type === 'task' && selectedItem.parentGoal}<button class="detail-header-back" type="button" onclick={() => openGoal(selectedItem.parentGoal)} aria-label="Back to goal"><Icon name="chevron-right" size={18} /></button>{/if}
-            <span>{selectedItem.type === 'task' ? 'Task details' : selectedItem.type === 'goal' ? 'Goal details' : 'Change record'}</span>
+            <span>{selectedItem.type === 'task' ? 'Task details' : selectedItem.type === 'goal' ? 'Goal details' : selectedItem.type === 'component' ? 'Component details' : 'Legacy change record'}</span>
           </div>
           <button class="detail-close" type="button" onclick={closePanel} aria-label="Close detail panel"><Icon name="close" size={19} /></button>
         </header>
@@ -405,22 +435,40 @@
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="status-pill status-pill--{selectedItem.item.column}"><span class="status-dot status-dot--{selectedItem.item.column}"></span>{statusLabel(selectedItem.item.status)}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
             <p class="detail-context">Part of <button type="button" onclick={() => { const goal = board?.goals?.find((candidate) => candidate.ref === selectedItem.item.goal_ref); if (goal) openGoal(goal); }}>{selectedItem.item.goal_title}</button></p>
-            {#if selectedItem.item.description}<div class="detail-description"><MarkdownContent source={selectedItem.item.description} /></div>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
+            <WorkDetails record={selectedItem.item} kind="task" components={board?.components || []} onOpenComponent={openComponent} />
             {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
-            <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Source</span><strong>{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
+            <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div><div><span>Source</span><strong>{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.revision}<div><span>Revision</span><strong>r{selectedItem.item.revision}</strong></div>{/if}{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
-            {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked change records</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
+            {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked legacy CRs</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
             {#if selectedItem.item.linked_prs?.length}<div class="detail-task-list"><h3>Linked GitHub PRs</h3>{#each selectedItem.item.linked_prs as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}
           {:else if selectedItem.type === 'goal'}
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="source-label source-label--{selectedItem.item.source}"><Icon name={selectedItem.item.source === 'github' ? 'github' : 'bookmark'} size={15} />{selectedItem.item.source === 'github' ? 'GitHub linked' : 'Local only'}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
-            {#if selectedItem.item.description}<div class="detail-description"><MarkdownContent source={selectedItem.item.description} /></div>{:else}<p class="detail-description detail-description--empty">No description provided.</p>{/if}
+            <WorkDetails record={selectedItem.item} kind="goal" components={board?.components || []} onOpenComponent={openComponent} />
             {#if selectedItem.item.behavior}<section class="detail-behavior"><h3>Behavior</h3><pre><code>{selectedItem.item.behavior}</code></pre></section>{/if}
-            <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Type</span><strong>{selectedItem.item.type === 'planning' ? 'Planning' : 'Building'}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div>{#if selectedItem.item.type === 'planning'}<div><span>Planning result</span><strong>{selectedItem.item.adr_id || 'ADR pending'}</strong></div>{:else}<div><span>Tasks</span><strong>{selectedItem.item.tasks.length}</strong></div>{/if}<div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
+            <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Status</span><strong>{statusLabel(selectedItem.item.status)}</strong></div><div><span>Legacy type</span><strong>{selectedItem.item.type === 'planning' ? 'Planning' : 'Building'}</strong></div><div><span>Verification</span><strong>{statusLabel(selectedItem.item.effective_verification_mode)}</strong></div>{#if selectedItem.item.adr_id}<div><span>Linked ADR</span><strong>{selectedItem.item.adr_id}</strong></div>{/if}<div><span>Tasks</span><strong>{selectedItem.item.tasks.length}</strong></div><div><span>Reference</span><strong>{selectedItem.item.ref}</strong></div>{#if selectedItem.item.revision}<div><span>Revision</span><strong>r{selectedItem.item.revision}</strong></div>{/if}{#if selectedItem.item.status === 'closed' && selectedItem.item.closed_commit_sha}<div><span>Closed in commit</span><strong class="commit-sha" title={selectedItem.item.closed_commit_sha}>{selectedItem.item.closed_commit_sha}</strong></div>{/if}</div>
             {#if selectedItem.item.issue_url}<a class="detail-external-link" href={selectedItem.item.issue_url} target="_blank" rel="noreferrer"><Icon name="github" size={17} /> Open linked GitHub issue</a>{/if}
-            {#if selectedItem.item.type !== 'planning'}<div class="detail-task-list"><h3>Tasks in this goal</h3>{#each selectedItem.item.tasks as task}<button type="button" onclick={() => openTask(task, selectedItem.item)}><span class="status-dot status-dot--{task.column}"></span><span>{task.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
-            {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked change records</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
+            <div class="detail-task-list"><h3>Tasks in this goal</h3>{#each selectedItem.item.tasks as task}<button type="button" onclick={() => openTask(task, selectedItem.item)}><span class="status-dot status-dot--{task.column}"></span><span>{task.title}</span><Icon name="chevron-right" size={15} /></button>{/each}{#if selectedItem.item.tasks.length === 0}<p>No tasks recorded.</p>{/if}</div>
+            {#if selectedItem.item.linked_crs?.length}<div class="detail-task-list"><h3>Linked legacy CRs</h3>{#each selectedItem.item.linked_crs as record}<button type="button" onclick={() => openChangeRecord(record)}><Icon name="changes" size={15} /><span>{record.id}: {record.title}</span><Icon name="chevron-right" size={15} /></button>{/each}</div>{/if}
             {#if selectedItem.item.linked_prs?.length}<div class="detail-task-list"><h3>Linked GitHub PRs</h3>{#each selectedItem.item.linked_prs as pr}<a class="github-pr-row" href={prUrl(pr)} target="_blank" rel="noreferrer"><Icon name="github" size={16} /><span><strong>{prLabel(pr)}</strong><small>{pr.repository} · {pr.state}{#if pr.merged} · merged{/if}</small></span><Icon name="link" size={14} /></a>{/each}</div>{/if}
+          {:else if selectedItem.type === 'component'}
+            <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.ref}</span><span class="source-label">{selectedItem.item.status}</span></div>
+            <h2 id="detail-title">{selectedItem.item.title}</h2>
+            <div class="detail-meta"><div><span>Project</span><strong>{selectedItem.item.project_label}</strong></div><div><span>Revision</span><strong>r{selectedItem.item.revision}</strong></div><div><span>Status</span><strong>{selectedItem.item.status}</strong></div></div>
+            {#each [['Responsibility', 'responsibility'], ['Contract', 'contract'], ['Decisions', 'decisions']] as [heading, field]}
+              {#if selectedItem.item[field]}<section class="detail-section"><h3>{heading}</h3><MarkdownContent source={selectedItem.item[field]} /></section>{/if}
+            {/each}
+            {#if selectedItem.item.dependencies?.length}
+              <section class="detail-section"><h3>System dependencies</h3><ul class="reference-list">
+                {#each selectedItem.item.dependency_refs || selectedItem.item.dependencies as ref}
+                  {@const component = board?.components?.find((candidate) => candidate.ref === ref)}
+                  <li>{#if component}<button type="button" onclick={() => openComponent(component)}>{ref} · {component.title}</button>{:else}<code>{ref}</code>{/if}</li>
+                {/each}
+              </ul></section>
+            {/if}
+            {#if selectedItem.item.source_refs?.length}<section class="detail-section"><h3>Source references</h3><ul class="reference-list">{#each selectedItem.item.source_refs as ref}<li><code>{ref}</code></li>{/each}</ul></section>{/if}
+            {#each Object.entries(selectedItem.item.sections || {}) as [heading, markdown]}<section class="detail-section"><h3>{heading}</h3><MarkdownContent source={markdown} /></section>{/each}
+            {#if Object.keys(selectedItem.item.extensions || {}).length}<details class="detail-section record-extra"><summary>Extensions</summary><EvidenceValue value={selectedItem.item.extensions} /></details>{/if}
           {:else}
             <div class="detail-eyebrow"><span class="task-ref">{selectedItem.item.id}</span><span class="source-label">{selectedItem.item.status}</span></div>
             <h2 id="detail-title">{selectedItem.item.title}</h2>
