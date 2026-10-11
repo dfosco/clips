@@ -6,6 +6,7 @@ import { planningBehaviorFields } from '../lib/behavior.js';
 import { discoverBoardGoals } from '../lib/board.js';
 import { adrRecordExists, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
 import { validateTrack } from '../lib/tracks.js';
+import { laneToTrackId, trackToLaneId, validateLane } from '../lib/lanes.js';
 import { acceptanceFields, invalidateAcceptanceFields, referenceList, requestSnapshot, validateWorkInput, workFields } from '../lib/work-fields.js';
 import { readJsonInput } from '../lib/json-input.js';
 import { resolveComponentBasis } from '../lib/component-basis.js';
@@ -56,6 +57,19 @@ function syncGoal(goalId, username) {
   if (!username) try { pushGoal(goalId); } catch (error) { /* best effort */ }
 }
 
+function goalLaneFields(data) {
+  if (Object.hasOwn(data, 'lane_id')) {
+    if (data.lane_id == null) return { lane_id: null, track_id: null };
+    const laneId = validateLane(data.lane_id);
+    return { lane_id: laneId, track_id: laneToTrackId(laneId) };
+  }
+  if (Object.hasOwn(data, 'track_id')) {
+    const trackId = validateTrack(data.track_id);
+    return { track_id: trackId, lane_id: trackId ? trackToLaneId(trackId) : null };
+  }
+  return {};
+}
+
 function generateId() {
   const clipsDbDir = getClipsDbDir();
   if (!fs.existsSync(clipsDbDir)) {
@@ -81,7 +95,7 @@ function createGoal(data) {
     goal_id: goalId,
     timestamp: new Date().toISOString(),
     ...workFields(data, {}, { kind: 'goal', creating: true }),
-    track_id: validateTrack(data.track_id),
+    ...goalLaneFields(data),
     blocked_by: goalDependencies(Object.hasOwn(data, 'blocked_by') ? data.blocked_by : [], { goalId, username: null }),
     ...goalTypeFields(data, { defaultType: true }),
     ...planningBehaviorFields(data, { defaultMode: true }),
@@ -109,7 +123,7 @@ function updateGoal(goalId, data) {
   const typeFields = goalTypeFields(data);
   const behaviorFields = planningBehaviorFields(data);
   const updateFields = { ...workFields(data, goal, { kind: 'goal' }), ...typeFields, ...behaviorFields };
-  if (Object.hasOwn(data, 'track_id')) updateFields.track_id = validateTrack(data.track_id);
+  Object.assign(updateFields, goalLaneFields(data));
   if (Object.hasOwn(data, 'blocked_by')) updateFields.blocked_by = goalDependencies(data.blocked_by, { goalId: normalizedId, username });
   const event = {
     event: 'updated',
@@ -299,7 +313,7 @@ export function runGoalCommand(args) {
       acceptGoal(rest[0], readJsonInput(rest.slice(1)));
       break;
     case 'assign':
-      updateGoal(rest[0], { track_id: rest[1] === 'null' || rest[1] === 'none' ? null : rest[1] });
+      updateGoal(rest[0], { lane_id: rest[1] === 'null' || rest[1] === 'none' ? null : rest[1] });
       break;
     case 'status':
       changeStatus(rest[0], rest[1]);
@@ -323,7 +337,7 @@ export function runGoalCommand(args) {
 Commands:
   create <json>        Create a new goal
   update <id> <json>   Update goal properties
-  assign <id> <track|null> Assign or move a goal to a track
+  assign <id> <lane|null>  Assign or move a goal to a strategic lane
   accept <id> <json>   Accept an outcome with artifact and criterion evidence
   attach-adr <id> <adr> Attach a legacy ADR reference (optional)
   unlink <id|--all>    Disconnect one or all goals and their tasks from GitHub
@@ -337,7 +351,8 @@ Goal fields:
   sections, extensions Additional Markdown sections and custom JSON
   expected_revision    Reject an update based on a stale record revision
   type                 Legacy planning | building label (default: building)
-  track_id             Optional r001 track ref
+  lane_id              Optional l001 strategic lane ref
+  track_id             Legacy r001 Track ref (read/write compatibility)
   blocked_by           Array of goal refs
 
 Behavior fields:
