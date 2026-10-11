@@ -14,7 +14,18 @@ It is not a claim that an older installed CLI supports every command below.
 
 ## Core records
 
-A **goal** is a desired outcome and the record that coordinates its delivery.
+A **Lane** is a sustained conceptual and strategic frame across related goals.
+It describes product direction and helps agents understand why several outcomes
+belong together. It is not an engineering acceptance layer: Lanes do not carry
+technical acceptance criteria, verification modes, or acceptance receipts.
+
+Closing a Lane creates a strategic retrospective. The closure records a summary,
+the decisions made across its goals, a system overview and components worked on,
+product goals achieved, goal-status snapshot, and product media such as
+screenshots when useful. Goal acceptance remains authoritative for engineering
+completion.
+
+A **goal** is a desired engineering outcome and the record that coordinates its delivery.
 It holds the context, scope, plan, architectural decisions, and outcome
 acceptance. Its plan can change as the team learns. Decisions retain the choices
 and reasons that explain the plan and the resulting system.
@@ -54,9 +65,10 @@ Keep them as named Markdown or links to authoritative code, schemas, tests, or
 specifications. Use ordinary names for decisions and constraints. Stable
 component identity does not require numbered IDs for every function or invariant.
 
-The goal owns orchestration. Component dependencies describe the system. Task
-dependencies describe ordering of work. Neither the agent hierarchy nor a file
-tree has to mirror these records.
+The Lane supplies strategic context across goals. The goal owns engineering
+orchestration. Component dependencies describe the system. Task dependencies
+describe ordering of work. Merely sharing a Lane does not imply a dependency.
+Neither the agent hierarchy nor a file tree has to mirror these records.
 
 ## Fields and extensions
 
@@ -88,8 +100,13 @@ universal planning template.
 | `extensions` | All three | Project-defined JSON metadata or relationships |
 | `expected_revision` | Update/accept input | Reject a mutation if the current record revision differs |
 
-Goals also retain optional `track_id` and legacy `type` labels.
-Use status commands for lifecycle changes.
+Goals support `lane_id` for their strategic frame and retain legacy
+`track_id` plus `type` labels for compatibility. Lane creation/update uses
+`title`, `description`, and optional `product_goals`. Lane closure uses
+`summary`, `decision_log`, `system_overview`,
+`product_goals_achieved`, and optional `components` / `media`.
+Use status commands for lifecycle changes, except Lane closure, which uses
+`clips lane close` so the retrospective is captured.
 
 ### Extend without multiplying artifact types
 
@@ -126,8 +143,9 @@ authoritative request too.
 
 ## Identity and revisions
 
-Current references identify goals, tasks, and components:
+Current references identify Lanes, goals, tasks, and components:
 
+- `#l1`
 - `#g1`
 - `#g1#t1`
 - `#c1`
@@ -159,9 +177,11 @@ required step, evidence, invariant, or decision ID namespace.
 
 ### History
 
-Append `#rN` to read a recoverable record snapshot:
+Append `#rN` to read a recoverable record snapshot. Lane IDs use `l`, so
+`#l1#r2` is unambiguous: Lane 1, revision 2.
 
 ```bash
+clips view '#l1#r1' --json
 clips view '#c1#r1' --json
 clips view '#g1#t1#r2' --json
 clips view '#g1#t1#r2#A1' --json
@@ -308,6 +328,13 @@ Status is useful for coordination, while evidence supports the completion claim.
 
 ## Dependencies and coordination
 
+Use Lanes for strategic grouping and narrative continuity across related goals.
+A goal belongs to at most one Lane, but Lane membership does not schedule work.
+When an agent works on a goal in a Lane, read the Lane for context; do not
+automatically pull sibling goals into scope. When the Lane itself is the user's
+scope, coordinate its dependency-ready goals and close the Lane only after
+capturing the strategic retrospective.
+
 Use component `dependencies` for structural system relationships. Structural
 cycles are permitted; the field does not schedule work. Pin a component revision
 when a consumer needs a specific contract and reconcile changes before
@@ -329,8 +356,11 @@ record is required.
 
 ## Compatibility and storage
 
-Existing planning/building labels, track relationships, attached ADRs, CR/ADR
-files, GitHub metadata, and old event streams remain supported. Labels no longer
+Existing planning/building labels, Track relationships, attached ADRs, CR/ADR
+files, GitHub metadata, and old event streams remain supported. Track IDs such
+as `#r001` are exposed as legacy aliases of `#l001`; their journals remain in
+`.clips/db/tracks/` so existing stores do not need a migration. New user-facing
+commands, fields, and references use Lane terminology. Labels no longer
 force a separate ADR or prohibit tasks. Existing records are not rewritten into
 new objects or discarded.
 
@@ -338,6 +368,7 @@ Workflow instances remain local under `.clips/` and must not be committed:
 
 | State | Location |
 |---|---|
+| Lane events (including legacy Tracks) | `.clips/db/tracks/r001.jsonl` |
 | Goal/task events | `.clips/db/[username/]g001.jsonl` |
 | Component events | `.clips/components/[username/]c001.jsonl` |
 | Optional CR/ADR Markdown | `.clips/records/{cr,adr}/` |
