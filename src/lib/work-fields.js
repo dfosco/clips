@@ -171,7 +171,7 @@ export const WORK_FIELDS = Object.freeze([
 
 export function validateWorkInput(data, { kind = 'task', extra = [] } = {}) {
   assertObject(data, `${kind} data`);
-  const allowed = new Set([...WORK_FIELDS, ...(kind === 'goal' ? ['plan', 'decisions', 'type', 'track_id'] : []), ...extra]);
+  const allowed = new Set([...WORK_FIELDS, ...(kind === 'goal' ? ['plan', 'decisions', 'type', 'lane_id', 'track_id'] : []), ...extra]);
   const unsupported = Object.keys(data).filter((field) => !allowed.has(field));
   if (unsupported.length) {
     throw new Error(`Unsupported ${kind} fields: ${unsupported.join(', ')}. Use sections for Markdown or extensions for custom JSON`);
