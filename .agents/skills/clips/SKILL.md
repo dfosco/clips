@@ -1,8 +1,9 @@
 ---
 name: clips
 description: >-
-  Plan and track repository work with Clips goals, atomic task change requests
-  and records, system components, acceptance evidence, and record history. Use
+  Plan and track repository work with strategic Clips Lanes, goals, atomic task
+  change requests and records, system components, acceptance evidence, and
+  record history. Use
   when framing an outcome, negotiating scope or interfaces, assigning work,
   reviewing completion, resuming tracked work, or managing existing CRs, ADRs,
   and optional GitHub synchronization.
@@ -13,7 +14,8 @@ metadata:
 
 # Clips
 
-Use a small set of durable work identities: goals, tasks, and system components.
+Use a small set of durable work identities: strategic Lanes, goals, tasks, and
+system components.
 Make each task the agent's work contract before execution and its change record
 afterward. Add detail when it helps another agent act or accept the result.
 
@@ -29,7 +31,8 @@ Inspect the installed CLI's help before relying on unfamiliar commands. This
 skill describes the work-contract implementation, which adds components,
 structured acceptance, and revision views beyond the published 1.6.0 baseline.
 The skill version is not a promise that these features are installed. Check
-`clips --help`, `clips goal --help`, and `clips task --help`; use supported syntax.
+`clips --help`, `clips lane --help`, `clips goal --help`, and
+`clips task --help`; use supported syntax.
 
 With an older CLI, preserve the same concepts in named Markdown sections of the
 existing goal/task descriptions. Record acceptance evidence there and treat
@@ -44,9 +47,21 @@ to satisfy that gate.
 
 | Record | Responsibility | Typical content |
 |---|---|---|
-| Goal `#g1` | The outcome and how the work is organized | Context, scope, plan, architectural decisions, task relationships, outcome acceptance |
+| Lane `#l1` | Strategic frame across related goals | Product direction, narrative, goal set, product goals, and eventual strategic retrospective |
+| Goal `#g1` | One engineering outcome and how the work is organized | Context, scope, plan, architectural decisions, task relationships, outcome acceptance |
 | Task `#g1#t1` | One independently reviewable and acceptable change | Request, affected components, boundaries, owner, criteria, amendments, actual result, evidence, acceptance |
 | Component `#c1` | A persistent system responsibility and behavioral boundary | Responsibility, interface or behavior contract, constraints, implementation/specification references, dependencies |
+
+Use a Lane when multiple goals belong to one sustained product or strategic
+workstream. Lanes are deliberately less formal than goals: they do not own
+technical acceptance criteria, test evidence, or an acceptance owner. Read a
+goal's Lane for strategic context, but do not assume sibling goals are in scope
+or dependent merely because they share a Lane.
+
+Closing a Lane is retrospective, not engineering acceptance. Capture a concise
+summary, the cross-goal decision log, a system overview with components worked
+on, product goals achieved, and product media/screenshots when useful. Goal and
+task acceptance remain the evidence-bearing engineering records.
 
 Keep plan and decisions in the goal. The plan describes the current route to the
 outcome; the decisions explain choices, rationale, and consequences. Update the
@@ -88,13 +103,13 @@ do not automatically invalidate acceptance.
 
 ## Keep identities stable
 
-- Use `#g1`, `#g1#t1`, and `#c1` for current records. The CLI may display padded
+- Use `#l1`, `#g1`, `#g1#t1`, and `#c1` for current records. The CLI may display padded
   forms such as `#g001#t01`. Use the full goal/task reference outside its context.
 - Use `#g1#A1` and `#g1#t1#A1` for acceptance criteria. Within an identified goal,
   `#t1#A1` is a contextual shorthand. Store criteria as objects with stable IDs;
   preserve IDs when reordering or rewording the same condition. Retired IDs must
   not be reused for different conditions. Evidence belongs to the criterion.
-- Use `#c1#r1`, `#g1#r1`, or `#g1#t1#r1` to cite a recoverable record snapshot.
+- Use `#l1#r1`, `#c1#r1`, `#g1#r1`, or `#g1#t1#r1` to cite a recoverable record snapshot.
   Use current refs for navigation and pinned revisions when a dependency or
   acceptance discussion requires a particular agreement. A criterion within a
   pinned task snapshot is `#g1#t1#r1#A1`. Use the same history mechanism for all
@@ -104,13 +119,16 @@ do not automatically invalidate acceptance.
   with verification evidence. A HEAD commit alone does not identify dirty work.
 
 Quote refs beginning with `#` in shell commands so the shell does not treat them
-as comments. Existing tracks and their standalone `#r001` refs remain optional
-grouping features; a nested `#r1` identifies record history.
+as comments. Historical Tracks and standalone `#r001` refs remain compatibility aliases;
+current strategic grouping uses Lanes and `#l001`. A nested `#r1` identifies
+record history, so `#l1#r2` means Lane 1 revision 2.
 
 ## Negotiate and execute a task
 
-1. Find or create the goal from the requested outcome. Add the plan and decisions
-   at the level needed for coordination. Create task requests from the available
+1. Find or create the goal from the requested outcome. If it belongs to an
+   existing Lane, read that Lane for strategic context; create a Lane when this
+   work is part of a sustained multi-goal product frame rather than a one-off
+   outcome. Add the goal plan and decisions at the level needed for coordination. Create task requests from the available
    context, without asking the user to author the breakdown.
 2. Make the task understandable before assignment: state the intended change in
    `description`, identify affected `components`, describe `scope`, and define
@@ -184,6 +202,8 @@ is not an all-or-nothing transaction.
 
 ```bash
 clips init
+clips lane create '{"title":"Workspace experience","description":"Make returning to work continuous","product_goals":["Users return to the right workspace quickly"]}'
+clips view '#l1'
 clips view all
 clips view '#g1' --json
 clips view '#g1#t1#A1' --json
@@ -195,12 +215,13 @@ clips component update c1 '{"sections":{"Failure behavior":"Treat unavailable st
 clips component list
 clips component history c1
 
-clips goal create '{"title":"Restore the selected workspace","description":"Reopen the last available workspace after reload","components":["#c1"],"plan":"Implement persistence, then integrate selection","decisions":"Store an ID and validate it against current workspaces","acceptance_criteria":[{"id":"A1","description":"Reload restores the last available workspace"}]}'
+clips goal create '{"title":"Restore the selected workspace","lane_id":"l1","description":"Reopen the last available workspace after reload","components":["#c1"],"plan":"Implement persistence, then integrate selection","decisions":"Store an ID and validate it against current workspaces","acceptance_criteria":[{"id":"A1","description":"Reload restores the last available workspace"}]}'
 clips task create g1 '{"title":"Persist workspace preference","description":"Read and write the selected workspace ID","components":["#c1"],"scope":"Persistence boundary and its failure behavior","acceptance_criteria":[{"id":"A1","description":"A stored ID can be read back"},{"id":"A2","description":"Unavailable storage does not throw"}]}'
 clips task status g1 t1 in_progress
 clips task update g1 t1 --file task-result.json
 clips task accept g1 t1 --file task-acceptance.json
 clips goal accept g1 --file goal-acceptance.json
+clips lane close l1 --file lane-closure.json
 ```
 
 For example, a task result file may contain `{"record":"Implemented the reader
@@ -239,11 +260,16 @@ checks when supported, but do not treat append locks or optimistic checks as a
 distributed scheduler, lease, or full multiwriter workflow.
 
 Keep execution state in task status, owner, and blocker information; keep
-cross-task coordination in the goal plan. Use an existing squad log or session
+cross-task coordination in the goal plan and cross-goal strategic context in the
+Lane. Use an existing squad log or session
 handoff for transient context. Do not require a separate execution-note artifact.
 On resume, reconcile those records with current source, workers, and user input.
 
 ## Preserve optional and legacy workflows
+
+Keep existing Track journals, `#r001` refs, and `track_id` fields readable as
+legacy Lane aliases without rewriting them. New work uses `clips lane`,
+`#l001`, and `lane_id`.
 
 Keep existing `planning`/`building` type labels and attached ADRs readable without
 using them to prohibit tasks or require an ADR. The goal can hold both planning
@@ -259,6 +285,5 @@ type's `archived/` directory. Copy committed templates only when needed.
 Keep GitHub collaboration opt-in. `clips init` is local and `clips sync` performs
 no GitHub work while collaboration is disabled. Enable it only when authorized
 with `clips config collaboration true`. Use `clips goal unlink <ref>` or `--all`
-to keep local history while leaving existing remote issues unchanged. Use
-`clips web` for the read-only board and existing track commands when grouping
-multiple goals is useful. These optional surfaces do not change task acceptance.
+to keep local history while leaving existing remote issues unchanged. Use `clips web` for the read-only board and Lane summaries. The legacy
+`clips track` command remains only for compatibility. These optional surfaces do not change task acceptance.
