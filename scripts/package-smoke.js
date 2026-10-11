@@ -55,7 +55,7 @@ try {
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
   assert(paths.includes('.agents/skills/loopz/SKILL.md'), 'tarball is missing the Loopz skill');
   assert(paths.includes('.agents/skills/loopz/agents/openai.yaml'), 'tarball is missing Loopz agent metadata');
-  assert(paths.includes('skillshop.manifest.js'), 'tarball is missing the Skillshop manifest');
+  assert(paths.includes('skillshop.manifest.mjs'), 'tarball is missing the Skillshop manifest');
   assert(!paths.includes('src/skills.js'), 'tarball still contains the deprecated named skill export');
   assert(!paths.some((file) => file.startsWith('.agents/skills/clips-')), 'tarball contains routed Clips skills');
   assert(paths.includes('CHANGELOG.md'), 'tarball is missing the changelog');
@@ -67,9 +67,9 @@ try {
   const extractedRoot = path.join(tempRoot, 'package');
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
-  assert.equal(packedPackage.exports['./skillshop'], './skillshop.manifest.js');
+  assert.equal(packedPackage.exports['./skillshop'], './skillshop.manifest.mjs');
   assert.equal(packedPackage.exports['./skills'], undefined);
-  const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.js')).href)).default;
+  const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.mjs')).href)).default;
   assert.equal(skillLibrary.packageName, '@dfosco/clips');
   assert.deepEqual(Object.keys(skillLibrary.skills).sort(), ['skill:clips', 'skill:loopz']);
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:clips']), 'SKILL.md')), 'skill:clips manifest does not exist');
