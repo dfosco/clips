@@ -519,7 +519,7 @@ export function runViewCommand(args) {
   if (/^#?[lr]\d+(?:#r\d+)?$/i.test(ref)) {
     const match = String(ref).match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
     const lane = readLane(normalizeLaneId(match[1]), undefined, { revision: match[2] ? Number(match[2]) : undefined });
-    if (!lane) throw new Error(`Lane ${ref} not found`);
+    if (!lane) throw new Error(`${/^#?r/i.test(ref) ? 'Track' : 'Lane'} ${ref} not found`);
     if (json) console.log(JSON.stringify(lane, null, 2));
     else viewLane(ref);
     return;
