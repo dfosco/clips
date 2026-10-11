@@ -36,7 +36,7 @@
     "!src/**/*.test.js",
     ".agents/skills/clips",
     ".agents/skills/loopz",
-    "skillshop.manifest.js",
+    "skillshop.manifest.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -73,7 +73,7 @@
   },
   "dependencies": {},
   "exports": {
-    "./skillshop": "./skillshop.manifest.js",
+    "./skillshop": "./skillshop.manifest.mjs",
     "./*": "./*"
   }
 }
