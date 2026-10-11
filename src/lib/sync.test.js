@@ -43,6 +43,26 @@ describe('GitHub pull normalization', () => {
 });
 
 describe('GitHub behavior rendering', () => {
+  it('renders the work contract, stable criterion refs, and supplied acceptance evidence', () => {
+    const task = { task_id: 't01', title: 'Store selection', scope: 'Persistence only',
+      components: ['#c001#r1'], record: 'Added a tolerant reader',
+      acceptance_criteria: [{ id: 'A2', description: 'Unavailable storage is harmless' }],
+      acceptance: { accepted_by: 'fixture-reviewer', summary: 'Checked candidate', artifact: 'fixture:commit',
+        criteria: [{ id: 'A2', status: 'satisfied', evidence: 'fixture:failure-path-result' }] },
+    };
+    const body = buildIssueBody({ goal_id: 'g001', plan: 'Persist then integrate', decisions: 'Store only the ID',
+      blocked_by: ['#sam#g002'], acceptance_criteria: [{ id: 'A1', description: 'Reload restores selection' }],
+      tasks: { t01: task },
+    });
+    expect(body).toContain('#g001#A1: Reload restores selection');
+    expect(body).toContain('#g001#t01#A2: Unavailable storage is harmless');
+    expect(body).toContain('fixture:failure-path-result');
+    expect(body).toContain('## Plan\n\nPersist then integrate');
+    expect(body).toContain('Blocked by: #sam#g002');
+    expect(body).not.toContain('[object Object]');
+    expect(buildTaskIssueBody(task, { goal_id: 'g001' })).toContain('#g001#t01#A2: satisfied');
+  });
+
   it('renders goal and task behavior with effective verification modes', () => {
     const body = buildIssueBody({
       goal_id: 'g001',
@@ -70,12 +90,12 @@ describe('GitHub behavior rendering', () => {
     expect(body).toContain('Scenario: Add a to-do');
   });
 
-  it('renders and parses planning metadata without rendering tasks', () => {
+  it('retains planning metadata while rendering its work tasks', () => {
     const body = buildIssueBody({
       goal_id: 'g001',
       type: 'planning',
       adr_id: 'ADR-004',
-      tasks: { t01: { task_id: 't01', title: 'Invalid planning task', status: 'open' } },
+      tasks: { t01: { task_id: 't01', title: 'Plan-compatible task', status: 'open' } },
       _taskOrder: ['t01'],
     });
 
@@ -85,8 +105,8 @@ describe('GitHub behavior rendering', () => {
       type_explicit: true,
       adr_explicit: true,
     });
-    expect(body).not.toContain('## Tasks');
-    expect(body).not.toContain('Invalid planning task');
+    expect(body).toContain('## Tasks');
+    expect(body).toContain('Plan-compatible task');
   });
 
   it('renders standalone task issue details using a task override', () => {

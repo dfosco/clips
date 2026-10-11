@@ -81,6 +81,21 @@ try {
     fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
     'packaged init did not install the Clips skill',
   );
+  const runPackaged = (...args) => execFileSync(process.execPath, [cli, ...args], {
+    cwd: initializedProject, encoding: 'utf8',
+    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+  });
+  runPackaged('component', 'create', JSON.stringify({ title: 'Packaged persistence', contract: 'Return a stored ID' }));
+  runPackaged('component', 'update', 'c1', JSON.stringify({ contract: 'Return a stored ID or no preference' }));
+  assert.equal(JSON.parse(runPackaged('view', '#c1#r1', '--json')).contract, 'Return a stored ID');
+  runPackaged('goal', 'create', JSON.stringify({ title: 'Packaged feature', plan: 'Implement persistence' }));
+  runPackaged('task', 'create', 'g1', JSON.stringify({ title: 'Persist selection', components: ['#c1#r1'], acceptance_criteria: ['Read the stored ID'] }));
+  runPackaged('task', 'accept', 'g1', 't1', JSON.stringify({
+    artifact: 'fixture:packaged-candidate', accepted_by: 'package-smoke-fixture', summary: 'Validate record transport',
+    criteria: [{ id: 'A1', status: 'satisfied', evidence: 'Fixture evidence for packaged command validation' }],
+  }));
+  assert.equal(JSON.parse(runPackaged('view', '#g1#t1#A1', '--json')).acceptance.status, 'satisfied');
+  assert.equal(JSON.parse(runPackaged('history', '#g1#t1', '--json')).length, 2);
 
   board = spawn(process.execPath, [cli, 'web', '--port', '0'], {
     cwd: tempRoot,
@@ -95,7 +110,7 @@ try {
   assert.equal(api.status, 200);
   assert.deepEqual(JSON.parse(api.body).goals, []);
 
-  console.log(`Verified ${manifest.id}: CLI, skill, and web board`);
+  console.log(`Verified ${manifest.id}: CLI, skill, components, revisions, acceptance, and web board`);
 } finally {
   if (board && !board.killed) board.kill();
   fs.rmSync(tempRoot, { recursive: true, force: true });

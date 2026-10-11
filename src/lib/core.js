@@ -5,6 +5,9 @@ import { execSync } from 'child_process';
 import { readConfig } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
+import { isDeepStrictEqual } from 'node:util';
+import { appendJsonEvent, assertExpectedRevision, readJsonEvents, withRecordLock } from './journal.js';
+import { invalidateAcceptanceFields, normalizeAcceptanceCriteria, workRequestChanged } from './work-fields.js';
 
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
@@ -29,20 +32,20 @@ export function getCurrentUsername() {
  * Accepts: #g001, g001, g1, #g1 → g001 (if exists in db)
  * Also accepts non-numeric IDs like: dfosco, my-goal
  */
-export function normalizeGoalId(input) {
+export function normalizeGoalId(input, username = null) {
   if (!input) return null;
   
   let id = input.replace(/^#/, '').toLowerCase();
   
   // Check if it exists as-is
-  if (goalExists(id)) return id;
+  if (goalExists(id, username)) return id;
   
   // Try expanding short form: g1 → g001, g12 → g012
   const shortMatch = id.match(/^g(\d+)$/);
   if (shortMatch) {
     const num = shortMatch[1].padStart(3, '0');
     const expanded = `g${num}`;
-    if (goalExists(expanded)) return expanded;
+    if (goalExists(expanded, username)) return expanded;
   }
   
   return id; // Return as-is, let caller handle non-existence
@@ -66,6 +69,12 @@ export function normalizeTaskId(input) {
   return id;
 }
 
+export function normalizeComponentId(input) {
+  const match = String(input || '').replace(/^#/, '').match(/^c(\d+)$/i);
+  if (!match || !Number.isSafeInteger(Number(match[1])) || Number(match[1]) < 1) return null;
+  return `c${String(Number(match[1])).padStart(3, '0')}`;
+}
+
 /**
  * Parse a ref string into username, goalId, and taskId
  * Flexible formats:
@@ -77,61 +86,45 @@ export function normalizeTaskId(input) {
  * When username is not specified, defaults to current user from config.
  */
 export function parseRef(ref) {
-  if (!ref) return null;
-  
-  const input = ref.trim();
-  
-  // Full namespaced format: #username#g001#t4 or #username#g001
-  const fullNamespaced = input.match(/^#?([a-z][a-z0-9_-]*)#(g\d+)(?:#(t\d+))?$/i);
-  if (fullNamespaced) {
-    return {
-      username: fullNamespaced[1].toLowerCase(),
-      goalId: normalizeGoalId(fullNamespaced[2]),
-      taskId: fullNamespaced[3] ? normalizeTaskId(fullNamespaced[3]) : null
-    };
+  if (typeof ref !== 'string' || !ref.trim()) return null;
+  const input = ref.trim().replace(/^#/, '').replace(/^(g\d+)-(t\d+)$/i, '$1#$2');
+  const parts = input.split('#');
+  const parsed = { username: null, goalId: null, taskId: null };
+  // Suffixes address the record's history and a criterion inside that record.
+  // Accept either input order, but format revision before criterion.
+  while (parts.length > 1 && /^(r|a)\d+$/i.test(parts.at(-1))) {
+    const suffix = parts.pop();
+    const number = Number(suffix.slice(1));
+    if (!Number.isSafeInteger(number) || number < 1) return null;
+    const key = suffix[0].toLowerCase() === 'r' ? 'revision' : 'criterionId';
+    if (Object.hasOwn(parsed, key)) return null;
+    parsed[key] = key === 'revision' ? number : `A${number}`;
   }
-  
-  // Combined format: #g001#t4 or g001#t4 (no username - defaults to current user)
-  const combinedHash = input.match(/^#?([a-z0-9-]+)#([a-z0-9]+)$/i);
-  if (combinedHash) {
-    return {
-      username: null, // Will default to current user
-      goalId: normalizeGoalId(combinedHash[1]),
-      taskId: normalizeTaskId(combinedHash[2])
-    };
-  }
-  
-  // Combined format with dash: g1-t4 or g001-t4
-  const combinedDash = input.match(/^#?([a-z][a-z0-9]*)-([a-z0-9]+)$/i);
-  if (combinedDash) {
-    return {
-      username: null,
-      goalId: normalizeGoalId(combinedDash[1]),
-      taskId: normalizeTaskId(combinedDash[2])
-    };
-  }
-  
-  // Task only: #t4 or t4
-  const taskOnly = input.match(/^#?(t\d+)$/i);
-  if (taskOnly) {
-    return {
-      username: null,
-      goalId: null,
-      taskId: normalizeTaskId(taskOnly[1])
-    };
-  }
-  
-  // Goal only (or non-numeric ID like dfosco for notepad)
-  const goalOnly = input.match(/^#?([a-z0-9_-]+)$/i);
-  if (goalOnly) {
-    return {
-      username: null,
-      goalId: normalizeGoalId(goalOnly[1]),
-      taskId: null
-    };
-  }
-  
-  return null;
+  if (parts.some((part) => !/^[a-z0-9_-]+$/i.test(part))) return null;
+  if (parts.length === 3 && /^t\d+$/i.test(parts[2])) {
+    parsed.username = parts[0].toLowerCase();
+    parsed.goalId = normalizeGoalId(parts[1], parsed.username);
+    parsed.taskId = normalizeTaskId(parts[2]);
+  } else if (parts.length === 2 && /^t\d+$/i.test(parts[1])) {
+    parsed.goalId = normalizeGoalId(parts[0]);
+    parsed.taskId = normalizeTaskId(parts[1]);
+  } else if (parts.length === 2) {
+    parsed.username = parts[0].toLowerCase();
+    if (/^c\d+$/i.test(parts[1])) {
+      parsed.componentId = normalizeComponentId(parts[1]);
+      if (!parsed.componentId) return null;
+    } else {
+      parsed.goalId = normalizeGoalId(parts[1], parsed.username);
+    }
+  } else if (parts.length === 1) {
+    if (/^t\d+$/i.test(parts[0])) parsed.taskId = normalizeTaskId(parts[0]);
+    else if (/^c\d+$/i.test(parts[0])) {
+      parsed.componentId = normalizeComponentId(parts[0]);
+      if (!parsed.componentId) return null;
+    } else parsed.goalId = normalizeGoalId(parts[0]);
+  } else return null;
+  if (parsed.componentId && parsed.criterionId) return null;
+  return parsed;
 }
 
 /**
@@ -141,7 +134,7 @@ export function parseRef(ref) {
  * @returns {string} Formatted ref like #username#g001#t01 or #g001#t01
  */
 export function formatRef(ref, options = {}) {
-  if (!ref || !ref.goalId) return null;
+  if (!ref || (!ref.goalId && !ref.taskId && !ref.componentId)) return null;
   
   const parts = [];
   
@@ -151,11 +144,14 @@ export function formatRef(ref, options = {}) {
     parts.push(username);
   }
   
-  parts.push(ref.goalId);
+  if (ref.componentId) parts.push(ref.componentId);
+  else if (ref.goalId) parts.push(ref.goalId);
   
   if (ref.taskId) {
     parts.push(ref.taskId);
   }
+  if (ref.revision !== undefined) parts.push(`r${ref.revision}`);
+  if (ref.criterionId) parts.push(ref.criterionId);
   
   return '#' + parts.join('#');
 }
@@ -179,14 +175,16 @@ export function parseArgs(args) {
     
     // Check if first looks like a goal ID
     const goalParsed = parseRef(first);
-    if (goalParsed && !goalParsed.taskId) {
+    if (goalParsed?.goalId && !goalParsed.taskId && !goalParsed.revision && !goalParsed.criterionId) {
       // Check if second looks like a task ID
       const taskParsed = parseRef(second);
       if (taskParsed && taskParsed.taskId && !taskParsed.goalId) {
         return {
           username: goalParsed.username,
           goalId: goalParsed.goalId,
-          taskId: taskParsed.taskId
+          taskId: taskParsed.taskId,
+          ...(taskParsed.revision ? { revision: taskParsed.revision } : {}),
+          ...(taskParsed.criterionId ? { criterionId: taskParsed.criterionId } : {}),
         };
       }
       // Second might be task without t prefix in some contexts
@@ -197,7 +195,7 @@ export function parseArgs(args) {
         return {
           username: goalParsed.username,
           goalId: goalParsed.goalId,
-          taskId
+          taskId: normalizeTaskId(taskId)
         };
       }
     }
@@ -310,53 +308,92 @@ export function goalExists(goalId, username = null) {
 }
 
 export function appendEvent(goalId, event, options = {}) {
-  // Validate no undefined values in event
-  const undefinedKeys = Object.entries(event)
-    .filter(([_, value]) => value === undefined)
-    .map(([key]) => key);
-  
-  if (undefinedKeys.length > 0) {
-    throw new Error(`Cannot append event with undefined values: ${undefinedKeys.join(', ')}`);
-  }
-
   const filePath = getGoalFilePath(goalId, options.username);
-  
-  // Ensure parent directory exists for namespaced paths
-  const dirPath = path.dirname(filePath);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-  
-  // Ensure file ends with newline before appending (fix corruption)
-  if (fs.existsSync(filePath)) {
-    const content = fs.readFileSync(filePath, 'utf8');
-    if (content.length > 0 && !content.endsWith('\n')) {
-      fs.appendFileSync(filePath, '\n');
+  return withRecordLock(filePath, () => {
+    const events = readJsonEvents(filePath);
+    const current = events.length ? replayGoalEvents(events, goalId) : null;
+    const target = event.task_id ? current?.tasks[event.task_id] : current;
+    const ref = formatRef({ username: options.username, goalId, taskId: event.task_id });
+    assertExpectedRevision(options.expectedRevision, target?.revision || 0, ref);
+    if (['created', 'goal_created', 'task_created'].includes(event.event) && target) {
+      throw new Error(`Record ${ref} already exists; read it before retrying creation`);
     }
-  }
-  
-  fs.appendFileSync(filePath, JSON.stringify(event) + '\n');
+    if (event.task_id && event.event !== 'task_created' && !target) {
+      throw new Error(`Task ${ref} not found`);
+    }
+    appendJsonEvent(filePath, event);
+  });
 }
 
-export function readGoalWithTasks(goalId, username = null) {
-  const filePath = getGoalFilePath(goalId, username);
-  if (!fs.existsSync(filePath)) return null;
-  
-  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
-  let goal = { goal_id: goalId, tasks: {} };
-  
-  for (const line of lines) {
-    const event = JSON.parse(line);
+// Older versions stored both criterion maps and objects with `text` rather
+// than `description`. Read those historical shapes without rewriting the log.
+// Map keys and old IDs are retained so later legacy amendments keep identity.
+function readableCriteria(value, previous) {
+  const prior = Array.isArray(previous.acceptance_criteria) ? previous.acceptance_criteria : [];
+  const entries = Array.isArray(value) ? value.map((item) => [null, item])
+    : value && typeof value === 'object' ? Object.entries(value) : [];
+  return entries.map(([key, value]) => {
+    if (key === null && typeof value === 'string') return value;
+    const item = value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : { description: String(value) };
+    if (typeof item.description !== 'string' && typeof item.text === 'string') item.description = item.text;
+    if (typeof item.description !== 'string') item.description = JSON.stringify(value);
+    if (key !== null) item.legacy_key = key;
+    if (item.id !== undefined && !/^A[1-9]\d*$/i.test(String(item.id))) {
+      item.legacy_id = item.id;
+      delete item.id;
+    }
+    if (item.id === undefined) {
+      const match = prior.find((old) => (key !== null && old.legacy_key === key)
+        || (item.legacy_id !== undefined && old.legacy_id === item.legacy_id));
+      if (match) item.id = match.id;
+      else if (key && /^A[1-9]\d*$/i.test(key)) item.id = key;
+    }
+    return item;
+  });
+}
+
+function normalizeWorkRecord(record, previous = {}) {
+  const fields = normalizeAcceptanceCriteria(readableCriteria(record.acceptance_criteria, previous), previous, { allowEmpty: true });
+  return { ...record, ...fields,
+    acceptance_criteria_next_id: Math.max(fields.acceptance_criteria_next_id, record.acceptance_criteria_next_id || 1),
+    behavior: record.behavior || '',
+  };
+}
+
+function assertSnapshotRevision(revision, label) {
+  if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1)) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+}
+
+/** Replay the same durable model for the CLI and the read-only web board.
+ * Goal revisions count all events in its aggregate stream. A task revision counts
+ * events affecting that task, including changes to inherited verification mode.
+ * Reading a task revision stops at the event that first produced that snapshot.
+ */
+export function replayGoalEvents(events, goalId, { revision, taskId, taskRevision, onEvent } = {}) {
+  assertSnapshotRevision(revision, 'revision');
+  assertSnapshotRevision(taskRevision, 'taskRevision');
+  if (taskRevision !== undefined && !taskId) throw new Error('taskRevision requires taskId');
+  if (revision !== undefined && revision > events.length) throw new Error(`Revision r${revision} not found for #${goalId}`);
+  let goal = { goal_id: goalId, tasks: {}, _taskOrder: [], revision: 0 };
+  let foundTaskRevision = false;
+  for (let index = 0; index < (revision ?? events.length); index++) {
+    const event = events[index];
+    const previousGoal = goal;
+    const previousTask = event.task_id ? goal.tasks[event.task_id] : null;
+    goal = { ...goal, tasks: { ...goal.tasks }, _taskOrder: [...(goal._taskOrder || [])] };
+    const affectedTasks = new Set();
     switch (event.event) {
-      case 'created':  // legacy
+      case 'created':
       case 'goal_created':
-        goal = { ...goal, ...event, tasks: {} };
+        goal = { ...goal, ...event, tasks: goal.tasks, _taskOrder: goal._taskOrder };
         break;
       case 'updated':
-        goal = { ...goal, ...event };
+        goal = { ...goal, ...event, tasks: goal.tasks, _taskOrder: goal._taskOrder };
         break;
       case 'status_changed':
-        goal.status = event.status;
+        goal = { ...goal, ...event };
         goal.closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
         break;
       case 'github_synced':
@@ -368,14 +405,16 @@ export function readGoalWithTasks(goalId, username = null) {
         delete goal.issue_number;
         delete goal.issue_url;
         goal.github_unlinked = true;
-        for (const task of Object.values(goal.tasks)) {
-          delete task.issue_number;
-          delete task.issue_url;
+        for (const [id, task] of Object.entries(goal.tasks)) {
+          const updated = { ...task };
+          delete updated.issue_number;
+          delete updated.issue_url;
+          goal.tasks[id] = updated;
+          affectedTasks.add(id);
         }
         break;
       case 'github_pr_synced':
-        goal.github_prs = goal.github_prs || {};
-        goal.github_prs[`${event.repository || ''}#${event.pr_number}`] = event;
+        goal.github_prs = { ...(goal.github_prs || {}), [`${event.repository || ''}#${event.pr_number}`]: event };
         break;
       case 'adr_attached':
         goal.adr_id = event.adr_id;
@@ -384,54 +423,113 @@ export function readGoalWithTasks(goalId, username = null) {
         delete goal.adr_id;
         break;
       case 'task_created':
-        goal.tasks[event.task_id] = {
-          task_id: event.task_id,
-          title: event.title,
-          description: event.description || '',
-          behavior: event.behavior || '',
-          ...(Object.prototype.hasOwnProperty.call(event, 'verification_mode')
-            ? { verification_mode: event.verification_mode }
-            : {}),
-          status: 'open'
-        };
-        goal._taskOrder = goal._taskOrder || [];
-        goal._taskOrder.push(event.task_id);
+        goal.tasks[event.task_id] = { ...event, description: event.description || '', status: event.status || 'open' };
+        if (!goal._taskOrder.includes(event.task_id)) goal._taskOrder.push(event.task_id);
+        affectedTasks.add(event.task_id);
         break;
       case 'task_updated':
-        if (goal.tasks[event.task_id]) {
-          goal.tasks[event.task_id] = { ...goal.tasks[event.task_id], ...event };
+        if (previousTask) {
+          goal.tasks[event.task_id] = { ...previousTask, ...event };
+          affectedTasks.add(event.task_id);
         }
         break;
       case 'task_status_changed':
-        if (goal.tasks[event.task_id]) {
-          goal.tasks[event.task_id].status = event.status;
-          goal.tasks[event.task_id].closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
+        if (previousTask) {
+          goal.tasks[event.task_id] = { ...previousTask, ...event,
+            closed_commit_sha: event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null,
+          };
+          affectedTasks.add(event.task_id);
         }
         break;
       case 'task_github_synced':
-        if (goal.tasks[event.task_id] && !goal.github_unlinked) {
-          goal.tasks[event.task_id].issue_number = event.issue_number;
-          goal.tasks[event.task_id].issue_url = event.issue_url;
+        if (previousTask) {
+          if (!goal.github_unlinked) goal.tasks[event.task_id] = { ...previousTask, issue_number: event.issue_number, issue_url: event.issue_url };
+          affectedTasks.add(event.task_id);
         }
         break;
       case 'tasks_reordered':
-        goal._taskOrder = event.order;
+        if (Array.isArray(event.order)) goal._taskOrder = event.order;
         break;
     }
+    goal = normalizeWorkRecord(goal, previousGoal);
+    goal.type = normalizeGoalType(goal.type);
+    goal.verification_mode = effectiveVerificationMode(goal.verification_mode);
+    let childAgreementChanged = event.event === 'task_created';
+    for (const [id, raw] of Object.entries(goal.tasks)) {
+      const previous = previousGoal.tasks[id];
+      let task = normalizeWorkRecord(raw, previous || {});
+      task.effective_verification_mode = effectiveVerificationMode(goal.verification_mode, task.verification_mode);
+      const inheritedModeChanged = previous && previous.effective_verification_mode !== task.effective_verification_mode;
+      if (inheritedModeChanged) affectedTasks.add(id);
+      if (previous && affectedTasks.has(id)) {
+        const requestChanged = workRequestChanged(previous, task);
+        const explicitlyAccepted = event.task_id === id && event.acceptance;
+        if ((requestChanged || inheritedModeChanged) && !explicitlyAccepted) {
+          const invalidation = invalidateAcceptanceFields(previous, task, {
+            force: inheritedModeChanged, timestamp: event.timestamp || null,
+            reason: inheritedModeChanged ? 'Inherited verification requirements changed' : 'The task agreement changed',
+          });
+          // Command-created invalidations already contain the historical receipt.
+          if (!Object.hasOwn(event, 'acceptance') || event.task_id !== id) task = { ...task, ...invalidation };
+        }
+        if (previous.acceptance && task.status !== 'closed' && task.acceptance) {
+          task = { ...task, ...invalidateAcceptanceFields(previous, {}, { force: true, timestamp: event.timestamp || null, reason: 'The task was reopened' }) };
+          if (event.event === 'task_status_changed') task.status = event.status;
+        }
+        if (requestChanged || previous.status !== task.status || !isDeepStrictEqual(previous.acceptance, task.acceptance)) childAgreementChanged = true;
+      }
+      task.revision = (previous?.revision || 0) + (affectedTasks.has(id) ? 1 : 0);
+      goal.tasks[id] = task;
+    }
+    if (previousGoal.revision) {
+      const explicitGoalAcceptance = !event.task_id && event.acceptance;
+      if (!explicitGoalAcceptance && !Object.hasOwn(event, 'acceptance')) {
+        goal = { ...goal, ...invalidateAcceptanceFields(previousGoal, goal, {
+          kind: 'goal', timestamp: event.timestamp || null,
+        }) };
+      }
+      if (previousGoal.acceptance && (childAgreementChanged || (goal.status !== 'closed' && goal.acceptance))) {
+        goal = { ...goal, ...invalidateAcceptanceFields(previousGoal, {}, {
+          kind: 'goal', force: true, timestamp: event.timestamp || null,
+          reason: childAgreementChanged ? 'A child task agreement, disposition, or acceptance changed' : 'The goal was reopened',
+        }) };
+        if (event.event === 'status_changed') goal.status = event.status;
+      }
+    }
+    goal.revision = index + 1;
+    onEvent?.(event, goal, affectedTasks);
+    if (taskRevision !== undefined && goal.tasks[taskId]?.revision === taskRevision) {
+      foundTaskRevision = true;
+      break;
+    }
   }
-
-  goal.behavior = goal.behavior || '';
-  goal.type = normalizeGoalType(goal.type);
-  goal.verification_mode = effectiveVerificationMode(goal.verification_mode);
-  for (const task of Object.values(goal.tasks)) {
-    task.behavior = task.behavior || '';
-    task.effective_verification_mode = effectiveVerificationMode(
-      goal.verification_mode,
-      task.verification_mode,
-    );
-  }
-  
+  if (taskRevision !== undefined && !foundTaskRevision) throw new Error(`Revision r${taskRevision} not found for #${goalId}#${taskId}`);
   return goal;
+}
+
+export function readGoalWithTasks(goalId, username = null, options = {}) {
+  const filePath = getGoalFilePath(goalId, username);
+  if (!fs.existsSync(filePath)) return null;
+  return replayGoalEvents(readJsonEvents(filePath), goalId, options);
+}
+
+export function readGoalHistory(goalId, username = null, { taskId, revision } = {}) {
+  const filePath = getGoalFilePath(goalId, username);
+  if (!fs.existsSync(filePath)) return null;
+  const events = readJsonEvents(filePath);
+  if (!taskId) {
+    if (revision !== undefined) replayGoalEvents(events, goalId, { revision });
+    return events.slice(0, revision).map((event, index) => ({ ...event, revision: index + 1 }));
+  }
+  const history = [];
+  let previous = 0;
+  replayGoalEvents(events, goalId, { taskId, taskRevision: revision, onEvent(event, snapshot) {
+    const current = snapshot.tasks[taskId]?.revision || 0;
+    if (current > previous) history.push({ ...event, revision: current, goal_revision: snapshot.revision });
+    previous = current;
+  } });
+  if (revision !== undefined && previous !== revision) throw new Error(`Revision r${revision} not found for #${goalId}#${taskId}`);
+  return history;
 }
 
 export function run(cmd, opts = {}) {

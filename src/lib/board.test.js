@@ -58,7 +58,7 @@ describe('readBoardData', () => {
     const result = readBoardData({ dbDir });
     expect(result.goals.map((goal) => goal.goal_id)).toEqual(['g001']);
     expect(result.warnings).toHaveLength(1);
-    expect(result.warnings[0].message).toContain('Invalid JSON');
+    expect(result.warnings[0].message).toContain('Invalid journal');
   });
 
   it('returns an empty board for missing local storage', () => {
@@ -238,5 +238,60 @@ describe('readBoardData', () => {
     expect(result.goals.map((goal) => goal.tasks[0].linked_crs[0].key)).toEqual(['first#CR-001', 'second#CR-001']);
     expect(result.change_records.map((record) => record.covers[0])).toEqual(['first#g001#t01', 'second#g001#t01']);
     expect(result.change_records[0]).not.toHaveProperty('path');
+  });
+
+  it('exposes the same work agreement, direct acceptance evidence and extensions as journal replay', () => {
+    const clipsDir = makeDb({
+      'db/g001.jsonl': [
+        { event: 'goal_created', goal_id: 'g001', title: 'Restore active tab', type: 'planning', plan: 'Agree the storage boundary, then wire restoration.', decisions: 'Persist stable tab keys.', acceptance_criteria: ['Selection survives reopening.'] },
+        { event: 'task_created', task_id: 't01', title: 'Store active tab', description: 'Persist each workspace tab selection.', scope: 'Storage behavior only.', components: ['#c1#r1'], acceptance_criteria: [{ id: 'A1', description: 'Invalid values use defaults.' }], owner: 'builder', acceptance_owner: 'reviewer', sections: { Compatibility: 'Old preference files remain readable.' }, extensions: { review: { audience: 'workspace' } } },
+        { event: 'task_updated', task_id: 't01', record: 'Added defensive reads and workspace-scoped writes.', status: 'closed', acceptance: { accepted_by: 'reviewer', summary: 'Storage behavior meets the task contract.', artifact: { commit: 'test-fixture-artifact' }, criteria: [{ id: 'A1', status: 'satisfied', evidence: 'Malformed stored-key fixture restores the default.' }], request_revision: 1, request_snapshot: { description: 'Persist each workspace tab selection.' } } },
+      ].map((event) => JSON.stringify(event)).join('\n'),
+      'db/tracks/r001.jsonl': JSON.stringify({ event: 'track_created', track_id: 'r001', title: 'Workspace', status: 'open' }),
+      'components/c001.jsonl': JSON.stringify({ event: 'component_created', component_id: 'c001', title: 'Workspace preferences', responsibility: 'Store workspace choices.', contract: 'Unknown values use defaults.' }),
+    });
+    const result = readBoardData({ dbDir: path.join(clipsDir, 'db') });
+    expect(result.goals).toHaveLength(1);
+    expect(result.goals[0]).toMatchObject({ type: 'planning', plan: 'Agree the storage boundary, then wire restoration.', decisions: 'Persist stable tab keys.', revision: 3, acceptance_criteria: [{ id: 'A1', description: 'Selection survives reopening.' }] });
+    expect(result.goals[0].tasks[0]).toMatchObject({
+      description: 'Persist each workspace tab selection.', scope: 'Storage behavior only.',
+      record: 'Added defensive reads and workspace-scoped writes.', components: ['#c1#r1'],
+      revision: 2, owner: 'builder', acceptance_owner: 'reviewer',
+      acceptance: { artifact: { commit: 'test-fixture-artifact' }, criteria: [{ id: 'A1', evidence: 'Malformed stored-key fixture restores the default.' }] },
+      sections: { Compatibility: 'Old preference files remain readable.' }, extensions: { review: { audience: 'workspace' } },
+    });
+    expect(result.components).toMatchObject([{ component_id: 'c001', ref: '#c001', revision: 1, contract: 'Unknown values use defaults.' }]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('keeps valid components visible when another component journal is corrupt', () => {
+    const clipsDir = makeDb({
+      'components/c001.jsonl': JSON.stringify({ event: 'component_created', title: 'Valid component' }),
+      'components/c002.jsonl': '{bad-json}',
+    });
+    const result = readBoardData({ dbDir: path.join(clipsDir, 'db') });
+    expect(result.goals).toEqual([]);
+    expect(result.components.map((component) => component.title)).toEqual(['Valid component']);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0].path).toBe(path.join(clipsDir, 'components', 'c002.jsonl'));
+  });
+
+  it('keeps unqualified component refs repository-wide even inside namespaced work', () => {
+    const root = makeDb({
+      '.clips/db/alice/g001.jsonl': [
+        { event: 'goal_created', goal_id: 'g001', title: 'Workspace', components: ['#c1'] },
+        { event: 'task_created', task_id: 't01', title: 'Change preferences', components: ['#c1#r1', '#alice#c1'] },
+      ].map((event) => JSON.stringify(event)).join('\n'),
+      '.clips/components/c001.jsonl': JSON.stringify({ event: 'component_created', title: 'Root preferences' }),
+      '.clips/components/alice/c001.jsonl': JSON.stringify({ event: 'component_created', title: 'Alice preferences', dependencies: ['#c2', '#alice#c2'] }),
+      '.clips/components/alice/c002.jsonl': JSON.stringify({ event: 'component_created', title: 'Alice workspace' }),
+    });
+    const result = readWorkspaceBoard({ projects: [{ id: 'editor', label: 'Editor', path: root }] });
+    expect(result.components.map((component) => component.ref)).toEqual(['editor#c001', 'editor#alice#c001', 'editor#alice#c002']);
+    expect(result.components[1].dependency_refs).toEqual(['editor#c002', 'editor#alice#c002']);
+    expect(result.components.some((component) => component.ref === 'editor#c002')).toBe(false);
+    expect(result.goals[0].component_refs).toEqual(['editor#c001']);
+    expect(result.goals[0].tasks[0].component_refs).toEqual(['editor#c001#r1', 'editor#alice#c001']);
+    expect(result.goals[0].tasks[0].components).toEqual(['#c1#r1', '#alice#c1']);
   });
 });

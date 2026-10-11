@@ -60,7 +60,7 @@ describe('local installation switching', () => {
       let state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       expect(state.mode).toBe('dev');
       expect(fs.realpathSync(path.join(globalRoot, '@dfosco', 'clips'))).toBe(path.resolve(process.cwd()));
-      expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toContain('Skill: clips');
+      expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.resolve('.agents/skills/clips/SKILL.md'), 'utf8'));
       expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips']);
       expect(fs.existsSync(path.join(state.prod_package, 'src', 'cli.js'))).toBe(true);
 
@@ -73,7 +73,7 @@ describe('local installation switching', () => {
 
       execFileSync(process.execPath, [devCli, 'dev'], { cwd: project, env });
       expect(JSON.parse(fs.readFileSync(statePath, 'utf8')).mode).toBe('dev');
-      expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toContain('Skill: clips');
+      expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.resolve('.agents/skills/clips/SKILL.md'), 'utf8'));
       expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips']);
       expect(fs.readFileSync(env.FAKE_NPM_LOG, 'utf8').trim().split('\n')).toEqual(['root -g', 'link', 'root -g', 'root -g']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }

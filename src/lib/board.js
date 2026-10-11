@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getClipsDbDir, getClipsRecordsDir } from './core.js';
+import { getClipsDbDir, getClipsRecordsDir, replayGoalEvents } from './core.js';
+import { readJsonEvents } from './journal.js';
+import { listComponents } from './components.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
 import { listTracks } from './tracks.js';
@@ -124,90 +126,7 @@ function linkedPrsByCr(prs, recordId) {
 }
 
 export function parseGoalFile(filePath, goalId) {
-  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
-  let goal = { goal_id: goalId, tasks: {}, _taskOrder: [] };
-
-  for (const [index, line] of lines.entries()) {
-    let event;
-    try {
-      event = JSON.parse(line);
-    } catch (error) {
-      throw new Error(`Invalid JSON at line ${index + 1}: ${error.message}`);
-    }
-
-    switch (event.event) {
-      case 'created':
-      case 'goal_created':
-        goal = { ...goal, ...event, tasks: goal.tasks, _taskOrder: goal._taskOrder };
-        break;
-      case 'updated':
-        goal = { ...goal, ...event };
-        break;
-      case 'status_changed':
-        goal.status = event.status;
-        goal.closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
-        break;
-      case 'github_synced':
-        goal.issue_number = event.issue_number;
-        goal.issue_url = event.issue_url;
-        goal.github_unlinked = false;
-        break;
-      case 'github_unlinked':
-        delete goal.issue_number;
-        delete goal.issue_url;
-        goal.github_unlinked = true;
-        for (const task of Object.values(goal.tasks)) {
-          delete task.issue_number;
-          delete task.issue_url;
-        }
-        break;
-      case 'github_pr_synced':
-        goal.github_prs = goal.github_prs || {};
-        goal.github_prs[`${event.repository || ''}#${event.pr_number}`] = event;
-        break;
-      case 'adr_attached':
-        goal.adr_id = event.adr_id;
-        break;
-      case 'adr_detached':
-        delete goal.adr_id;
-        break;
-      case 'task_created':
-        goal.tasks[event.task_id] = {
-          task_id: event.task_id,
-          title: event.title,
-          description: event.description || '',
-          behavior: event.behavior || '',
-          ...(Object.prototype.hasOwnProperty.call(event, 'verification_mode')
-            ? { verification_mode: event.verification_mode }
-            : {}),
-          status: 'open',
-        };
-        goal._taskOrder.push(event.task_id);
-        break;
-      case 'task_updated':
-        if (goal.tasks[event.task_id]) goal.tasks[event.task_id] = { ...goal.tasks[event.task_id], ...event };
-        break;
-      case 'task_status_changed':
-        if (goal.tasks[event.task_id]) {
-          goal.tasks[event.task_id].status = event.status;
-          goal.tasks[event.task_id].closed_commit_sha = event.status === 'closed' ? (event.commit_sha || event.closed_commit_sha || event.commit || null) : null;
-        }
-        break;
-      case 'task_github_synced':
-        if (goal.tasks[event.task_id] && !goal.github_unlinked) {
-          goal.tasks[event.task_id].issue_number = event.issue_number;
-          goal.tasks[event.task_id].issue_url = event.issue_url;
-        }
-        break;
-      case 'tasks_reordered':
-        goal._taskOrder = Array.isArray(event.order) ? event.order : goal._taskOrder;
-        break;
-      default:
-        break;
-    }
-  }
-
-  return goal;
+  return replayGoalEvents(readJsonEvents(filePath), goalId);
 }
 
 export function discoverBoardGoals(dbDir = getClipsDbDir()) {
@@ -222,10 +141,10 @@ export function discoverBoardGoals(dbDir = getClipsDbDir()) {
       continue;
     }
 
-    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'tracks') continue;
     const userDir = path.join(dbDir, entry.name);
     for (const file of fs.readdirSync(userDir)) {
-      if (file.endsWith('.jsonl')) {
+      if (!file.startsWith('_') && file.endsWith('.jsonl')) {
         discovered.push({ username: entry.name, goalId: file.slice(0, -'.jsonl'.length), filePath: path.join(userDir, file) });
       }
     }
@@ -243,6 +162,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
   const goalPrs = Object.values(rawGoal.github_prs || {});
 
   return {
+    ...rawGoal,
     goal_id: rawGoal.goal_id,
     ref: goalRef,
     username,
@@ -267,6 +187,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
       const taskRef = formatRef(username, rawGoal.goal_id, rawTask.task_id);
       const shortTaskRef = formatRef(null, rawGoal.goal_id, rawTask.task_id);
       return {
+        ...rawTask,
         task_id: rawTask.task_id,
         ref: taskRef,
         title: rawTask.title || 'Untitled task',
@@ -283,6 +204,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
         issue_url: rawTask.issue_url || null,
         source,
         goal_id: rawGoal.goal_id,
+        goal_ref: goalRef,
         goal_title: rawGoal.title || rawGoal.goal_id,
         goal_status: goalStatus,
         closed_commit_sha: status === 'closed' ? rawTask.closed_commit_sha || null : null,
@@ -293,7 +215,11 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
   };
 }
 
-export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = getClipsRecordsDir('cr') } = {}) {
+export function readBoardData({
+  dbDir = getClipsDbDir(),
+  recordsDir = path.join(path.dirname(dbDir), 'records', 'cr'),
+  componentsDir = path.join(path.dirname(dbDir), 'components'),
+} = {}) {
   const warnings = [];
   const goals = [];
   const changeRecords = readChangeRecords(recordsDir);
@@ -322,11 +248,17 @@ export function readBoardData({ dbDir = getClipsDbDir(), recordsDir = getClipsRe
     const members = goals.filter((goal) => goal.track_id === track.track_id);
     return { ...track, ref: `#${track.track_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
   });
-  return { version: 1, generated_at: new Date().toISOString(), tracks, goals, change_records: records, github_prs: uniquePrs, warnings };
+  const components = listComponents({ componentsDir, onError: (warning) => warnings.push(warning) });
+  return { version: 1, generated_at: new Date().toISOString(), tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
 }
 
 function qualifyRef(projectId, ref) {
   return `${projectId}#${String(ref).replace(/^#/, '')}`;
+}
+
+function qualifyComponentRef(projectId, ref) {
+  const canonical = String(ref).replace(/(^|#)c(\d+)(?=#|$)/i, (_, prefix, number) => `${prefix}c${String(Number(number)).padStart(3, '0')}`);
+  return qualifyRef(projectId, canonical);
 }
 
 function qualifyRecord(project, record) {
@@ -349,6 +281,7 @@ export function readProjectBoard(project) {
   const localBoard = readBoardData({
     dbDir: path.join(project.path, '.clips', 'db'),
     recordsDir: path.join(project.path, '.clips', 'records', 'cr'),
+    componentsDir: path.join(project.path, '.clips', 'components'),
   });
   const goals = localBoard.goals.map((goal) => {
     const ref = qualifyRef(project.id, goal.ref);
@@ -356,7 +289,8 @@ export function readProjectBoard(project) {
       ...goal,
       ref,
       track_ref: goal.track_id ? qualifyRef(project.id, `#${goal.track_id}`) : null,
-      blocked_by: goal.blocked_by.map((id) => qualifyRef(project.id, `#${id}`)),
+      blocked_by: goal.blocked_by.map((id) => qualifyRef(project.id, id)),
+      component_refs: (goal.components || []).map((component) => qualifyComponentRef(project.id, component)),
       project_id: project.id,
       project_label: project.label,
       linked_crs: (goal.linked_crs || []).map((record) => qualifyRecordSummary(project, record)),
@@ -365,6 +299,7 @@ export function readProjectBoard(project) {
         ...task,
         ref: qualifyRef(project.id, task.ref),
         goal_ref: ref,
+        component_refs: (task.components || []).map((component) => qualifyComponentRef(project.id, component)),
         project_id: project.id,
         project_label: project.label,
         linked_crs: (task.linked_crs || []).map((record) => qualifyRecordSummary(project, record)),
@@ -374,6 +309,13 @@ export function readProjectBoard(project) {
   });
 
   return {
+    components: localBoard.components.map((component) => ({
+      ...component,
+      ref: qualifyRef(project.id, component.ref),
+      dependency_refs: (component.dependencies || []).map((dependency) => qualifyComponentRef(project.id, dependency)),
+      project_id: project.id,
+      project_label: project.label,
+    })),
     tracks: localBoard.tracks.map((track) => ({ ...track, ref: qualifyRef(project.id, track.ref), project_id: project.id, project_label: project.label, goal_refs: track.goal_refs.map((ref) => qualifyRef(project.id, ref)) })),
     goals,
     change_records: localBoard.change_records.map((record) => qualifyRecord(project, record)),
@@ -395,6 +337,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
     projects: availableProjects.map(({ id, label }) => ({ id, label })),
     default_project_ids: projects.map((project) => project.id),
     goals: [],
+    components: [],
     tracks: [],
     change_records: [],
     github_prs: [],
@@ -405,6 +348,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
     try {
       const projectBoard = readProjectBoard(project);
       board.goals.push(...projectBoard.goals);
+      board.components.push(...projectBoard.components);
       board.tracks.push(...projectBoard.tracks);
       board.change_records.push(...projectBoard.change_records);
       board.github_prs.push(...projectBoard.github_prs);

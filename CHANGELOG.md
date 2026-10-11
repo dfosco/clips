@@ -1,5 +1,38 @@
 # Clips
 
+## Unreleased
+
+Use goals, atomic tasks, and system components as a small, extensible work model
+for agents. A task is the change request before execution and the change record
+after acceptance.
+
+### Features
+
+- Add persistent system components with responsibility, contract, source references,
+  dependencies, named sections, and project-defined metadata.
+- Add task scope, component references, ownership, result records, and work
+  dependencies. Goals now carry their plan and architectural decisions.
+- Give acceptance criteria stable nested IDs and record structured acceptance
+  receipts with evidence, artifact identity, and the request that was accepted.
+- Add recoverable goal, task, and component revisions, history inspection, and
+  JSON views for agents. Preserve prior agreements and acceptance history.
+- Support optional named Markdown sections and JSON extensions without requiring
+  another artifact type for each project-specific need.
+
+### Changes
+
+- Remove mandatory planning-goal ADRs and building-goal task gates. Existing type
+  labels, attached ADRs, and independent CR/ADR records remain supported.
+- Replace the separate-task-and-CR workflow with a task that preserves both its
+  request and actual result. Administrative closure remains distinct from evidence
+  and acceptance.
+- Update the Clips skill and repository guidance to avoid repeated confirmations
+  for authorized work and to coordinate shared workflow state through one writer
+  by default.
+
+These changes describe the development branch. They do not publish a new npm
+release or upgrade existing installations.
+
 ## 1.5.0
 
 Organize related goals into tracks, switch between a local development checkout and a saved npm installation, and return to a single Clips agent skill.

@@ -141,6 +141,27 @@ body { font-size: 18px; }
 .detail-external-link { font-size: 14px; }
 .detail-behavior h3 { font-size: 18px; }
 .detail-behavior pre { font-size: 14px; }
+.detail-section { margin: 28px 0 0; color: var(--body); }
+.detail-section h3 { margin: 0 0 12px; color: var(--ink); font-size: 18px; }
+.detail-section h4 { margin: 15px 0 8px; color: var(--muted); font-size: 14px; }
+.detail-section .markdown-content { font-size: 16px; }
+.reference-list { display: grid; gap: 9px; margin: 0; padding-left: 20px; }
+.reference-list code, .reference-list button { overflow-wrap: anywhere; font-size: 14px; }
+.reference-list button { padding: 0; color: var(--accent); border: 0; background: transparent; text-align: left; }
+.reference-list button:hover { text-decoration: underline; }
+.work-ownership { display: grid; gap: 9px; margin: 22px 0; font-size: 14px; }
+.work-ownership > div { display: flex; justify-content: space-between; gap: 16px; }
+.work-ownership dt { color: var(--muted); }
+.work-ownership dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.acceptance-criteria { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.acceptance-criteria > li { padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.criterion-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.criterion-header code { color: var(--accent); font-size: 12px; overflow-wrap: anywhere; }
+.criterion-status { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.criterion-evidence { border-top: 1px solid var(--border); margin-top: 12px; }
+.evidence-json { overflow: auto; padding: 13px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--body); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-extra summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.previous-acceptance { margin-top: 16px; padding-top: 4px; border-top: 1px solid var(--border); }
 
 @media (max-width: 1150px) { .sidebar { width: 82px; } .main-content { width: calc(100% - 82px); margin-left: 82px; } .sidebar-link span, .brand > span:last-child { display: none; } .board-header { align-items: start; flex-direction: column; } .board-controls { width: 100%; } .search-field { width: min(360px, 100%); } .task-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .main-content { padding: 0 15px 30px; } .topbar { height: 68px; } .top-search { width: min(240px, 42vw); margin-right: 10px; } .docs-button { display: none; } .board-header { padding: 31px 0 22px; } .board-header > div:first-child { align-items: start; flex-direction: column; gap: 11px; } .board-controls { display: grid; grid-template-columns: 1fr auto; } .search-field { width: auto; } .select-field { display: none; } .kanban { grid-template-columns: repeat(4, minmax(260px, 1fr)); overflow-x: auto; margin-right: -15px; padding-right: 15px; padding-bottom: 8px; } .task-list { grid-template-columns: 1fr; } .secondary-view { padding: 34px 0; } }

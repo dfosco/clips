@@ -36,6 +36,19 @@ afterEach(() => {
 });
 
 describe('typed goal issue import', () => {
+  it('imports an explicit task section for either legacy type without requiring an ADR', () => {
+    const cwd = createWorkspace();
+    importIssue(cwd, {
+      number: 3, title: 'Plan and deliver',
+      body: '## Goal Type\n\n`planning`\n\n- [ ] A planning note\n\n## Tasks\n\n- [x] Deliver the agreed change\n\n---\nfooter',
+      state: 'CLOSED', createdAt: '2026-10-11T00:00:00Z',
+    });
+    const goal = showGoal(cwd, 'g001');
+    expect(goal.tasks).toHaveLength(1);
+    expect(goal.tasks[0]).toMatchObject({ title: 'Deliver the agreed change', status: 'closed' });
+    expect(goal.acceptance).toBeUndefined();
+  });
+
   it('preserves planning metadata without importing checkboxes as tasks', () => {
     const cwd = createWorkspace();
     importIssue(cwd, {
@@ -50,7 +63,7 @@ describe('typed goal issue import', () => {
     expect(showGoal(cwd, 'g001')).toMatchObject({
       type: 'planning',
       adr_id: 'ADR-004',
-      status: 'open',
+      status: 'closed',
       tasks: [],
     });
 
@@ -59,7 +72,7 @@ describe('typed goal issue import', () => {
     expect(showGoal(cwd, 'g001').status).toBe('closed');
   });
 
-  it('only imports a closed building state when tasks exist', () => {
+  it('imports administrative closure independently of task acceptance', () => {
     const cwd = createWorkspace();
     importIssue(cwd, {
       number: 1,
@@ -76,7 +89,8 @@ describe('typed goal issue import', () => {
       createdAt: '2026-08-31T00:00:00.000Z',
     });
 
-    expect(showGoal(cwd, 'g001').status).toBe('open');
+    expect(showGoal(cwd, 'g001').status).toBe('closed');
+    expect(showGoal(cwd, 'g001').acceptance).toBeUndefined();
     expect(showGoal(cwd, 'g002')).toMatchObject({ type: 'building', status: 'closed' });
     expect(showGoal(cwd, 'g002').tasks).toHaveLength(1);
   });

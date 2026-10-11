@@ -106,7 +106,9 @@ const planningBoard = {
     title: 'Choose storage model',
     type: 'planning',
     adr_id: 'ADR-004',
-    tasks: [],
+    plan: 'Describe the storage boundary, then implement it.',
+    decisions: 'Use workspace-local preferences.',
+    tasks: [{ ...board.goals[0].tasks[0], goal_title: 'Choose storage model' }],
   }],
 };
 
@@ -222,8 +224,8 @@ describe('board app', () => {
     await screen.getByPlaceholderText('Search current page').click();
     await waitFor(() => expect(screen.getByPlaceholderText('Search current page')).toHaveFocus());
 
-    await screen.getByRole('button', { name: 'CRs', exact: true }).click();
-    expect(screen.getByRole('heading', { name: 'Change records', exact: true })).toBeInTheDocument();
+    await screen.getByRole('button', { name: 'Legacy CRs', exact: true }).click();
+    expect(screen.getByRole('heading', { name: 'Legacy change records', exact: true })).toBeInTheDocument();
 
     await screen.getByRole('button', { name: 'Settings', exact: true }).click();
     expect(screen.getByRole('heading', { name: 'Settings', exact: true })).toBeInTheDocument();
@@ -280,7 +282,7 @@ describe('board app', () => {
     expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Local roadmap' })).toBeInTheDocument();
   });
 
-  it('shows the ADR result instead of tasks for a planning goal', async () => {
+  it('shows plan, decisions and tasks while retaining a legacy planning label and ADR link', async () => {
     vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify(planningBoard), { status: 200 }));
     render(App);
 
@@ -289,7 +291,10 @@ describe('board app', () => {
     const dialog = within(screen.getByRole('dialog'));
     expect(dialog.getByText('Planning')).toBeInTheDocument();
     expect(dialog.getByText('ADR-004')).toBeInTheDocument();
-    expect(dialog.queryByRole('heading', { name: 'Tasks in this goal' })).not.toBeInTheDocument();
+    expect(dialog.getByRole('heading', { name: 'Tasks in this goal' })).toBeInTheDocument();
+    expect(dialog.getByText('Describe the storage boundary, then implement it.')).toBeInTheDocument();
+    expect(dialog.getByText('Use workspace-local preferences.')).toBeInTheDocument();
+    expect(dialog.getByRole('button', { name: 'Define board data contract' })).toBeInTheDocument();
   });
 
   it('opens CRs as a full page with rendered markdown and linked objects', async () => {
@@ -297,7 +302,7 @@ describe('board app', () => {
     render(App);
 
     await screen.findByText('Define board data contract');
-    await screen.getByRole('button', { name: 'CRs', exact: true }).click();
+    await screen.getByRole('button', { name: 'Legacy CRs', exact: true }).click();
     await screen.getByRole('button', { name: /CR-003: Add read-only local kanban board/ }).click();
 
     expect(screen.getByRole('heading', { name: 'CR-003: Add read-only local kanban board' })).toBeInTheDocument();
@@ -317,7 +322,7 @@ describe('board app', () => {
     render(App);
 
     await screen.findByText('Define board data contract');
-    await screen.getByRole('button', { name: 'CRs', exact: true }).click();
+    await screen.getByRole('button', { name: 'Legacy CRs', exact: true }).click();
     expect(screen.getByRole('heading', { name: 'Unassociated GitHub changes' })).toBeInTheDocument();
     const prLink = screen.getByRole('link', { name: /#99 Unassociated cleanup/ });
     expect(prLink).toHaveAttribute('target', '_blank');
@@ -337,5 +342,91 @@ describe('board app', () => {
     await screen.getByRole('button', { name: 'Show goal cards' }).click();
     await screen.getByRole('button', { name: 'Open goal Local roadmap in clips' }).click();
     expect(screen.getByText('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')).toBeInTheDocument();
+  });
+
+  it('shows the task request, record and acceptance evidence on their stable criteria', async () => {
+    const component = {
+      component_id: 'c001', ref: 'clips#c001', project_id: 'clips', project_label: 'clips',
+      title: 'Workspace preferences', responsibility: 'Remember workspace choices.', contract: 'Invalid choices restore defaults.',
+      revision: 3, status: 'active', dependencies: [], source_refs: ['src/preferences.js'], sections: {}, extensions: {},
+    };
+    const task = {
+      ...board.goals[0].tasks[0],
+      scope: 'Change workspace preference storage.', owner: 'builder', acceptance_owner: 'reviewer',
+      record: 'Added defensive reads and scoped writes.', revision: 4,
+      components: ['#c001'], component_refs: ['clips#c001'],
+      acceptance_criteria: [{ id: 'A4', description: 'Corrupt data uses defaults.' }, { id: 'A1', description: 'Selection survives reopening.' }],
+      acceptance: {
+        accepted_by: 'reviewer', accepted_at: '2026-10-11T12:00:00Z', request_revision: 3,
+        summary: 'The agreed preference behavior is accepted.', artifact: { commit: 'fixture-candidate-42' },
+        component_basis: ['#c001#r2'],
+        criteria: [
+          { id: 'A1', status: 'satisfied', evidence: 'Reopen fixture retained the selected tab.' },
+          { id: 'A4', status: 'waived', reason: 'Corrupt storage is handled by the existing adapter.' },
+        ],
+      },
+      sections: { Compatibility: 'Existing preference keys remain valid.' },
+      extensions: { review: { audience: 'workspace' } },
+    };
+    vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ...board, components: [component], goals: [{ ...board.goals[0], tasks: [task] }] }), { status: 200 }));
+    render(App);
+    await (await screen.findByRole('button', { name: 'Open task Define board data contract in clips' })).click();
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByRole('heading', { name: 'Change request' })).toBeInTheDocument();
+    expect(dialog.getByText('Document response shape.')).toBeInTheDocument();
+    expect(dialog.getByText('Change workspace preference storage.')).toBeInTheDocument();
+    expect(dialog.getByRole('heading', { name: 'Change record' })).toBeInTheDocument();
+    expect(dialog.getByText('Added defensive reads and scoped writes.')).toBeInTheDocument();
+    const firstCriterion = dialog.getByText('clips#g001#t01#A4').closest('li');
+    const secondCriterion = dialog.getByText('clips#g001#t01#A1').closest('li');
+    expect(within(firstCriterion).getByText('Corrupt storage is handled by the existing adapter.')).toBeInTheDocument();
+    expect(within(secondCriterion).getByText('Reopen fixture retained the selected tab.')).toBeInTheDocument();
+    expect(dialog.getByText(/fixture-candidate-42/)).toBeInTheDocument();
+    expect(dialog.getByRole('heading', { name: 'Accepted component revisions' })).toBeInTheDocument();
+    expect(dialog.getByText('#c001#r2')).toBeInTheDocument();
+    expect(dialog.getByText('Existing preference keys remain valid.')).toBeInTheDocument();
+    await dialog.getByRole('button', { name: 'clips#c001 · Workspace preferences' }).click();
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Workspace preferences' })).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Invalid choices restore defaults.')).toBeInTheDocument();
+  });
+
+  it('lists components without goals, opens dependency details and restores a component route', async () => {
+    const componentBoard = {
+      ...board, goals: [],
+      components: [
+        { component_id: 'c001', ref: 'clips#c001', project_id: 'clips', project_label: 'clips', title: 'Workspace preferences', responsibility: 'Remember workspace choices.', contract: 'Invalid choices restore defaults.', revision: 3, status: 'active', dependencies: ['#c002'], dependency_refs: ['clips#c002'], source_refs: ['src/preferences.js'], sections: { Constraints: 'Values remain local.' } },
+        { component_id: 'c002', ref: 'clips#c002', project_id: 'clips', project_label: 'clips', title: 'Tab registry', responsibility: 'Define supported tab keys.', revision: 1, status: 'retired', dependencies: [], source_refs: [] },
+      ],
+    };
+    vi.spyOn(window, 'fetch').mockImplementation(() => Promise.resolve(new Response(JSON.stringify(componentBoard), { status: 200 })));
+    history.replaceState(null, '', '/components/clips%23c001');
+    render(App);
+    const panel = within(await screen.findByRole('dialog'));
+    expect(panel.getByRole('heading', { name: 'Workspace preferences' })).toBeInTheDocument();
+    expect(panel.getByText('src/preferences.js')).toBeInTheDocument();
+    expect(panel.getByText('Values remain local.')).toBeInTheDocument();
+    await panel.getByRole('button', { name: 'clips#c002 · Tab registry' }).click();
+    expect(within(screen.getByRole('dialog')).getByText('Define supported tab keys.')).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/components/clips%23c002');
+    await screen.getByRole('button', { name: 'Close detail panel' }).click();
+    expect(screen.getByRole('heading', { name: 'System components' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Workspace preferencesclips/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Tab registryclips/ })).toBeInTheDocument();
+  });
+
+  it('does not resolve a missing root component to a similarly numbered namespace', async () => {
+    const qualified = {
+      component_id: 'c001', ref: 'clips#alice#c001', project_id: 'clips', project_label: 'clips',
+      title: 'Alice preferences', responsibility: 'An explicitly scoped boundary.', revision: 1, status: 'active',
+    };
+    const task = { ...board.goals[0].tasks[0], components: ['#c1', '#alice#c1'], component_refs: ['clips#c001', 'clips#alice#c001'] };
+    vi.spyOn(window, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ...board, components: [qualified], goals: [{ ...board.goals[0], tasks: [task] }] }), { status: 200 }));
+    render(App);
+    await (await screen.findByRole('button', { name: 'Open task Define board data contract in clips' })).click();
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.getByText('clips#c001')).toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: /^clips#c001/ })).not.toBeInTheDocument();
+    await dialog.getByRole('button', { name: 'clips#alice#c001 · Alice preferences' }).click();
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Alice preferences' })).toBeInTheDocument();
   });
 });

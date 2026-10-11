@@ -111,85 +111,47 @@ describe('goal unlink', () => {
   });
 });
 
-describe('goal types', () => {
-  it('routes planning goals to ADRs instead of tasks', () => {
+describe('legacy goal metadata in the unified work model', () => {
+  it('allows either legacy goal label to contain tasks and close without an ADR', () => {
     const cwd = createWorkspace();
-    const created = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({
-      title: 'Choose a storage model',
-      type: 'planning',
-    })]));
-
-    const taskResult = runClipsResult(cwd, ['task', 'create', created.goal_id, JSON.stringify({ title: 'Compare databases' })]);
-    expect(taskResult.status).toBe(1);
-    expect(taskResult.stderr).toContain('Planning goals produce an ADR and cannot contain tasks');
-
-    const closeWithoutAdr = runClipsResult(cwd, ['goal', 'status', created.goal_id, 'closed']);
-    expect(closeWithoutAdr.status).toBe(1);
-    expect(closeWithoutAdr.stderr).toContain('Cannot close a planning goal until an ADR is attached');
-
-    fs.writeFileSync(path.join(cwd, '.clips', 'records', 'adr', 'ADR-001-storage-model.md'), '# ADR-001: Storage model\n');
-    expect(JSON.parse(runClips(cwd, ['goal', 'attach-adr', created.goal_id, 'adr-001']))).toEqual({
-      success: true,
-      goal_id: created.goal_id,
-      adr_id: 'ADR-001',
-    });
-    expect(JSON.parse(runClips(cwd, ['goal', 'show', created.goal_id]))).toMatchObject({
-      type: 'planning',
-      adr_id: 'ADR-001',
-      tasks: [],
-    });
-    fs.rmSync(path.join(cwd, '.clips', 'records', 'adr', 'ADR-001-storage-model.md'));
-    const closeWithoutFile = runClipsResult(cwd, ['goal', 'status', created.goal_id, 'closed']);
-    expect(closeWithoutFile.status).toBe(1);
-    expect(closeWithoutFile.stderr).toContain('ADR-001 is missing');
-    fs.writeFileSync(path.join(cwd, '.clips', 'records', 'adr', 'ADR-001-storage-model.md'), '# ADR-001: Storage model\n\n**Status:** Accepted\n');
-    runClips(cwd, ['record', 'status', 'ADR-001', 'archived']);
-    expect(JSON.parse(runClips(cwd, ['goal', 'status', created.goal_id, 'closed']))).toMatchObject({ status: 'closed' });
+    for (const type of ['planning', 'building']) {
+      const created = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({
+        title: 'Choose and implement storage', type,
+        plan: 'Compare the available stores, then implement the chosen boundary.',
+        decisions: 'Use the existing local store.',
+      })]));
+      runClips(cwd, ['task', 'create', created.goal_id, JSON.stringify({ title: 'Compare stores' })]);
+      expect(JSON.parse(runClips(cwd, ['goal', 'show', created.goal_id]))).toMatchObject({
+        type, plan: 'Compare the available stores, then implement the chosen boundary.',
+        decisions: 'Use the existing local store.', tasks: [{ title: 'Compare stores' }],
+      });
+      expect(JSON.parse(runClips(cwd, ['goal', 'status', created.goal_id, 'closed']))).toMatchObject({ status: 'closed' });
+      expect(JSON.parse(runClips(cwd, ['goal', 'show', created.goal_id])).acceptance).toBeUndefined();
+    }
   });
 
-  it('routes building goals to tasks and defaults legacy goals to building', () => {
+  it('preserves optional legacy ADR metadata across type changes', () => {
     const cwd = createWorkspace();
-    const created = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({ title: 'Build an import flow' })]));
-    expect(JSON.parse(runClips(cwd, ['goal', 'show', created.goal_id])).type).toBe('building');
+    const created = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({ title: 'Build the feature' })]));
+    fs.writeFileSync(path.join(cwd, '.clips', 'records', 'adr', 'ADR-001-storage.md'), '# ADR-001: Storage\n');
+    runClips(cwd, ['goal', 'attach-adr', created.goal_id, 'adr-001']);
+    runClips(cwd, ['task', 'create', created.goal_id, JSON.stringify({ title: 'Implement' })]);
+    runClips(cwd, ['goal', 'update', created.goal_id, JSON.stringify({ type: 'planning' })]);
+    runClips(cwd, ['goal', 'update', created.goal_id, JSON.stringify({ type: 'building' })]);
+    expect(JSON.parse(runClips(cwd, ['goal', 'show', created.goal_id]))).toMatchObject({ type: 'building', adr_id: 'ADR-001' });
+  });
 
-    const closeWithoutTasks = runClipsResult(cwd, ['goal', 'status', created.goal_id, 'closed']);
-    expect(closeWithoutTasks.status).toBe(1);
-    expect(closeWithoutTasks.stderr).toContain('Cannot close a building goal without tasks');
-
-    runClips(cwd, ['task', 'create', created.goal_id, JSON.stringify({ title: 'Implement import' })]);
-    expect(JSON.parse(runClips(cwd, ['goal', 'status', created.goal_id, 'closed']))).toMatchObject({ status: 'closed' });
-
+  it('retains legacy defaults and rejects accidental system-field mutation', () => {
+    const cwd = createWorkspace();
     fs.writeFileSync(path.join(cwd, '.clips', 'db', 'g099.jsonl'), `${JSON.stringify({
-      event: 'goal_created',
-      goal_id: 'g099',
-      title: 'Legacy goal',
-      status: 'open',
+      event: 'goal_created', goal_id: 'g099', title: 'Legacy goal', status: 'open',
     })}\n`);
     expect(JSON.parse(runClips(cwd, ['goal', 'show', 'g099'])).type).toBe('building');
-  });
-
-  it('rejects invalid types and retyping after an outcome exists', () => {
-    const cwd = createWorkspace();
     const invalid = runClipsResult(cwd, ['goal', 'create', JSON.stringify({ title: 'Invalid', type: 'research' })]);
     expect(invalid.status).toBe(1);
     expect(invalid.stderr).toContain("Invalid goal type 'research'");
-
-    const building = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({ title: 'Build', type: 'building' })]));
-    runClips(cwd, ['task', 'create', building.goal_id, JSON.stringify({ title: 'Implement' })]);
-    const retype = runClipsResult(cwd, ['goal', 'update', building.goal_id, JSON.stringify({ type: 'planning' })]);
-    expect(retype.status).toBe(1);
-    expect(retype.stderr).toContain('Cannot change a goal with tasks to planning');
-
-    const updateStatus = runClipsResult(cwd, ['goal', 'update', building.goal_id, JSON.stringify({ status: 'closed' })]);
+    const updateStatus = runClipsResult(cwd, ['goal', 'update', 'g099', JSON.stringify({ status: 'closed' })]);
     expect(updateStatus.status).toBe(1);
     expect(updateStatus.stderr).toContain('Unsupported goal fields: status');
-
-    const planning = JSON.parse(runClips(cwd, ['goal', 'create', JSON.stringify({ title: 'Plan', type: 'planning' })]));
-    fs.writeFileSync(path.join(cwd, '.clips', 'db', `${planning.goal_id}.jsonl`), `${JSON.stringify({
-      event: 'goal_created', goal_id: planning.goal_id, title: 'Plan', type: 'planning', status: 'open',
-    })}\n${JSON.stringify({ event: 'adr_attached', goal_id: planning.goal_id, adr_id: 'ADR-999' })}\n`);
-    runClips(cwd, ['goal', 'update', planning.goal_id, JSON.stringify({ type: 'building' })]);
-    expect(JSON.parse(runClips(cwd, ['goal', 'show', planning.goal_id]))).toMatchObject({ type: 'building' });
-    expect(JSON.parse(runClips(cwd, ['goal', 'show', planning.goal_id])).adr_id).toBeUndefined();
   });
 });

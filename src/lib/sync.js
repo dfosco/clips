@@ -13,7 +13,7 @@ import {
 } from './core.js';
 import { readConfig, isCollaborationEnabled } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
-import { adrRecordExists, goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
+import { goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
 import { appendTrackEvent, listTracks, readTrack } from './tracks.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
@@ -182,10 +182,34 @@ function formatBehaviorBlock(behavior, indent = '') {
   return `${indent}\`\`\`gherkin\n${lines}\n${indent}\`\`\``;
 }
 
+function workDetails(record, ref, { criteria = true } = {}) {
+  const sections = [];
+  for (const [label, field] of [['Scope', 'scope'], ['Plan', 'plan'], ['Decisions', 'decisions'], ['Change record', 'record']]) {
+    if (record[field]) sections.push(`## ${label}\n\n${record[field]}`);
+  }
+  if (record.components?.length) sections.push(`## Components\n\n${record.components.join(', ')}`);
+  if (record.owner) sections.push(`Owner: ${record.owner}`);
+  if (record.acceptance_owner) sections.push(`Acceptance owner: ${record.acceptance_owner}`);
+  if (criteria && record.acceptance_criteria?.length) {
+    sections.push(`## Acceptance criteria\n\n${record.acceptance_criteria.map((item, index) => {
+      const id = typeof item === 'string' ? `A${index + 1}` : item.id || `A${index + 1}`;
+      return `- ${ref}#${id}: ${typeof item === 'string' ? item : item.description || item.text}`;
+    }).join('\n')}`);
+  }
+  if (record.acceptance) {
+    const { accepted_by, summary, artifact, criteria: assessments } = record.acceptance;
+    sections.push(`## Acceptance\n\nAccepted by: ${accepted_by}\n\n${summary}\n\nArtifact: ${typeof artifact === 'string' ? artifact : JSON.stringify(artifact)}\n\n${(assessments || []).map((item) => `- ${ref}#${item.id}: ${item.status}${item.reason ? ` (${item.reason})` : ''}${item.evidence ? ` — ${typeof item.evidence === 'string' ? item.evidence : JSON.stringify(item.evidence)}` : ''}`).join('\n')}`);
+  }
+  for (const [heading, markdown] of Object.entries(record.sections || {})) sections.push(`## ${heading}\n\n${markdown}`);
+  return sections.join('\n\n');
+}
+
 export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
   const sections = [];
   if (parentIssueNumber) sections.push(`Sub-issue of #${parentIssueNumber}`);
   if (task.description) sections.push(formatDescription(task.description));
+  const details = workDetails(task, `#${goal?.goal_id || 'goal'}#${task.task_id || 'task'}`);
+  if (details) sections.push(details);
   if (task.behavior) sections.push(`## Behavior\n\n${formatBehaviorBlock(task.behavior)}`);
   sections.push(`## Verification Mode\n\n\`${effectiveVerificationMode(goal?.verification_mode, task.verification_mode)}\``);
   return sections.join('\n\n').trim();
@@ -195,7 +219,7 @@ export function buildIssueBody(goal) {
   const config = readConfig();
   let body = '';
   if (goal.track_id) body += `Track: #${goal.track_id}\n\n`;
-  if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => `#${id}`).join(', ')}\n\n`;
+  if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}\n\n`;
 
   if (goal.description) {
     const desc = formatDescription(goal.description);
@@ -227,14 +251,17 @@ export function buildIssueBody(goal) {
           typeof criterion === 'string'
             ? criterion
             : criterion.text || criterion.description || JSON.stringify(criterion);
-        body += `- ${text}\n`;
+        body += `- ${typeof criterion === 'object' && criterion.id ? `#${goal.goal_id}#${criterion.id}: ` : ''}${text}\n`;
       }
       body += '\n';
     }
   }
 
+  const details = workDetails(goal, `#${goal.goal_id}`, { criteria: false });
+  if (details) body += `${details}\n\n`;
+
   const tasks = getOrderedTasks(goal);
-  if (goal.type !== 'planning' && tasks.length > 0) {
+  if (tasks.length > 0) {
     body += `## Tasks\n\n`;
     for (const task of tasks) {
       const checked = ['closed', 'not_planned', 'duplicate'].includes(task.status) ? 'x' : ' ';
@@ -245,6 +272,8 @@ export function buildIssueBody(goal) {
         if (task.description) {
           body += `${String(task.description).split(/\r?\n/).map((line) => `  ${line}`).join('\n')}\n`;
         }
+        const details = workDetails(task, `#${goal.goal_id}#${task.task_id}`);
+        if (details) body += details.split('\n').map((line) => `  ${line}`).join('\n') + '\n';
         body += `  - Verification: \`${effectiveVerificationMode(goal.verification_mode, task.verification_mode)}\`\n`;
         if (task.behavior) {
           body += `  - Behavior:\n\n${formatBehaviorBlock(task.behavior, '    ')}\n`;
@@ -374,7 +403,7 @@ export function importIssue(issueData) {
     },
   );
 
-  if (metadata.type === 'planning' && metadata.adr_id) {
+  if (metadata.adr_id) {
     appendEvent(goalId, {
       event: 'adr_attached',
       goal_id: goalId,
@@ -383,8 +412,10 @@ export function importIssue(issueData) {
     });
   }
 
-  // Planning issue checkboxes are content, not implementation tasks.
-  const tasks = metadata.type === 'building' ? parseTaskList(issueData.body) : [];
+  // Legacy planning checkboxes outside an explicit Tasks section remain prose.
+  // Both old type labels can now contain an explicitly declared task list.
+  const taskSection = issueData.body?.match(/^## Tasks\s*\n([\s\S]*?)(?=^## |^---|$(?![\s\S]))/m)?.[1];
+  const tasks = parseTaskList(taskSection ?? (metadata.type === 'planning' ? '' : issueData.body));
   tasks.forEach((task, idx) => {
     const taskId = `t${String(idx + 1).padStart(2, '0')}`;
     appendEvent(
@@ -463,50 +494,21 @@ export function pullAllIssues() {
       if (goal.github_unlinked) continue;
 
       const metadata = parseGoalMetadata(issue.body);
-      if (goal.status !== 'closed' && metadata.type_explicit && metadata.type !== goal.type) {
-        const candidate = {
-          ...goal,
-          type: metadata.type,
-          adr_id: metadata.type === 'planning' && metadata.adr_explicit ? metadata.adr_id : goal.adr_id,
-        };
-        const hasInvalidArtifacts = metadata.type === 'planning'
-          ? Object.keys(goal.tasks).length > 0
-          : Boolean(goal.adr_id && adrRecordExists(getClipsRecordsDir('adr'), goal.adr_id));
-        const invalidClosedState = goal.status === 'closed'
-          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
-        if (!hasInvalidArtifacts && !invalidClosedState) {
-          appendEvent(existingGoalId, {
-            event: 'updated',
-            goal_id: existingGoalId,
-            timestamp: issue.updatedAt || new Date().toISOString(),
-            type: metadata.type,
-          });
-          if (metadata.type === 'building' && goal.adr_id) {
-            appendEvent(existingGoalId, {
-              event: 'adr_detached',
-              goal_id: existingGoalId,
-              timestamp: issue.updatedAt || new Date().toISOString(),
-              adr_id: goal.adr_id,
-            });
-          }
-          goal = readGoalWithTasks(existingGoalId);
-          updated++;
-        }
+      if (metadata.type_explicit && metadata.type !== goal.type) {
+        appendEvent(existingGoalId, {
+          event: 'updated', goal_id: existingGoalId,
+          timestamp: issue.updatedAt || new Date().toISOString(), type: metadata.type,
+        });
+        goal = readGoalWithTasks(existingGoalId);
+        updated++;
       }
-      if (goal.status !== 'closed' && goal.type === 'planning' && metadata.adr_explicit && metadata.adr_id && metadata.adr_id !== goal.adr_id) {
-        const candidate = { ...goal, adr_id: metadata.adr_id };
-        const invalidClosedState = goal.status === 'closed'
-          && Boolean(goalCompletionError(candidate, { recordsDir: getClipsRecordsDir('adr') }));
-        if (!invalidClosedState) {
-          appendEvent(existingGoalId, {
-            event: 'adr_attached',
-            goal_id: existingGoalId,
-            timestamp: issue.updatedAt || new Date().toISOString(),
-            adr_id: metadata.adr_id,
-          });
-          goal = readGoalWithTasks(existingGoalId);
-          updated++;
-        }
+      if (metadata.adr_explicit && metadata.adr_id && metadata.adr_id !== goal.adr_id) {
+        appendEvent(existingGoalId, {
+          event: 'adr_attached', goal_id: existingGoalId,
+          timestamp: issue.updatedAt || new Date().toISOString(), adr_id: metadata.adr_id,
+        });
+        goal = readGoalWithTasks(existingGoalId);
+        updated++;
       }
 
       const ghClosed = issue.state === 'CLOSED' || issue.state === 'closed';
