@@ -34,9 +34,9 @@
   "files": [
     "src/**/*.js",
     "!src/**/*.test.js",
-    ".agents/skills/clips/SKILL.md",
-    ".agents/skills/loopz/SKILL.md",
-    ".agents/skills/loopz/agents/openai.yaml",
+    ".agents/skills/clips",
+    ".agents/skills/loopz",
+    "skillshop.manifest.js",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -73,7 +73,7 @@
   },
   "dependencies": {},
   "exports": {
-    "./skills": "./src/skills.js",
+    "./skillshop": "./skillshop.manifest.js",
     "./*": "./*"
   }
 }
