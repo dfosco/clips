@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-package-'));
@@ -53,6 +53,9 @@ try {
   assert(paths.includes('src/cli.js'), 'tarball is missing the CLI');
   assert(paths.includes('dist/web/index.html'), 'tarball is missing board assets');
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
+  assert(paths.includes('.agents/skills/loopz/SKILL.md'), 'tarball is missing the Loopz skill');
+  assert(paths.includes('.agents/skills/loopz/agents/openai.yaml'), 'tarball is missing Loopz agent metadata');
+  assert(paths.includes('src/skills.js'), 'tarball is missing the skill-library export');
   assert(!paths.some((file) => file.startsWith('.agents/skills/clips-')), 'tarball contains routed Clips skills');
   assert(paths.includes('CHANGELOG.md'), 'tarball is missing the changelog');
   assert(!paths.some((file) => file.endsWith('.test.js')), 'tarball contains source tests');
@@ -63,6 +66,12 @@ try {
   const extractedRoot = path.join(tempRoot, 'package');
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
+  assert.equal(packedPackage.exports['./skills'], './src/skills.js');
+  const skillLibrary = await import(pathToFileURL(path.join(extractedRoot, 'src', 'skills.js')).href);
+  assert.equal(skillLibrary.clipsSkill.name, 'clips');
+  assert.equal(skillLibrary.loopzSkill.name, 'loopz');
+  assert(fs.existsSync(skillLibrary.clipsSkill.manifestPath), 'Clips descriptor manifest does not exist');
+  assert(fs.existsSync(skillLibrary.loopzSkill.manifestPath), 'Loopz descriptor manifest does not exist');
   const cli = path.join(extractedRoot, 'src', 'cli.js');
   const version = execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim();
   assert.equal(version, `clips v${manifest.version}`);

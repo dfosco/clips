@@ -1,0 +1,4 @@
+interface:
+  display_name: "Loopz"
+  short_description: "Drive Clips Lanes, goals, and tasks to completion"
+  default_prompt: "Use $loopz to continue the scoped Clips Lane, goals, or tasks until the requested outcomes are complete and accepted at the appropriate level."
