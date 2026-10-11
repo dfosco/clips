@@ -11,6 +11,7 @@ import { runSyncCommand } from './commands/sync.js';
 import { runWebCommand } from './commands/web.js';
 import { runRecordCommand } from './commands/record.js';
 import { runTrackCommand } from './commands/track.js';
+import { runLaneCommand } from './commands/lane.js';
 import { runComponentCommand } from './commands/component.js';
 import { runHistoryCommand } from './commands/history.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
@@ -51,7 +52,8 @@ Commands:
   view [ref] [--json]     View a goal, task, criterion, or component
   history <ref> [--json]  Read the record's revision journal
   goal <action> [args]    Manage goals
-  track <action> [args]   Manage tracks
+  lane <action> [args]    Manage strategic multi-goal lanes
+  track <action> [args]   Legacy Track command alias
   task <action> [args]    Manage tasks
   component <action>     Manage persistent system components
   record <action> [args]  Manage optional legacy CR and ADR records
@@ -67,7 +69,8 @@ Examples:
   clips init
   clips dev --project /path/to/repo
   clips prod --project /path/to/repo
-  clips track r01 add g01 g02 g010
+  clips lane create '{"title":"Workspace improvements","description":"Strategic product workstream"}'
+  clips lane l01 add g01 g02 g010
   clips view
   clips goal create '{"title":"Build import flow","plan":"...","decisions":"..."}'
   clips component create '{"title":"Selection store","responsibility":"Persist the current selection"}'
@@ -90,6 +93,7 @@ Examples:
 // Route to command handlers
 const commands = {
   goal: runGoalCommand,
+  lane: runLaneCommand,
   track: runTrackCommand,
   component: runComponentCommand,
   history: runHistoryCommand,
