@@ -12,23 +12,35 @@ export function trackPath(id, dbDir = getClipsDbDir()) {
   return path.join(dbDir, 'tracks', `${normalizeTrackId(id)}.jsonl`);
 }
 
-export function readTrack(id, dbDir = getClipsDbDir()) {
+export function readTrack(id, dbDir = getClipsDbDir(), { revision } = {}) {
   const file = trackPath(id, dbDir);
   if (!fs.existsSync(file)) return null;
-  const track = { track_id: normalizeTrackId(id) };
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean)) {
-    const event = JSON.parse(line);
-    if (event.event === 'track_created' || event.event === 'track_updated') {
-      for (const key of ['title', 'description', 'acceptance_criteria']) {
+  const events = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1 || revision > events.length)) {
+    throw new Error(`Revision r${revision} not found for #${normalizeTrackId(id)}`);
+  }
+  const track = { track_id: normalizeTrackId(id), revision: 0 };
+  for (const [index, event] of events.slice(0, revision ?? events.length).entries()) {
+    if (['track_created', 'track_updated', 'lane_created', 'lane_updated'].includes(event.event)) {
+      for (const key of ['title', 'description', 'acceptance_criteria', 'product_goals', 'sections', 'extensions']) {
         if (Object.hasOwn(event, key)) track[key] = event[key];
       }
+      if (event.event.startsWith('lane_')) track.record_kind = 'lane';
     }
-    if (event.event === 'track_created' || event.event === 'track_status_changed') track.status = event.status;
-    if (event.event === 'track_github_synced') {
+    if (['track_created', 'track_status_changed', 'lane_created', 'lane_status_changed', 'lane_closed'].includes(event.event)) {
+      track.status = event.status;
+    }
+    if (event.event === 'lane_closed') {
+      track.record_kind = 'lane';
+      track.closure = event.closure;
+    }
+    if (event.event === 'track_github_synced' || event.event === 'lane_github_synced') {
       track.issue_number = event.issue_number;
       track.issue_id = event.issue_id;
       track.issue_url = event.issue_url;
+      if (event.event === 'lane_github_synced') track.record_kind = 'lane';
     }
+    track.revision = index + 1;
   }
   return track;
 }
