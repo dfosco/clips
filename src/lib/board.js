@@ -303,6 +303,7 @@ export function readProjectBoard(project) {
         ...task,
         ref: qualifyRef(project.id, task.ref),
         goal_ref: ref,
+        blocked_by: (task.blocked_by || []).map((dependency) => qualifyRef(project.id, dependency)),
         component_refs: (task.components || []).map((component) => qualifyComponentRef(project.id, component)),
         project_id: project.id,
         project_label: project.label,
