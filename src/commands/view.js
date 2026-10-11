@@ -5,7 +5,7 @@ import { parseRef, readGoalWithTasks, getClipsDbDir, getCurrentUsername, formatR
 import { readConfig } from '../lib/config.js';
 import { readComponent } from '../lib/components.js';
 import { renderComponent } from './component.js';
-import { listTracks, normalizeTrackId, readTrack } from '../lib/tracks.js';
+import { listLanes, normalizeLaneId, readLane } from '../lib/lanes.js';
 
 const STATUS_ICONS = {
   open: '🟢',
@@ -81,7 +81,7 @@ function viewGoal(goalId, username = null, options = {}) {
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
   console.log(`${BOLD}│${RESET} Revision: r${goal.revision}`);
-  if (goal.track_id) console.log(`${BOLD}│${RESET} Track:  #${goal.track_id}`);
+  if (goal.lane_id) console.log(`${BOLD}│${RESET} Lane:   #${goal.lane_id}`);
   if (goal.blocked_by?.length) console.log(`${BOLD}│${RESET} Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
   if (goal.adr_id) {
@@ -244,13 +244,13 @@ function discoverGoals() {
   return goals;
 }
 
-function trackGoals(trackId) {
+function laneGoals(laneId) {
   return discoverGoals()
     .map(({ goalId, username }) => ({ goal: readGoalWithTasks(goalId, username), username }))
-    .filter(({ goal }) => goal?.track_id === trackId);
+    .filter(({ goal }) => goal?.lane_id === laneId);
 }
 
-function printTrackGoals(members) {
+function printLaneGoals(members) {
   console.log(`  Goals (${members.length})`);
   if (!members.length) {
     console.log(`    ${DIM}None yet${RESET}`);
@@ -262,29 +262,44 @@ function printTrackGoals(members) {
   }
 }
 
-function viewTrack(ref) {
-  const id = normalizeTrackId(ref);
-  const track = readTrack(id);
-  if (!track) {
-    console.error(`Error: Track #${id} not found`);
+function viewLane(ref) {
+  const match = String(ref || '').match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
+  if (!match) throw new Error(`Invalid lane ref: ${ref}`);
+  const id = normalizeLaneId(match[1]);
+  const lane = readLane(id, undefined, { revision: match[2] ? Number(match[2]) : undefined });
+  if (!lane) {
+    console.error(`Error: Lane #${id} not found`);
     process.exit(1);
   }
-  const members = trackGoals(id);
+  const members = laneGoals(id);
   console.log();
-  console.log(`${BOLD}#${id} ${track.title}${RESET}`);
-  console.log(`Status: ${formatStatus(track.status)}`);
+  console.log(`${BOLD}#${id} ${lane.title}${RESET}`);
+  console.log(`Status: ${formatStatus(lane.status)}`);
+  console.log(`Revision: r${lane.revision}`);
   console.log(`Progress: ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
-  if (track.issue_number) console.log(`GitHub: #${track.issue_number} ${DIM}${track.issue_url || ''}${RESET}`);
+  if (lane.issue_number) console.log(`GitHub: #${lane.issue_number} ${DIM}${lane.issue_url || ''}${RESET}`);
   console.log();
   console.log(`${BOLD}Description${RESET}`);
-  console.log(track.description ? wrapText(track.description, 60) : `${DIM}No description${RESET}`);
-  if (track.acceptance_criteria?.length) {
+  console.log(lane.description ? wrapText(lane.description, 60) : `${DIM}No description${RESET}`);
+  if (lane.product_goals?.length) {
     console.log();
-    console.log(`${BOLD}Acceptance Criteria${RESET}`);
-    for (const criterion of track.acceptance_criteria) console.log(`  • ${criterion}`);
+    console.log(`${BOLD}Product goals${RESET}`);
+    for (const item of lane.product_goals) console.log(`  • ${item}`);
+  }
+  if (lane.closure) {
+    console.log();
+    console.log(`${BOLD}Lane closure${RESET}`);
+    console.log(lane.closure.summary);
+    console.log(`Product goals achieved: ${lane.closure.product_goals_achieved?.length || 0}`);
+    console.log(`Components: ${lane.closure.components?.join(', ') || 'None recorded'}`);
+    console.log(`Media: ${lane.closure.media?.length || 0} item(s)`);
+  } else if (lane.legacy_acceptance_criteria?.length) {
+    console.log();
+    console.log(`${BOLD}Legacy Track criteria${RESET}`);
+    for (const criterion of lane.legacy_acceptance_criteria) console.log(`  • ${criterion}`);
   }
   console.log();
-  printTrackGoals(members);
+  printLaneGoals(members);
   console.log();
 }
 
@@ -297,14 +312,14 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   
   const allGoals = discoverGoals();
   if (allGoals.length === 0) {
-    const tracks = listTracks();
-    if (tracks.length) {
+    const lanes = listLanes();
+    if (lanes.length) {
       console.log();
-      console.log(`${BOLD}Tracks${RESET}`);
-      for (const track of tracks) {
-        console.log(`  #${track.track_id} ${track.title} [${track.status}] 0/0 goals closed`);
-        console.log(`    ${track.description || 'No description'}`);
-        printTrackGoals([]);
+      console.log(`${BOLD}Lanes${RESET}`);
+      for (const lane of lanes) {
+        console.log(`  #${lane.lane_id} ${lane.title} [${lane.status}] 0/0 goals closed`);
+        console.log(`    ${lane.description || 'No description'}`);
+        printLaneGoals([]);
       }
       console.log();
     }
@@ -352,14 +367,14 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   console.log();
   console.log(`${BOLD}Goals${RESET}`);
   console.log(`${DIM}═════════════════════════════════════════════════════════════${RESET}`);
-  const tracks = listTracks();
-  if (tracks.length) {
-    console.log(`${BOLD}Tracks${RESET}`);
-    for (const track of tracks) {
-      const members = trackGoals(track.track_id);
-      console.log(`  #${track.track_id} ${track.title} [${track.status}] ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
-      console.log(`    ${track.description || 'No description'}`);
-      printTrackGoals(members);
+  const lanes = listLanes();
+  if (lanes.length) {
+    console.log(`${BOLD}Lanes${RESET}`);
+    for (const lane of lanes) {
+      const members = laneGoals(lane.lane_id);
+      console.log(`  #${lane.lane_id} ${lane.title} [${lane.status}] ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
+      console.log(`    ${lane.description || 'No description'}`);
+      printLaneGoals(members);
     }
     console.log();
   }
@@ -392,7 +407,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       
       console.log();
       const resultInfo = goal.adr_id ? ` ${DIM}[${goal.adr_id}]${RESET}` : '';
-      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${goal.track_id ? ` [#${goal.track_id}]` : ''}${goal.blocked_by?.length ? ` [blocked by ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}]` : ''}${RESET}${resultInfo}`);
+      console.log(`  ${formatStatus(goal.status)} ${BOLD}${displayRef}${RESET} ${goal.title} ${taskInfo} ${DIM}[${goal.type}] [${formatVerificationMode(goal.verification_mode)}]${goal.lane_id ? ` [#${goal.lane_id}]` : ''}${goal.blocked_by?.length ? ` [blocked by ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}]` : ''}${RESET}${resultInfo}`);
       
       // Hide tasks if goal status is in hideTasksForGoalStatuses
       if (hideTasksForGoalStatuses.includes(goal.status)) continue;
@@ -501,16 +516,16 @@ export function runViewCommand(args) {
     } else listAllGoals(ref === 'all', showAllUsers);
     return;
   }
-  if (/^#?r\d+$/i.test(ref)) {
-    if (json) {
-      const track = readTrack(normalizeTrackId(ref));
-      if (!track) throw new Error(`Track ${ref} not found`);
-      console.log(JSON.stringify(track, null, 2));
-    } else viewTrack(ref);
+  if (/^#?[lr]\d+(?:#r\d+)?$/i.test(ref)) {
+    const match = String(ref).match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
+    const lane = readLane(normalizeLaneId(match[1]), undefined, { revision: match[2] ? Number(match[2]) : undefined });
+    if (!lane) throw new Error(`Lane ${ref} not found`);
+    if (json) console.log(JSON.stringify(lane, null, 2));
+    else viewLane(ref);
     return;
   }
   const parsed = parseRef(ref);
-  if (!parsed) throw new Error('Invalid reference. Use #g1, #g1#t1, #c1, or a nested #rN / #A1 reference.');
+  if (!parsed) throw new Error('Invalid reference. Use #l1, #g1, #g1#t1, #c1, or a nested #rN / #A1 reference.');
   if (parsed.taskId && !parsed.goalId && goalContext) {
     parsed.goalId = goalContext.goalId;
     parsed.username = goalContext.username;
