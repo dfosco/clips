@@ -17,13 +17,21 @@ collaboration is available after explicit opt-in.
 
 | Record | Purpose | Example |
 |---|---|---|
-| Goal | Outcome, scope, plan, architectural decisions, and outcome acceptance | `#g1` Restore the last workspace |
+| Lane | Strategic, conceptual frame spanning related goals; closes with a product/system retrospective rather than engineering acceptance | `#l1` Workspace experience |
+| Goal | Engineering outcome, scope, plan, architectural decisions, and outcome acceptance | `#g1` Restore the last workspace |
 | Task | One independently assignable and acceptable change; request before, record afterward | `#g1#t1` Persist the selected workspace ID |
 | System component | Persistent responsibility with a behavioral boundary and implementation references | `#c1` Workspace preference storage |
 
-A goal's plan describes how to reach the outcome; its decisions explain why the
-approach was chosen. They can evolve in the same record. An independent ADR is
-optional when a decision needs a separate lifecycle.
+A Lane is the strategic frame above goals. It explains the product direction and
+groups outcomes that make sense together over time. It deliberately does not
+carry technical acceptance criteria or verification receipts. Closing a Lane
+records what product goals were achieved, the decisions made across its goals,
+the resulting system/component overview, and useful product media such as
+screenshots.
+
+A goal's plan describes how to reach one engineering outcome; its decisions
+explain why the approach was chosen. They can evolve in the same record. An
+independent ADR is optional when a decision needs a separate lifecycle.
 
 A component is a unit of responsibility that other system parts or tasks can
 depend on. It describes its interface or observable behavior, constraints, and
@@ -89,9 +97,9 @@ a summary, and evidence for every criterion. See the
 
 | Reference | Meaning |
 |---|---|
-| `#g1`, `#g1#t1`, `#c1` | Current goal, task, or component |
-| `#g1#A1`, `#g1#t1#A1` | Acceptance criterion belonging to that record |
-| `#c1#r1`, `#g1#t1#r1` | Recoverable record snapshot |
+| `#l1`, `#g1`, `#g1#t1`, `#c1` | Current Lane, goal, task, or component |
+| `#g1#A1`, `#g1#t1#A1` | Acceptance criterion belonging to an engineering record |
+| `#l1#r1`, `#c1#r1`, `#g1#t1#r1` | Recoverable record snapshot |
 | `#g1#t1#r1#A1` | Criterion in a particular task snapshot |
 
 Criteria retain their IDs when reordered. Removed IDs are not reused. Revisions
@@ -155,29 +163,62 @@ The mode does not prescribe a language, framework, or test-writing order.
 Types can establish structural contracts; runtime behavior still needs suitable
 evidence.
 
-## Dependencies and optional tracks
+## Dependencies and strategic Lanes
 
 Component `dependencies` describe system relationships. Task `blocked_by`
 describes required work ordering. An agreed interface can let a provider and
 consumer be implemented in parallel; integrated acceptance still checks their
 interaction. Dependencies are coordination data, not an automatic scheduler.
 
-Tracks remain an optional way to group related goals. A goal belongs to at most
-one track. Track status is managed directly, and an existing standalone track
-ref such as `#r001` is distinct from a nested revision suffix such as
-`#c1#r1`.
+A **Lane** is an optional strategic frame for related goals. A goal belongs to
+at most one Lane. Lanes are intentionally less formal than goals: they can carry
+a description and product goals, but they do not have technical acceptance
+criteria, test evidence, or an acceptance owner.
 
 ```bash
-clips track create '{"title":"Workspace improvements","description":"Make workspace selection reliable"}'
-clips goal assign g1 r1
+clips lane create '{"title":"Workspace experience","description":"Make returning to work feel continuous","product_goals":["Users return to the right workspace quickly"]}'
+clips goal assign g1 l1
 clips goal update g2 '{"blocked_by":["g1"]}'
-clips track show r1
+clips lane show l1
 clips goal assign g1 none
 ```
 
-Goal dependencies reject missing goals, self-dependencies, and cycles. With
-GitHub collaboration enabled, tracks can mirror as issues containing their goal
-issues. Existing track and goal relationships remain supported.
+When a Lane is closed, Clips records a strategic retrospective rather than an
+engineering acceptance receipt. Closure requires a summary, a cross-goal decision
+log, a system overview, and the product goals achieved. It also snapshots the
+Lane's goals and their statuses, derives referenced components from those goals
+and tasks, and can include screenshot or other product-media references.
+
+```json
+{
+  "summary": "Workspace restoration is now coherent across reload and switching.",
+  "decision_log": "We standardized persistence on stable workspace IDs.",
+  "system_overview": "Workspace preference owns persisted selection; project selection consumes it.",
+  "product_goals_achieved": [
+    "Users return to the intended workspace after reload"
+  ],
+  "media": [
+    {"src":"screenshots/workspace-restored.png","caption":"Restored workspace"}
+  ]
+}
+```
+
+```bash
+clips lane close l1 --file lane-closure.json
+clips view '#l1'
+clips view '#l1#r1' --json
+```
+
+Lanes can be moved to `in_progress`, `not_planned`, or `duplicate` without
+technical ceremony. The `closed` state uses `lane close` so the retrospective
+is not lost. Merely sharing a Lane does not make goals dependent on one another.
+
+Historical Tracks remain readable. Existing `#r001`, `track_id`,
+`.clips/db/tracks/`, and `clips track` data/commands are compatibility
+surfaces; current UI and agent guidance use `#l001`, `lane_id`, and
+`clips lane`. GitHub collaboration mirrors Lanes as parent issues containing
+their goal issues.
+
 
 ## Storage and compatibility
 
@@ -197,7 +238,9 @@ coordinator for shared record writes by default. Revision checks and short file
 locks reduce specific write hazards; they do not provide distributed task
 ownership, leases, or a scheduler.
 
-Existing `planning` and `building` labels remain readable. Neither prohibits
+Existing Track relationships are exposed as legacy Lane aliases without rewriting
+their journals. Existing `planning` and `building` labels remain readable.
+Neither prohibits
 tasks or requires a separate ADR. Existing attached ADRs, CRs, and their links
 remain available. New work normally keeps the request and result in the task
 and decisions in the goal.
