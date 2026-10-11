@@ -124,9 +124,6 @@ function packagedSkill(specifier) {
   return Object.freeze({ name, sourceDir, manifestPath: path.join(sourceDir, 'SKILL.md') });
 }
 
-const clipsSkill = packagedSkill('skill:clips');
-const BUNDLED_SKILLS = [clipsSkill];
-
 function listFiles(directory, relative = '') {
   return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
     .flatMap((entry) => {
@@ -141,7 +138,8 @@ function listFiles(directory, relative = '') {
  * Returns { installed: bool, updated: bool, path: string }
  */
 function installSkill(cwd) {
-  const sourceSkill = clipsSkill.manifestPath;
+  const bundledSkills = [packagedSkill('skill:clips')];
+  const sourceSkill = bundledSkills[0].manifestPath;
 
   if (!fs.existsSync(sourceSkill)) {
     return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
@@ -153,12 +151,12 @@ function installSkill(cwd) {
   let installed = false;
   let updated = false;
 
-  const missingSkill = BUNDLED_SKILLS.find((skill) => !fs.existsSync(skill.sourceDir));
+  const missingSkill = bundledSkills.find((skill) => !fs.existsSync(skill.sourceDir));
   if (missingSkill) {
     return { installed: false, updated: false, error: `bundled ${missingSkill.name} skill not found` };
   }
 
-  for (const skill of BUNDLED_SKILLS) {
+  for (const skill of bundledSkills) {
     const skillName = skill.name;
     const sourceDirectory = skill.sourceDir;
 
