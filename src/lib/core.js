@@ -504,6 +504,7 @@ export function replayGoalEvents(events, goalId, { revision, taskId, taskRevisio
     }
   }
   if (taskRevision !== undefined && !foundTaskRevision) throw new Error(`Revision r${taskRevision} not found for #${goalId}#${taskId}`);
+  goal.lane_id = goal.track_id ? `l${String(goal.track_id).replace(/^r/i, '')}` : (goal.lane_id ?? null);
   return goal;
 }
 
