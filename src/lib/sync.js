@@ -15,6 +15,7 @@ import { readConfig, isCollaborationEnabled } from './config.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { goalCompletionError, normalizeAdrId, normalizeGoalType } from './goal-type.js';
 import { appendTrackEvent, listTracks, readTrack } from './tracks.js';
+import { trackToLaneId } from './lanes.js';
 
 const GITHUB_CACHE_FILE = '_github.jsonl';
 
@@ -218,7 +219,7 @@ export function buildTaskIssueBody(task, goal, parentIssueNumber = null) {
 export function buildIssueBody(goal) {
   const config = readConfig();
   let body = '';
-  if (goal.track_id) body += `Track: #${goal.track_id}\n\n`;
+  if (goal.track_id) body += `Lane: #${trackToLaneId(goal.track_id)}\n\n`;
   if (goal.blocked_by?.length) body += `Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}\n\n`;
 
   if (goal.description) {
@@ -485,7 +486,7 @@ export function pullAllIssues() {
   let updated = 0;
 
   for (const issue of issues) {
-    if (issue.body?.includes('<!-- clips-track:')) continue;
+    if (issue.body?.includes('<!-- clips-track:') || issue.body?.includes('<!-- clips-lane:')) continue;
     const existingGoalId = findGoalByIssueNumber(issue.number);
     if (existingGoalId) {
       // Already imported — check if status diverged
@@ -613,19 +614,36 @@ function issueId(number, repository) {
 export function pushTrack(trackId) {
   if (!isCollaborationEnabled()) return { skipped: true };
   const track = readTrack(trackId);
-  if (!track) throw new Error(`Track ${trackId} not found`);
+  if (!track) throw new Error(`Lane ${trackId} not found`);
   const repository = repositoryFromRemote();
-  if (!repository) throw new Error('GitHub origin remote is required to sync tracks');
-  const body = [`<!-- clips-track: ${track.track_id} -->`, track.description || '',
-    track.acceptance_criteria?.length ? `## Acceptance criteria\n\n${track.acceptance_criteria.map((item) => `- ${item}`).join('\n')}` : ''].filter(Boolean).join('\n\n');
-  const title = `[Track] ${track.title}`;
+  if (!repository) throw new Error('GitHub origin remote is required to sync lanes');
+  const laneId = trackToLaneId(track.track_id);
+  const sections = [`<!-- clips-lane: ${laneId} -->`, track.description || ''];
+  if (track.product_goals?.length) sections.push(`## Product goals\n\n${track.product_goals.map((item) => `- ${item}`).join('\n')}`);
+  if (track.legacy_acceptance_criteria?.length || track.acceptance_criteria?.length) {
+    const criteria = track.legacy_acceptance_criteria || track.acceptance_criteria;
+    sections.push(`## Legacy Track criteria\n\n${criteria.map((item) => `- ${item}`).join('\n')}`);
+  }
+  if (track.closure) {
+    sections.push(`## Closure summary\n\n${track.closure.summary || ''}`);
+    if (track.closure.product_goals_achieved?.length) sections.push(`## Product goals achieved\n\n${track.closure.product_goals_achieved.map((item) => `- ${item}`).join('\n')}`);
+    if (track.closure.decision_log) sections.push(`## Decision log\n\n${track.closure.decision_log}`);
+    if (track.closure.system_overview) sections.push(`## System overview\n\n${track.closure.system_overview}`);
+    if (track.closure.components?.length) sections.push(`## Components worked on\n\n${track.closure.components.map((item) => `- ${item}`).join('\n')}`);
+    if (track.closure.media?.length) sections.push(`## Product media\n\n${track.closure.media.map((item) => {
+      const media = typeof item === 'string' ? { src: item } : item;
+      return media.caption ? `- [${media.caption}](${media.src})` : `- ${media.src}`;
+    }).join('\n')}`);
+  }
+  const body = sections.filter(Boolean).join('\n\n');
+  const title = `[Lane] ${track.title}`;
   if (!track.issue_number) {
     const result = spawnSync('gh', ['issue', 'create', '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     if (result.status !== 0) throw new Error(result.stderr || 'gh issue create failed');
     const issueUrl = result.stdout.trim();
     const number = Number(issueUrl.split('/').pop());
-    if (!Number.isInteger(number)) throw new Error('Could not read created track issue number');
-    appendTrackEvent(trackId, { event: 'track_github_synced', issue_number: number, issue_url: issueUrl });
+    if (!Number.isInteger(number)) throw new Error('Could not read created lane issue number');
+    appendTrackEvent(trackId, { event: 'lane_github_synced', lane_id: laneId, issue_number: number, issue_url: issueUrl });
   } else {
     const result = spawnSync('gh', ['issue', 'edit', String(track.issue_number), '--title', title, '--body-file', '-'], { input: body, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
     if (result.status !== 0) throw new Error(result.stderr || 'gh issue edit failed');
@@ -845,7 +863,7 @@ export function syncAll() {
 
   for (const track of listTracks()) {
     try { pushTrack(track.track_id); }
-    catch (error) { pullResult.warnings.push({ source: 'tracks', message: `${track.track_id}: ${error.message}` }); }
+    catch (error) { pullResult.warnings.push({ source: 'lanes', message: `#${trackToLaneId(track.track_id)}: ${error.message}` }); }
   }
 
   const dbDir = getClipsDbDir();
