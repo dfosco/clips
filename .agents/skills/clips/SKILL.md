@@ -9,7 +9,7 @@ description: >-
   and optional GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.11"
+  version: "2026.10.11.1"
 ---
 
 # Clips
