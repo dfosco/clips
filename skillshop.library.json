@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "exports": {
+    "skill:clips": "./.agents/skills/clips",
+    "skill:loopz": "./.agents/skills/loopz"
+  }
+}

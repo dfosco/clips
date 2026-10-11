@@ -2,11 +2,12 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'node:url';
 import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
-import { clipsSkill } from '../skills.js';
+import skillLibrary from '../../skillshop.manifest.mjs';
 
 /**
  * Add .clips to .git/info/exclude so local planning state is ignored locally
@@ -115,7 +116,13 @@ function resolveAgentDir(cwd) {
   return path.join(cwd, '.agents');
 }
 
-const BUNDLED_SKILLS = [clipsSkill];
+function packagedSkill(specifier) {
+  const href = skillLibrary.skills?.[specifier];
+  if (typeof href !== 'string' || !href) throw new Error(`Package does not export ${specifier}`);
+  const name = specifier.replace(/^skill:/, '');
+  const sourceDir = fileURLToPath(href);
+  return Object.freeze({ name, sourceDir, manifestPath: path.join(sourceDir, 'SKILL.md') });
+}
 
 function listFiles(directory, relative = '') {
   return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
@@ -131,7 +138,8 @@ function listFiles(directory, relative = '') {
  * Returns { installed: bool, updated: bool, path: string }
  */
 function installSkill(cwd) {
-  const sourceSkill = clipsSkill.manifestPath;
+  const bundledSkills = [packagedSkill('skill:clips')];
+  const sourceSkill = bundledSkills[0].manifestPath;
 
   if (!fs.existsSync(sourceSkill)) {
     return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
@@ -143,12 +151,12 @@ function installSkill(cwd) {
   let installed = false;
   let updated = false;
 
-  const missingSkill = BUNDLED_SKILLS.find((skill) => !fs.existsSync(skill.sourceDir));
+  const missingSkill = bundledSkills.find((skill) => !fs.existsSync(skill.sourceDir));
   if (missingSkill) {
     return { installed: false, updated: false, error: `bundled ${missingSkill.name} skill not found` };
   }
 
-  for (const skill of BUNDLED_SKILLS) {
+  for (const skill of bundledSkills) {
     const skillName = skill.name;
     const sourceDirectory = skill.sourceDir;
 

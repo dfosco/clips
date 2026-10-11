@@ -260,6 +260,29 @@ The optional [CR template](docs/records/cr/CR-TEMPLATE.md) and
 [ADR template](docs/records/adr/ADR-TEMPLATE.md) remain available. Copy them into
 `.clips/records/` when needed; never put instances beside templates.
 
+## Skill library exports
+
+Clips is also a Skillshop-compatible skill library. It publishes two portable
+components through the standard `@dfosco/clips/skillshop` package manifest:
+
+- `skill:clips` — the Clips planning and work-contract workflow.
+- `skill:loopz` — the autonomous continuation/orchestration workflow.
+
+Consumers refer to these names rather than importing package-specific JavaScript
+symbols. For example, a Skillshop consumer can resolve or materialize them with:
+
+```bash
+skillshop resolve @dfosco/clips skill:clips
+skillshop import @dfosco/clips skill:loopz --to .agents/skills/loopz
+```
+
+A Skillshop-built personal library can also re-export either component without
+copying its source. Applications such as Hypercanvas can resolve the same
+components directly when offering Clips/Loopz as an optional Squads workflow.
+
+The source mapping lives in `skillshop.library.json`; the packaged
+`skillshop.manifest.mjs` is the generated application-facing contract.
+
 ## Installation and setup
 
 ```bash
