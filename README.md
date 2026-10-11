@@ -281,7 +281,7 @@ copying its source. Applications such as Hypercanvas can resolve the same
 components directly when offering Clips/Loopz as an optional Squads workflow.
 
 The source mapping lives in `skillshop.library.json`; the packaged
-`skillshop.manifest.js` is the generated application-facing contract.
+`skillshop.manifest.mjs` is the generated application-facing contract.
 
 ## Installation and setup
 
