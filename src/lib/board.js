@@ -5,7 +5,7 @@ import { readJsonEvents } from './journal.js';
 import { listComponents } from './components.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
-import { listTracks } from './tracks.js';
+import { listLanes } from './lanes.js';
 
 export const BOARD_COLUMNS = [
   { id: 'open', label: 'Open' },
@@ -141,7 +141,7 @@ export function discoverBoardGoals(dbDir = getClipsDbDir()) {
       continue;
     }
 
-    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'tracks') continue;
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'tracks' || entry.name === 'lanes') continue;
     const userDir = path.join(dbDir, entry.name);
     for (const file of fs.readdirSync(userDir)) {
       if (!file.startsWith('_') && file.endsWith('.jsonl')) {
@@ -170,6 +170,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
     description: rawGoal.description || '',
     type: normalizeGoalType(rawGoal.type),
     adr_id: rawGoal.adr_id || null,
+    lane_id: rawGoal.lane_id || (rawGoal.track_id ? `l${String(rawGoal.track_id).replace(/^r/i, '')}` : null),
     track_id: rawGoal.track_id || null,
     blocked_by: rawGoal.blocked_by || [],
     behavior: rawGoal.behavior || '',
@@ -244,12 +245,14 @@ export function readBoardData({
     goal.linked_prs = [...new Map(goal.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
     for (const task of goal.tasks) task.linked_prs = [...new Map(task.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
   }
-  const tracks = listTracks(dbDir).map((track) => {
-    const members = goals.filter((goal) => goal.track_id === track.track_id);
-    return { ...track, ref: `#${track.track_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
+  const lanes = listLanes(dbDir).map((lane) => {
+    const members = goals.filter((goal) => goal.lane_id === lane.lane_id);
+    return { ...lane, ref: `#${lane.lane_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
   });
   const components = listComponents({ componentsDir, onError: (warning) => warnings.push(warning) });
-  return { version: 1, generated_at: new Date().toISOString(), tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
+  // Keep tracks as a read-only compatibility alias while Lane is the product model.
+  const tracks = lanes.map((lane) => ({ ...lane, track_id: lane.legacy_track_id, ref: `#${lane.legacy_track_id}` }));
+  return { version: 1, generated_at: new Date().toISOString(), lanes, tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
 }
 
 function qualifyRef(projectId, ref) {
@@ -288,6 +291,7 @@ export function readProjectBoard(project) {
     return {
       ...goal,
       ref,
+      lane_ref: goal.lane_id ? qualifyRef(project.id, `#${goal.lane_id}`) : null,
       track_ref: goal.track_id ? qualifyRef(project.id, `#${goal.track_id}`) : null,
       blocked_by: goal.blocked_by.map((id) => qualifyRef(project.id, id)),
       component_refs: (goal.components || []).map((component) => qualifyComponentRef(project.id, component)),
@@ -316,6 +320,7 @@ export function readProjectBoard(project) {
       project_id: project.id,
       project_label: project.label,
     })),
+    lanes: localBoard.lanes.map((lane) => ({ ...lane, ref: qualifyRef(project.id, lane.ref), project_id: project.id, project_label: project.label, goal_refs: lane.goal_refs.map((ref) => qualifyRef(project.id, ref)) })),
     tracks: localBoard.tracks.map((track) => ({ ...track, ref: qualifyRef(project.id, track.ref), project_id: project.id, project_label: project.label, goal_refs: track.goal_refs.map((ref) => qualifyRef(project.id, ref)) })),
     goals,
     change_records: localBoard.change_records.map((record) => qualifyRecord(project, record)),
@@ -338,6 +343,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
     default_project_ids: projects.map((project) => project.id),
     goals: [],
     components: [],
+    lanes: [],
     tracks: [],
     change_records: [],
     github_prs: [],
@@ -349,6 +355,7 @@ export function readWorkspaceBoard({ projects, availableProjects = projects, sco
       const projectBoard = readProjectBoard(project);
       board.goals.push(...projectBoard.goals);
       board.components.push(...projectBoard.components);
+      board.lanes.push(...projectBoard.lanes);
       board.tracks.push(...projectBoard.tracks);
       board.change_records.push(...projectBoard.change_records);
       board.github_prs.push(...projectBoard.github_prs);
