@@ -1,12 +1,12 @@
 // Init command - initialize clips in a repository
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
+import { clipsSkill } from '../skills.js';
 
 /**
  * Add .clips to .git/info/exclude so local planning state is ignored locally
@@ -115,9 +115,7 @@ function resolveAgentDir(cwd) {
   return path.join(cwd, '.agents');
 }
 
-const BUNDLED_SKILLS = [
-  'clips',
-];
+const BUNDLED_SKILLS = [clipsSkill];
 
 function listFiles(directory, relative = '') {
   return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
@@ -133,9 +131,7 @@ function listFiles(directory, relative = '') {
  * Returns { installed: bool, updated: bool, path: string }
  */
 function installSkill(cwd) {
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const sourceRoot = path.resolve(__dirname, '..', '..', '.agents', 'skills');
-  const sourceSkill = path.join(sourceRoot, 'clips', 'SKILL.md');
+  const sourceSkill = clipsSkill.manifestPath;
 
   if (!fs.existsSync(sourceSkill)) {
     return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
@@ -147,13 +143,14 @@ function installSkill(cwd) {
   let installed = false;
   let updated = false;
 
-  const missingSkill = BUNDLED_SKILLS.find((skillName) => !fs.existsSync(path.join(sourceRoot, skillName)));
+  const missingSkill = BUNDLED_SKILLS.find((skill) => !fs.existsSync(skill.sourceDir));
   if (missingSkill) {
-    return { installed: false, updated: false, error: `bundled ${missingSkill} skill not found` };
+    return { installed: false, updated: false, error: `bundled ${missingSkill.name} skill not found` };
   }
 
-  for (const skillName of BUNDLED_SKILLS) {
-    const sourceDirectory = path.join(sourceRoot, skillName);
+  for (const skill of BUNDLED_SKILLS) {
+    const skillName = skill.name;
+    const sourceDirectory = skill.sourceDir;
 
     for (const relativePath of listFiles(sourceDirectory)) {
       const sourcePath = path.join(sourceDirectory, relativePath);
