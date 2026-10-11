@@ -7,7 +7,7 @@ import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
-import skillLibrary from '../../skillshop.manifest.js';
+import skillLibrary from '../../skillshop.manifest.mjs';
 
 /**
  * Add .clips to .git/info/exclude so local planning state is ignored locally
