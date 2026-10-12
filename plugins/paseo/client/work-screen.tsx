@@ -379,10 +379,13 @@ export function WorkScreen({
   );
   const goalRefsInLanes = new Set((board.data?.lanes ?? []).flatMap((l) => l.goalRefs));
   const ungrouped = (board.data?.goals ?? []).filter((g) => !goalRefsInLanes.has(g.ref));
-  const noResults = Boolean(board.data) && !(board.data.lanes.some((l) => {
-    const attached = board.data!.goals.filter((g) => l.goalRefs.includes(g.ref));
-    return group(l, attached).showLane;
-  }) || group(null, ungrouped).showLane);
+  const currentBoard = board.data;
+  const noResults = currentBoard
+    ? !(currentBoard.lanes.some((l) => {
+        const attached = currentBoard.goals.filter((g) => l.goalRefs.includes(g.ref));
+        return group(l, attached).showLane;
+      }) || group(null, ungrouped).showLane)
+    : false;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{
@@ -458,6 +461,39 @@ export function WorkScreen({
               <FilterChip title="Active in Clips" selected={filter === "active"} onPress={() => setFilter("active")} theme={theme} />
             </View>
           </View>
+          {runtime.data && runningTasks > 0 && board.data ? (
+            <View style={{
+              borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10,
+              backgroundColor: theme.colors.surface1, padding: 12, gap: 7,
+            }}>
+              <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
+                Tasks executing now
+              </Text>
+              {board.data.goals.flatMap((g) => g.tasks).filter((t) => execution(t).status === "running").slice(0, 8).map((t) => (
+                <Pressable
+                  key={t.ref}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open running task ${t.ref} in Paseo`}
+                  onPress={() => {
+                    const workspaceId = execution(t).workspaceId;
+                    if (workspaceId) navigation?.openWorkspace({ workspaceId });
+                  }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 3 }}
+                >
+                  <Icon name="PlayCircle" size={15} color={theme.colors.statusSuccess} />
+                  <Text numberOfLines={1} style={{ color: theme.colors.foreground, flex: 1, fontSize: 13 }}>
+                    {t.ref} · {t.title}
+                  </Text>
+                  <Icon name="ArrowUpRight" size={14} color={theme.colors.foregroundMuted} />
+                </Pressable>
+              ))}
+              {runningTasks > 8 ? (
+                <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+                  +{runningTasks - 8} more. Use the Running filter to see all.
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
           {board.isPending ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
           {board.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not read Clips: {message(board.error)}</Text> : null}
           {board.data?.warnings.length ? (
