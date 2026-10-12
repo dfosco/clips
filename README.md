@@ -294,6 +294,31 @@ live subscription to the source library or retroactive revocation.
 The CLI requires the published `skillshop@2.1.0` package. The dependency
 lockfile records its npm registry integrity checksum.
 
+## Paseo workspaces integration
+
+The optional [Clips Workspaces](plugins/paseo/README.md) Paseo plugin browses
+Lanes → Goals → Tasks from the local Clips store and creates Paseo worktree
+workspaces with an optional running agent. It also shows live agent activity,
+a **Running** filter, and links back to existing workspaces. Clips remains the
+source of truth for work definitions and acceptance. Paseo owns execution and
+agent lifecycle.
+
+Install the plugin from this monorepo with:
+
+```bash
+paseo plugin install git:dfosco/clips:plugins/paseo
+```
+
+The Paseo daemon host must also have the **matching Clips CLI** installed;
+the plugin calls `clips board --json` locally to read data. For a development
+checkout, `CLIPS_CLI_PATH=/absolute/path/to/clips/src/cli.js` selects the
+unreleased CLI without replacing a global installation.
+
+The read-only `clips board --json` command emits current Lanes, Goals, and
+their ordered Tasks from the common Git directory, including when invoked
+inside a linked worktree. See the plugin README for setup and execution
+semantics.
+
 ## Installation and setup
 
 ```bash
