@@ -31,6 +31,7 @@ describe("Paseo work mapping", () => {
     expect(executionFor(task, projectIds, [workspace()], [agent("initializing")])).toMatchObject({ status: "running", runningAgents: 1 });
     expect(executionFor(task, projectIds, [workspace()], [agent("idle")])).toMatchObject({ status: "idle", runningAgents: 0 });
     expect(executionFor(task, projectIds, [workspace()], [agent("idle", true)])).toMatchObject({ status: "attention" });
+    expect(executionFor(task, projectIds, [workspace()], [agent("running", true)])).toMatchObject({ status: "attention", runningAgents: 0 });
     expect(executionFor(task, projectIds, [workspace()], [agent("error")])).toMatchObject({ status: "error" });
     expect(executionFor(task, projectIds, [], [])).toMatchObject({ status: "none" });
   });

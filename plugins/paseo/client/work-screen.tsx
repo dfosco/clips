@@ -113,7 +113,7 @@ function WorkRow({
       }}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${work.kind} ${work.ref}`}
+          accessibilityLabel={`${expanded ? "Hide" : "Show"} details for ${work.kind} ${work.ref}`}
           onPress={onToggle}
           style={{ flex: 1, flexDirection: "row", alignItems: "flex-start", gap: 8 }}
         >
@@ -326,6 +326,7 @@ export function WorkScreen({
         result.reused ? "Reused workspace" : "Created workspace";
       toast.show(outcome, { variant: "success" });
       void cache.invalidateQueries({ queryKey: ["clips-runtime", host.id] });
+      void cache.invalidateQueries({ queryKey: ["clips.projects", host.id] });
       navigation?.openWorkspace({ workspaceId: result.workspaceId });
     },
     onError: (error) => toast.show(message(error), { variant: "error" }),
