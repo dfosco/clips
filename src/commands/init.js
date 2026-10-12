@@ -7,7 +7,9 @@ import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
-import skillLibrary from '../../skillshop.manifest.mjs';
+import { importSkill } from 'skillshop/import';
+
+const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 /**
  * Add .clips to .git/info/exclude so local planning state is ignored locally
@@ -116,69 +118,31 @@ function resolveAgentDir(cwd) {
   return path.join(cwd, '.agents');
 }
 
-function packagedSkill(specifier) {
-  const href = skillLibrary.skills?.[specifier];
-  if (typeof href !== 'string' || !href) throw new Error(`Package does not export ${specifier}`);
-  const name = specifier.replace(/^skill:/, '');
-  const sourceDir = fileURLToPath(href);
-  return Object.freeze({ name, sourceDir, manifestPath: path.join(sourceDir, 'SKILL.md') });
-}
-
-function listFiles(directory, relative = '') {
-  return fs.readdirSync(path.join(directory, relative), { withFileTypes: true })
-    .flatMap((entry) => {
-      const entryPath = path.join(relative, entry.name);
-      return entry.isDirectory() ? listFiles(directory, entryPath) : [entryPath];
-    });
-}
-
 /**
  * Install or update the Clips router, routed skills, and references in the
  * target repo's agent directory without touching unrelated skills.
  * Returns { installed: bool, updated: bool, path: string }
  */
-function installSkill(cwd) {
-  const bundledSkills = [packagedSkill('skill:clips')];
-  const sourceSkill = bundledSkills[0].manifestPath;
-
-  if (!fs.existsSync(sourceSkill)) {
-    return { installed: false, updated: false, error: 'bundled SKILL.md not found' };
-  }
-
+async function installSkill(cwd) {
   const agentDir = resolveAgentDir(cwd);
-  const targetRoot = path.join(agentDir, 'skills');
-  const targetPath = path.join(targetRoot, 'clips', 'SKILL.md');
-  let installed = false;
-  let updated = false;
+  const targetPath = path.join(agentDir, 'skills', 'clips', 'SKILL.md');
 
-  const missingSkill = bundledSkills.find((skill) => !fs.existsSync(skill.sourceDir));
-  if (missingSkill) {
-    return { installed: false, updated: false, error: `bundled ${missingSkill.name} skill not found` };
+  let result;
+  try {
+    // Only explicitly exported skills may be imported. Each import copies
+    // the files into the project; it does not subscribe to future changes.
+    result = await importSkill({
+      library: CLIPS_LIBRARY_ROOT,
+      specifier: 'skill:clips',
+      targetDir: path.dirname(targetPath),
+      cwd,
+      merge: true,
+    });
+  } catch (error) {
+    return { installed: false, updated: false, error: error.message };
   }
 
-  for (const skill of bundledSkills) {
-    const skillName = skill.name;
-    const sourceDirectory = skill.sourceDir;
-
-    for (const relativePath of listFiles(sourceDirectory)) {
-      const sourcePath = path.join(sourceDirectory, relativePath);
-      const destinationPath = path.join(targetRoot, skillName, relativePath);
-      const sourceContent = fs.readFileSync(sourcePath);
-
-      if (fs.existsSync(destinationPath)) {
-        if (fs.readFileSync(destinationPath).equals(sourceContent)) continue;
-        fs.writeFileSync(destinationPath, sourceContent);
-        updated = true;
-        continue;
-      }
-
-      fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-      fs.writeFileSync(destinationPath, sourceContent);
-      installed = true;
-    }
-  }
-
-  // Persist the detected agent_dir in config so future runs are consistent
+  // Persist the detected agent_dir in config so future runs are consistent.
   try {
     const config = readConfig();
     if (!config.agent_dir) {
@@ -186,14 +150,13 @@ function installSkill(cwd) {
       config.agent_dir = relDir.startsWith('.') ? relDir : '.' + relDir;
       writeConfig(config);
     }
-  } catch (e) {
-    // Config write is best-effort during init
+  } catch (error) {
+    // Config write is best-effort during init.
   }
-
-  return { installed, updated, path: targetPath };
+  return { installed: result.installed, updated: result.updated, path: targetPath };
 }
 
-export function runInitCommand(args) {
+export async function runInitCommand(args) {
   const cwd = getRepoRoot(process.cwd());
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
@@ -263,7 +226,7 @@ export function runInitCommand(args) {
   console.log(`✓ Registered project ${projectId} in ${registeredProject.path}`);
 
   // Install or update skill file
-  const skillResult = installSkill(cwd);
+  const skillResult = await installSkill(cwd);
   if (skillResult.error) {
     console.log(`• Could not install skill pack (${skillResult.error})`);
   } else if (skillResult.installed) {

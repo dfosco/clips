@@ -283,6 +283,16 @@ components directly when offering Clips/Loopz as an optional Squads workflow.
 The source mapping lives in `skillshop.library.json`; the packaged
 `skillshop.manifest.mjs` is the generated application-facing contract.
 
+Clips uses `skillshop/import` during `clips init` to copy the explicitly
+exported `skill:clips` component into the project's selected agent directory.
+Re-running init overlays changed skill files and preserves additional
+project-local files. Imports are independent filesystem snapshots; there is
+no live subscription to the source library or retroactive revocation.
+
+The CLI requires `skillshop@^2.0.0`. Publish Skillshop 2.x **before**
+publishing Clips, then regenerate `package-lock.json` with npm to record
+the published artifact's registry integrity checksum.
+
 ## Installation and setup
 
 ```bash

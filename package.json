@@ -71,7 +71,9 @@
     "vitest": "^4.1.10",
     "iconoir": "^7.12.1"
   },
-  "dependencies": {},
+  "dependencies": {
+    "skillshop": "^2.0.0"
+  },
   "exports": {
     "./skillshop": "./skillshop.manifest.mjs",
     "./*": "./*"

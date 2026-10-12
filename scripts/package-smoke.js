@@ -67,6 +67,17 @@ try {
   const extractedRoot = path.join(tempRoot, 'package');
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
+  assert.equal(packedPackage.dependencies.skillshop, '^2.0.0');
+
+  // The smoke test extracts the tarball, rather than npm-installing it.
+  // Supply the real installed SDK at the path an npm install would create.
+  const installedSdk = path.join(packageRoot, 'node_modules', 'skillshop');
+  assert(fs.existsSync(installedSdk), 'Install skillshop@^2 before running package smoke');
+  fs.mkdirSync(path.join(extractedRoot, 'node_modules'), { recursive: true });
+  fs.cpSync(installedSdk, path.join(extractedRoot, 'node_modules', 'skillshop'), {
+    recursive: true,
+    dereference: true,
+  });
   assert.equal(packedPackage.exports['./skillshop'], './skillshop.manifest.mjs');
   assert.equal(packedPackage.exports['./skills'], undefined);
   const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.mjs')).href)).default;
@@ -92,6 +103,14 @@ try {
     fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
     'packaged init did not install the Clips skill',
   );
+  const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
+  fs.writeFileSync(localNote, 'local notes survive reinitialization\n');
+  execFileSync(process.execPath, [cli, 'init'], {
+    cwd: initializedProject,
+    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+    stdio: 'pipe',
+  });
+  assert.equal(fs.readFileSync(localNote, 'utf8'), 'local notes survive reinitialization\n');
   const runPackaged = (...args) => execFileSync(process.execPath, [cli, ...args], {
     cwd: initializedProject, encoding: 'utf8',
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },

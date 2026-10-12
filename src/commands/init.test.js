@@ -95,8 +95,11 @@ describe('setupGitExclude', () => {
     expect(fs.existsSync(skill)).toBe(true);
     expect(fs.readFileSync(skill, 'utf8')).toContain('name: clips');
     fs.writeFileSync(skill, 'stale skill\n');
+    const localNote = path.join(cwd, '.agents', 'skills', 'clips', 'project-notes.md');
+    fs.writeFileSync(localNote, '# Keep local notes\n');
     execFileSync(process.execPath, [cliPath, 'init'], { cwd, env });
     expect(fs.readFileSync(skill, 'utf8')).not.toBe('stale skill\n');
+    expect(fs.readFileSync(localNote, 'utf8')).toBe('# Keep local notes\n');
     expect(fs.readdirSync(path.join(cwd, '.agents', 'skills'))).toEqual(bundledSkills);
   });
 });
