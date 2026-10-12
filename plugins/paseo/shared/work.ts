@@ -85,8 +85,13 @@ export function executionFor(
   );
   const matchedIds = new Set([...relevant.map((w) => w.id), ...attributed.map((a) => a.workspaceId!)]);
   const relatedAgents = agents.filter((a) => a.workspaceId && matchedIds.has(a.workspaceId));
-  const active = relatedAgents.filter((a) => a.status === "running" || a.status === "initializing");
-  const attention = relatedAgents.some((a) => a.requiresAttention);
+  // A permission-blocked agent may still report "running" while it awaits a person.
+  // Do not count it as active execution.
+  const active = relatedAgents.filter((a) =>
+    (a.status === "running" || a.status === "initializing") && !a.requiresAttention,
+  );
+  const attention = relatedAgents.some((a) => a.requiresAttention) ||
+    relevant.some((w) => w.status === "needs_input" || w.status === "attention");
   const failed = relatedAgents.some((a) => a.status === "error");
   const status: RuntimeStatus = active.length ? "running" : attention ? "attention" : failed ? "error" : matchedIds.size ? "idle" : "none";
   const activeWorkspace = active[0]?.workspaceId || relatedAgents.find((a) => a.requiresAttention)?.workspaceId;
