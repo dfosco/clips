@@ -9,6 +9,7 @@ import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
 import { runWebCommand } from './commands/web.js';
+import { runBoardCommand } from './commands/board.js';
 import { runRecordCommand } from './commands/record.js';
 import { runTrackCommand } from './commands/track.js';
 import { runLaneCommand } from './commands/lane.js';
@@ -60,6 +61,7 @@ Commands:
   sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration
   web [--host H] [--port P] Start the read-only local or multi-project board
+  board --json             Output the current repository's Lanes, Goals and Tasks as JSON
 
 Options:
   --version, -v           Show version
@@ -104,6 +106,7 @@ const commands = {
   init: runInitCommand,
   sync: runSyncCommand,
   web: runWebCommand,
+  board: runBoardCommand,
 };
 
 const handler = commands[command];

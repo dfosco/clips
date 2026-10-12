@@ -40,7 +40,10 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "dist/web/"
+    "dist/web/",
+    "plugins/paseo/",
+    "!plugins/paseo/**/*.test.ts",
+    "!plugins/paseo/**/*.test.tsx"
   ],
   "keywords": [
     "cli",
