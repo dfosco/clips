@@ -35,6 +35,7 @@
     "src/**/*.js",
     "!src/**/*.test.js",
     ".agents/skills/clips",
+    ".agents/skills/lane-manager",
     ".agents/skills/loopz",
     "skillshop.manifest.mjs",
     "README.md",
