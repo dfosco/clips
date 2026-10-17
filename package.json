@@ -42,6 +42,7 @@
     "LICENSE",
     "dist/web/",
     "plugins/paseo/",
+    "!plugins/paseo/node_modules/**",
     "!plugins/paseo/**/*.test.ts",
     "!plugins/paseo/**/*.test.tsx"
   ],
