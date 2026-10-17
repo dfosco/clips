@@ -37,6 +37,7 @@ export async function runtimeSnapshot(paseo: Paseo): Promise<{ workspaces: Works
           workspaceId: agent.workspaceId || null,
           status: agent.status,
           requiresAttention: agent.requiresAttention ?? false,
+          attentionReason: agent.attentionReason ?? null,
           labels: agent.labels ?? {},
           title: agent.title ?? null,
         });

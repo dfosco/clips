@@ -14,6 +14,7 @@ export type AgentInfo = {
   workspaceId: string | null;
   status: string;
   requiresAttention: boolean;
+  attentionReason: "finished" | "error" | "permission" | null;
   labels: Record<string, string>;
   title: string | null;
 };
@@ -90,11 +91,14 @@ export function executionFor(
   const active = relatedAgents.filter((a) =>
     (a.status === "running" || a.status === "initializing") && !a.requiresAttention,
   );
-  const attention = relatedAgents.some((a) => a.requiresAttention) ||
-    relevant.some((w) => w.status === "needs_input" || w.status === "attention");
-  const failed = relatedAgents.some((a) => a.status === "error");
-  const status: RuntimeStatus = active.length ? "running" : attention ? "attention" : failed ? "error" : matchedIds.size ? "idle" : "none";
-  const activeWorkspace = active[0]?.workspaceId || relatedAgents.find((a) => a.requiresAttention)?.workspaceId;
+  const pending = relatedAgents.find((a) => a.requiresAttention &&
+    (a.attentionReason === "permission" || a.attentionReason === null));
+  const failed = relatedAgents.some((a) => a.status === "error" || a.attentionReason === "error") ||
+    relevant.some((w) => w.status === "failed");
+  const workspaceNeedsInput = relevant.some((w) => w.status === "needs_input") &&
+    !relatedAgents.some((a) => a.attentionReason === "finished" || a.attentionReason === "error");
+  const status: RuntimeStatus = active.length ? "running" : pending || workspaceNeedsInput ? "attention" : failed ? "error" : matchedIds.size ? "idle" : "none";
+  const activeWorkspace = active[0]?.workspaceId || pending?.workspaceId;
   return {
     status,
     runningAgents: active.length,
@@ -127,7 +131,7 @@ export function promptFor(target: WorkTarget): string {
       : "Implement this Task's bounded request, meet its stated acceptance criteria, test the actual changes, and document the result and evidence without self-approving human-owned acceptance.";
   return `Work on Clips ${target.kind} ${target.ref}: ${target.title}
 
-Start by reading AGENTS.md and the Clips skill if present. Read the complete Clips record for ${target.ref} using the local Clips CLI (clips view --json), then inspect linked records, blockers, and relevant source files.
+Start by reading AGENTS.md and the Clips skill if present. Read the complete Clips record for ${target.ref} using the local Clips CLI (clips view '${target.ref}' --json), then inspect linked records, blockers, and relevant source files.
 ${instructions}
 
 The worktree shares the repository's Clips store through the common Git directory. Preserve workflow record history; distinguish completed implementation from accepted work. Summarize changed files, checks, and unresolved issues. Do not create GitHub Issues or assume Clips status means a Paseo agent is running.`;

@@ -195,6 +195,7 @@ async function listAgents(paseo: Paseo): Promise<AgentInfo[]> {
         workspaceId: agent.workspaceId || null,
         status: agent.status,
         requiresAttention: agent.requiresAttention ?? false,
+        attentionReason: agent.attentionReason ?? null,
         labels: agent.labels ?? {},
         title: agent.title ?? null,
       });
@@ -248,6 +249,9 @@ export async function startWork(
 
     const [workspaces, agents] = await Promise.all([listWorkspaces(paseo), listAgents(paseo)]);
     const running = executionFor(target, project.projectIds, workspaces, agents);
+    if (input.mode === "agent" && running.status === "attention") {
+      throw new Error(`An agent for ${input.ref} needs input. Resolve it before starting another agent.`);
+    }
     // A configured provider is checked before any new workspace is created.
     const agent = input.mode === "agent" && running.status !== "running"
       ? await agentChoice(paseo, prefs.agent) : null;
