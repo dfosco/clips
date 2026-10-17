@@ -8,10 +8,8 @@ stable boundaries to rely on.
 Workflow state stays under `.clips/`, outside repository history. GitHub
 collaboration is available after explicit opt-in.
 
-> The component, acceptance, and revision commands below describe the unreleased
-> work-contract implementation in this checkout. The published 1.6.0 baseline
-> does not include those capabilities. Check `clips --help` for the installed
-> command set; use `node /path/to/clips/src/cli.js` to run this checkout.
+Check `clips --help` for the installed command set. Use
+`node /path/to/clips/src/cli.js` to run this checkout directly.
 
 ## Work model
 
@@ -289,9 +287,8 @@ Re-running init overlays changed skill files and preserves additional
 project-local files. Imports are independent filesystem snapshots; there is
 no live subscription to the source library or retroactive revocation.
 
-The CLI requires `skillshop@^2.0.0`. Publish Skillshop 2.x **before**
-publishing Clips, then regenerate `package-lock.json` with npm to record
-the published artifact's registry integrity checksum.
+The CLI requires the published `skillshop@^2.0.0`. The lockfile records the
+registry artifact's integrity checksum so installations use that release.
 
 ## Installation and setup
 
@@ -301,8 +298,8 @@ npm install -g @dfosco/clips
 npx @dfosco/clips --help
 ```
 
-Install commands above select the published npm package. They do not install
-unreleased work-contract capabilities from this branch.
+Install commands above select the published npm package. Run the checkout's CLI
+directly when developing changes that have not been published yet.
 
 `clips init` creates local workflow state and installs the Clips skill into the
 repository's detected agent directory. It does not contact GitHub or import
