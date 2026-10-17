@@ -44,6 +44,10 @@ function packageAt(root) {
 function skillFiles(packageRoot) {
   const skillsRoot = path.join(packageRoot, '.agents', 'skills');
   if (!fs.existsSync(skillsRoot)) return {};
+  const libraryFile = path.join(packageRoot, 'skillshop.library.json');
+  const exported = fs.existsSync(libraryFile)
+    ? new Set(Object.keys(JSON.parse(fs.readFileSync(libraryFile, 'utf8')).exports).map((name) => name.replace(/^skill:/, '')))
+    : null;
   const files = {};
   const walk = (directory) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -56,7 +60,7 @@ function skillFiles(packageRoot) {
     }
   };
   for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
-    if (entry.isDirectory() && (entry.name === 'clips' || entry.name.startsWith('clips-'))) walk(path.join(skillsRoot, entry.name));
+    if (entry.isDirectory() && (exported ? exported.has(entry.name) : true)) walk(path.join(skillsRoot, entry.name));
   }
   return files;
 }
@@ -143,7 +147,7 @@ export function switchInstallation(mode, argv = []) {
     }
   }
   const activeCli = mode === 'dev' ? devCli : path.join(prod.root, 'src', 'cli.js');
-  run(process.execPath, [activeCli, 'init'], { cwd: project, stdio: 'inherit', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+  run(process.execPath, [activeCli, 'init', '--skills-scope', 'project'], { cwd: project, stdio: 'inherit', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
   const selectedRoot = mode === 'dev' ? checkout : prod.root;
   const selectedFiles = skillFiles(selectedRoot);
   const agentDir = (() => {

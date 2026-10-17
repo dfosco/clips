@@ -61,20 +61,21 @@ describe('local installation switching', () => {
       expect(state.mode).toBe('dev');
       expect(fs.realpathSync(path.join(globalRoot, '@dfosco', 'clips'))).toBe(path.resolve(process.cwd()));
       expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.resolve('.agents/skills/clips/SKILL.md'), 'utf8'));
-      expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips']);
+      expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips', 'loopz']);
       expect(fs.existsSync(path.join(state.prod_package, 'src', 'cli.js'))).toBe(true);
 
       execFileSync(process.execPath, [devCli, 'prod'], { cwd: project, env });
       state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       expect(state.mode).toBe('prod');
       expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe('prod skill 1.3.2\n');
+      expect(fs.existsSync(path.join(project, '.agents', 'skills', 'loopz'))).toBe(false);
       expect(fs.existsSync(path.join(project, '.agents', 'skills', 'clips-frame-goal', 'SKILL.md'))).toBe(false);
       expect(execFileSync(process.execPath, [devCli, '--version'], { cwd: project, env, encoding: 'utf8' }).trim()).toBe('clips v1.3.2');
 
       execFileSync(process.execPath, [devCli, 'dev'], { cwd: project, env });
       expect(JSON.parse(fs.readFileSync(statePath, 'utf8')).mode).toBe('dev');
       expect(fs.readFileSync(path.join(project, '.agents', 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe(fs.readFileSync(path.resolve('.agents/skills/clips/SKILL.md'), 'utf8'));
-      expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips']);
+      expect(fs.readdirSync(path.join(project, '.agents', 'skills'))).toEqual(['clips', 'loopz']);
       expect(fs.readFileSync(env.FAKE_NPM_LOG, 'utf8').trim().split('\n')).toEqual(['root -g', 'link', 'root -g', 'root -g']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }, 15000);

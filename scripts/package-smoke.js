@@ -67,12 +67,12 @@ try {
   const extractedRoot = path.join(tempRoot, 'package');
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
-  assert.equal(packedPackage.dependencies.skillshop, '^2.0.0');
+  assert.equal(packedPackage.dependencies.skillshop, '2.1.0');
 
   // The smoke test extracts the tarball, rather than npm-installing it.
   // Supply the real installed SDK at the path an npm install would create.
   const installedSdk = path.join(packageRoot, 'node_modules', 'skillshop');
-  assert(fs.existsSync(installedSdk), 'Install skillshop@^2 before running package smoke');
+  assert(fs.existsSync(installedSdk), 'Install skillshop@2.1.0 before running package smoke');
   fs.mkdirSync(path.join(extractedRoot, 'node_modules'), { recursive: true });
   fs.cpSync(installedSdk, path.join(extractedRoot, 'node_modules', 'skillshop'), {
     recursive: true,
@@ -94,7 +94,7 @@ try {
   const initializedProject = path.join(tempRoot, 'initialized-project');
   fs.mkdirSync(initializedProject);
   execFileSync('git', ['init', '--quiet'], { cwd: initializedProject });
-  execFileSync(process.execPath, [cli, 'init'], {
+  execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
     stdio: 'pipe',
@@ -103,9 +103,10 @@ try {
     fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
     'packaged init did not install the Clips skill',
   );
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'loopz', 'SKILL.md')), 'packaged init did not install Loopz');
   const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
   fs.writeFileSync(localNote, 'local notes survive reinitialization\n');
-  execFileSync(process.execPath, [cli, 'init'], {
+  execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
     stdio: 'pipe',

@@ -283,15 +283,16 @@ components directly when offering Clips/Loopz as an optional Squads workflow.
 The source mapping lives in `skillshop.library.json`; the packaged
 `skillshop.manifest.mjs` is the generated application-facing contract.
 
-Clips uses `skillshop/import` during `clips init` to copy the explicitly
-exported `skill:clips` component into the project's selected agent directory.
-Re-running init overlays changed skill files and preserves additional
-project-local files. Imports are independent filesystem snapshots; there is
-no live subscription to the source library or retroactive revocation.
+`clips init` uses Skillshop 2.1.0 to install the exported Clips and Loopz
+skills. It asks on every interactive run whether to install into this project
+or the user account. Project imports go to the selected agent directory,
+overlay changed skill files, and preserve additional project files. User
+installs go to `~/.agents/skills` and replace existing copies, including
+local additions. Imports are independent filesystem snapshots; there is no
+live subscription to the source library or retroactive revocation.
 
-The CLI requires `skillshop@^2.0.0`. Publish Skillshop 2.x **before**
-publishing Clips, then regenerate `package-lock.json` with npm to record
-the published artifact's registry integrity checksum.
+The CLI requires the published `skillshop@2.1.0` package. The dependency
+lockfile records its npm registry integrity checksum.
 
 ## Installation and setup
 
@@ -304,10 +305,11 @@ npx @dfosco/clips --help
 Install commands above select the published npm package. They do not install
 unreleased work-contract capabilities from this branch.
 
-`clips init` creates local workflow state and installs the Clips skill into the
-repository's detected agent directory. It does not contact GitHub or import
-issues by default. Existing repositories with `collaboration: true` preserve
-that setting.
+`clips init` creates local workflow state and asks where to install the
+exported skills. In scripts, pass `--skills-scope project` or
+`--skills-scope user`; without a terminal or that option, init exits before
+writing project state. It does not contact GitHub or import issues by default.
+Existing repositories with `collaboration: true` preserve that setting.
 
 ### Switch between development and the installed npm package
 
