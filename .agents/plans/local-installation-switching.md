@@ -1,0 +1,3 @@
+# Local Clips installation switching
+
+Add `clips dev` and `clips prod` as reversible local mode commands. On first use, copy the already installed npm package to the Clips system directory, link the development checkout globally, and keep that checkout as the command dispatcher. Route ordinary commands to the saved package in prod mode. Run the selected CLI's `init` in the target repository on every switch so the skill pack matches the mode. Accept an alternate project and development checkout path. Verify with disposable npm and project fixtures, the full test suite, and the package smoke test.
