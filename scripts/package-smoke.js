@@ -53,6 +53,7 @@ try {
   assert(paths.includes('src/cli.js'), 'tarball is missing the CLI');
   assert(paths.includes('dist/web/index.html'), 'tarball is missing board assets');
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
+  assert(paths.includes('.agents/skills/lane-manager/SKILL.md'), 'tarball is missing the Lane Manager skill');
   assert(paths.includes('.agents/skills/loopz/SKILL.md'), 'tarball is missing the Loopz skill');
   assert(paths.includes('.agents/skills/loopz/agents/openai.yaml'), 'tarball is missing Loopz agent metadata');
   assert(paths.includes('skillshop.manifest.mjs'), 'tarball is missing the Skillshop manifest');
@@ -82,8 +83,9 @@ try {
   assert.equal(packedPackage.exports['./skills'], undefined);
   const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.mjs')).href)).default;
   assert.equal(skillLibrary.packageName, '@dfosco/clips');
-  assert.deepEqual(Object.keys(skillLibrary.skills).sort(), ['skill:clips', 'skill:loopz']);
+  assert.deepEqual(Object.keys(skillLibrary.skills).sort(), ['skill:clips', 'skill:lane-manager', 'skill:loopz']);
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:clips']), 'SKILL.md')), 'skill:clips manifest does not exist');
+  assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:lane-manager']), 'SKILL.md')), 'skill:lane-manager manifest does not exist');
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:loopz']), 'SKILL.md')), 'skill:loopz manifest does not exist');
   const cli = path.join(extractedRoot, 'src', 'cli.js');
   const version = execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim();
