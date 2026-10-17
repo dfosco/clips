@@ -16,6 +16,7 @@
     "web:test": "vitest run --config web/vitest.config.js",
     "prepublishOnly": "npm run test:all",
     "prepack": "npm run web:build",
+    "postinstall": "skillshop install-user . --if-global",
     "preversion": "npm test",
     "publish:npm": "npm publish --access public",
     "update": "npm install -g @dfosco/clips && npm list -g @dfosco/clips --depth=0",
@@ -73,7 +74,14 @@
     "iconoir": "^7.12.1"
   },
   "dependencies": {
-    "skillshop": "^2.0.0"
+    "skillshop": "^2.1.0"
+  },
+  "skillshop": {
+    "userInstall": [
+      "skill:lane-manager"
+    ],
+    "schemaVersion": 1,
+    "managedFiles": []
   },
   "exports": {
     "./skillshop": "./skillshop.manifest.mjs",

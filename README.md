@@ -262,10 +262,11 @@ The optional [CR template](docs/records/cr/CR-TEMPLATE.md) and
 
 ## Skill library exports
 
-Clips is also a Skillshop-compatible skill library. It publishes two portable
+Clips is also a Skillshop-compatible skill library. It publishes three portable
 components through the standard `@dfosco/clips/skillshop` package manifest:
 
 - `skill:clips` — the Clips planning and work-contract workflow.
+- `skill:lane-manager` — strategic coordination across Clips Lanes and projects.
 - `skill:loopz` — the autonomous continuation/orchestration workflow.
 
 Consumers refer to these names rather than importing package-specific JavaScript
@@ -283,15 +284,21 @@ components directly when offering Clips/Loopz as an optional Squads workflow.
 The source mapping lives in `skillshop.library.json`; the packaged
 `skillshop.manifest.mjs` is the generated application-facing contract.
 
+A global npm installation uses Skillshop to copy `skill:lane-manager` into
+`~/.agents/skills/lane-manager`. Reinstalling or updating Clips replaces the
+entire user skill directory with the packaged version. A local npm installation
+does not install user skills. If npm scripts are disabled, run
+`skillshop install-user .` from the installed Clips package directory.
+
 Clips uses `skillshop/import` during `clips init` to copy the explicitly
 exported `skill:clips` component into the project's selected agent directory.
 Re-running init overlays changed skill files and preserves additional
 project-local files. Imports are independent filesystem snapshots; there is
 no live subscription to the source library or retroactive revocation.
 
-The CLI requires `skillshop@^2.0.0`. Publish Skillshop 2.x **before**
-publishing Clips, then regenerate `package-lock.json` with npm to record
-the published artifact's registry integrity checksum.
+The CLI requires `skillshop@^2.1.0`. Publish that Skillshop release before
+publishing Clips, then regenerate `package-lock.json` to record the registry
+artifact's integrity checksum.
 
 ## Installation and setup
 

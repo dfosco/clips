@@ -68,12 +68,14 @@ try {
   const extractedRoot = path.join(tempRoot, 'package');
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
-  assert.equal(packedPackage.dependencies.skillshop, '^2.0.0');
+  assert.equal(packedPackage.dependencies.skillshop, '^2.1.0');
+  assert.deepEqual(packedPackage.skillshop.userInstall, ['skill:lane-manager']);
+  assert.equal(packedPackage.scripts.postinstall, 'skillshop install-user . --if-global');
 
   // The smoke test extracts the tarball, rather than npm-installing it.
   // Supply the real installed SDK at the path an npm install would create.
   const installedSdk = path.join(packageRoot, 'node_modules', 'skillshop');
-  assert(fs.existsSync(installedSdk), 'Install skillshop@^2 before running package smoke');
+  assert(fs.existsSync(installedSdk), 'Install skillshop@^2.1 before running package smoke');
   fs.mkdirSync(path.join(extractedRoot, 'node_modules'), { recursive: true });
   fs.cpSync(installedSdk, path.join(extractedRoot, 'node_modules', 'skillshop'), {
     recursive: true,
@@ -87,6 +89,41 @@ try {
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:clips']), 'SKILL.md')), 'skill:clips manifest does not exist');
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:lane-manager']), 'SKILL.md')), 'skill:lane-manager manifest does not exist');
   assert(fs.existsSync(path.join(fileURLToPath(skillLibrary.skills['skill:loopz']), 'SKILL.md')), 'skill:loopz manifest does not exist');
+  const globalPacks = path.join(tempRoot, 'global-packs');
+  fs.mkdirSync(globalPacks);
+  const npmPack = (root) => {
+    const output = execFileSync('npm', ['pack', root, '--ignore-scripts', '--json', '--silent', '--pack-destination', globalPacks], {
+      encoding: 'utf8', env: packEnv,
+    });
+    return path.join(globalPacks, JSON.parse(output)[0].filename);
+  };
+  const sdkTarball = npmPack(installedSdk);
+  const globalSource = path.join(tempRoot, 'global-source');
+  fs.mkdirSync(globalSource);
+  execFileSync('tar', ['-xzf', tarball, '-C', globalSource]);
+  const globalPackageRoot = path.join(globalSource, 'package');
+  const globalPackageFile = path.join(globalPackageRoot, 'package.json');
+  const globalPackage = JSON.parse(fs.readFileSync(globalPackageFile, 'utf8'));
+  globalPackage.dependencies.skillshop = `file:${sdkTarball}`;
+  fs.writeFileSync(globalPackageFile, JSON.stringify(globalPackage, null, 2));
+
+  const userHome = path.join(tempRoot, 'user-home');
+  const userSkill = path.join(userHome, '.agents', 'skills', 'lane-manager');
+  const globalEnv = { ...process.env, HOME: userHome, npm_config_cache: path.join(tempRoot, 'npm-cache') };
+  const globalPrefix = path.join(tempRoot, 'global-prefix');
+  const installGlobal = (packageTarball) => execFileSync('npm', [
+    'install', '--global', '--prefix', globalPrefix, '--offline', '--no-audit', '--no-fund', packageTarball,
+  ], { env: globalEnv });
+  installGlobal(npmPack(globalPackageRoot));
+  const packagedLaneManager = fs.readFileSync(path.join(globalPackageRoot, '.agents', 'skills', 'lane-manager', 'SKILL.md'), 'utf8');
+  assert.equal(fs.readFileSync(path.join(userSkill, 'SKILL.md'), 'utf8'), packagedLaneManager);
+  fs.writeFileSync(path.join(userSkill, 'SKILL.md'), 'local edit\n');
+  fs.writeFileSync(path.join(userSkill, 'notes.md'), 'local addition\n');
+  globalPackage.version = '1.6.1';
+  fs.writeFileSync(globalPackageFile, JSON.stringify(globalPackage, null, 2));
+  installGlobal(npmPack(globalPackageRoot));
+  assert.equal(fs.readFileSync(path.join(userSkill, 'SKILL.md'), 'utf8'), packagedLaneManager);
+  assert.equal(fs.existsSync(path.join(userSkill, 'notes.md')), false);
   const cli = path.join(extractedRoot, 'src', 'cli.js');
   const version = execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8' }).trim();
   assert.equal(version, `clips v${manifest.version}`);
@@ -142,7 +179,7 @@ try {
   assert.equal(api.status, 200);
   assert.deepEqual(JSON.parse(api.body).goals, []);
 
-  console.log(`Verified ${manifest.id}: CLI, skill, components, revisions, acceptance, and web board`);
+  console.log(`Verified ${manifest.id}: CLI, global user skill, components, revisions, acceptance, and web board`);
 } finally {
   if (board && !board.killed) board.kill();
   fs.rmSync(tempRoot, { recursive: true, force: true });
