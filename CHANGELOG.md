@@ -1,6 +1,6 @@
 # Clips
 
-## Unreleased
+## 1.7.0
 
 Use goals, atomic tasks, and system components as a small, extensible work model
 for agents. A task is the change request before execution and the change record
@@ -18,6 +18,10 @@ after acceptance.
   JSON views for agents. Preserve prior agreements and acceptance history.
 - Support optional named Markdown sections and JSON extensions without requiring
   another artifact type for each project-specific need.
+- Add strategic Lanes for coordinating related goals across workstreams.
+- Export `skill:clips` and `skill:loopz` through the Skillshop v2 library manifest.
+- Use Skillshop imports during `clips init` to update the Clips skill while
+  preserving project-local files.
 
 ### Changes
 
@@ -30,8 +34,10 @@ after acceptance.
   for authorized work and to coordinate shared workflow state through one writer
   by default.
 
-These changes describe the development branch. They do not publish a new npm
-release or upgrade existing installations.
+## 1.6.0 (GitHub release only)
+
+Show track details and member goals. This version was tagged on GitHub but was
+not published to npm; the npm `latest` tag remained at 1.5.0.
 
 ## 1.5.0
 
