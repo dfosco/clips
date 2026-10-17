@@ -46,7 +46,7 @@ if (command === '--help' || command === '-h' || !command) {
 Usage: clips <command> [args]
 
 Commands:
-  init [--skills-scope S] Initialize local state and install skills (project or user)
+  init [--global | --skills-scope S] Initialize state and install skills
   dev [--project P]       Use the development checkout and refresh its skills
   prod [--project P]      Use the saved local npm installation and refresh its skills
   view [ref] [--json]     View a goal, task, criterion, or component
@@ -67,6 +67,7 @@ Options:
 
 Examples:
   clips init
+  clips init --global             # Install skills in the user account
   clips init --skills-scope project  # Use in scripts without a terminal
   clips dev --project /path/to/repo
   clips prod --project /path/to/repo

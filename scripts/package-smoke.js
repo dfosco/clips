@@ -105,6 +105,7 @@ try {
     fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
     'packaged init did not install the Clips skill',
   );
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', 'SKILL.md')), 'packaged init did not install Lane Manager');
   assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'loopz', 'SKILL.md')), 'packaged init did not install Loopz');
   const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
   fs.writeFileSync(localNote, 'local notes survive reinitialization\n');

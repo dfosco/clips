@@ -9,7 +9,7 @@ import { chooseSkillScope, setupGitExclude } from './init.js';
 
 const tempDirs = [];
 const cliPath = path.resolve(process.cwd(), 'src', 'cli.js');
-const bundledSkills = ['clips', 'loopz'];
+const bundledSkills = ['clips', 'lane-manager', 'loopz'];
 
 function createGitRepo() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-init-'));
@@ -118,6 +118,7 @@ describe('setupGitExclude', () => {
 
     execFileSync(process.execPath, [cliPath, 'init', '--skills-scope', 'project'], { cwd, env });
     expect(fs.existsSync(skill)).toBe(true);
+    expect(fs.existsSync(path.join(cwd, '.agents', 'skills', 'lane-manager', 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(path.join(cwd, '.agents', 'skills', 'loopz', 'SKILL.md'))).toBe(true);
     expect(fs.readFileSync(skill, 'utf8')).toContain('name: clips');
     fs.writeFileSync(skill, 'stale skill\n');
@@ -134,14 +135,14 @@ describe('setupGitExclude', () => {
     const home = path.join(cwd, 'home');
     fs.mkdirSync(home);
     const env = { ...process.env, HOME: home, CLIPS_HOME: path.join(cwd, 'system-clips') };
-    execFileSync(process.execPath, [cliPath, 'init', '--skills-scope', 'user'], { cwd, env });
+    execFileSync(process.execPath, [cliPath, 'init', '--global'], { cwd, env });
     for (const name of bundledSkills) {
       expect(fs.existsSync(path.join(home, '.agents', 'skills', name, 'SKILL.md'))).toBe(true);
       expect(fs.existsSync(path.join(cwd, '.agents', 'skills', name, 'SKILL.md'))).toBe(false);
     }
     const note = path.join(home, '.agents', 'skills', 'clips', 'local-note.md');
     fs.writeFileSync(note, 'old note\n');
-    execFileSync(process.execPath, [cliPath, 'init', '--skills-scope', 'user'], { cwd, env });
+    execFileSync(process.execPath, [cliPath, 'init', '--global'], { cwd, env });
     expect(fs.existsSync(note)).toBe(false);
   });
 });

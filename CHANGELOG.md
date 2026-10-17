@@ -10,6 +10,7 @@ after acceptance.
 
 - Ask on every interactive `clips init` whether to install exported Clips skills
   in the project or user account, using Skillshop 2.1.0.
+- Accept `clips init --global` as the direct user-scope skill installation option.
 - Add persistent system components with responsibility, contract, source references,
   dependencies, named sections, and project-defined metadata.
 - Add task scope, component references, ownership, result records, and work

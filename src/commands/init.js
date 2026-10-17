@@ -123,8 +123,9 @@ function resolveAgentDir(cwd) {
 export async function chooseSkillScope(args, { input = process.stdin, output = process.stdout } = {}) {
   if (args.includes('--help') || args.includes('-h')) return null;
   if (args.length) {
+    if (args.length === 1 && args[0] === '--global') return 'user';
     if (args.length !== 2 || args[0] !== '--skills-scope' || !['project', 'user'].includes(args[1])) {
-      throw new Error('Usage: clips init [--skills-scope project|user]');
+      throw new Error('Usage: clips init [--global | --skills-scope project|user]');
     }
     return args[1];
   }
@@ -176,7 +177,7 @@ async function installSkills(cwd, scope) {
 export async function runInitCommand(args) {
   const skillScope = await chooseSkillScope(args);
   if (!skillScope) {
-    console.log('Usage: clips init [--skills-scope project|user]');
+    console.log('Usage: clips init [--global | --skills-scope project|user]');
     return;
   }
   const cwd = getRepoRoot(process.cwd());

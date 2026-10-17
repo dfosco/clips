@@ -262,10 +262,11 @@ The optional [CR template](docs/records/cr/CR-TEMPLATE.md) and
 
 ## Skill library exports
 
-Clips is also a Skillshop-compatible skill library. It publishes two portable
-components through the standard `@dfosco/clips/skillshop` package manifest:
+Clips is also a Skillshop-compatible skill library. It publishes three portable
+skills through the standard `@dfosco/clips/skillshop` package manifest:
 
 - `skill:clips` — the Clips planning and work-contract workflow.
+- `skill:lane-manager` — cross-surface lane planning and coordination.
 - `skill:loopz` — the autonomous continuation/orchestration workflow.
 
 Consumers refer to these names rather than importing package-specific JavaScript
@@ -273,19 +274,21 @@ symbols. For example, a Skillshop consumer can resolve or materialize them with:
 
 ```bash
 skillshop resolve @dfosco/clips skill:clips
+skillshop import @dfosco/clips skill:lane-manager --to .agents/skills/lane-manager
 skillshop import @dfosco/clips skill:loopz --to .agents/skills/loopz
 ```
 
-A Skillshop-built personal library can also re-export either component without
+A Skillshop-built personal library can also re-export any component without
 copying its source. Applications such as Hypercanvas can resolve the same
 components directly when offering Clips/Loopz as an optional Squads workflow.
 
 The source mapping lives in `skillshop.library.json`; the packaged
 `skillshop.manifest.mjs` is the generated application-facing contract.
 
-`clips init` uses Skillshop 2.1.0 to install the exported Clips and Loopz
-skills. It asks on every interactive run whether to install into this project
-or the user account. Project imports go to the selected agent directory,
+`clips init` uses Skillshop 2.1.0 to install all three exported skills. It asks
+on every interactive run whether to install into this project or the user
+account. Pass `--global` to select the user account directly; this aliases
+`--skills-scope user`. Project imports go to the selected agent directory,
 overlay changed skill files, and preserve additional project files. User
 installs go to `~/.agents/skills` and replace existing copies, including
 local additions. Imports are independent filesystem snapshots; there is no
@@ -306,8 +309,9 @@ Install commands above select the published npm package. They do not install
 unreleased work-contract capabilities from this branch.
 
 `clips init` creates local workflow state and asks where to install the
-exported skills. In scripts, pass `--skills-scope project` or
-`--skills-scope user`; without a terminal or that option, init exits before
+exported skills. Use `clips init --global` to install in the user account. In
+scripts, pass `--global`, `--skills-scope project`, or `--skills-scope user`;
+without a terminal or an explicit scope, init exits before
 writing project state. It does not contact GitHub or import issues by default.
 Existing repositories with `collaboration: true` preserve that setting.
 
