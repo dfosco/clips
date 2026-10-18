@@ -51,6 +51,11 @@ try {
   const paths = manifest.files.map((file) => file.path);
 
   assert(paths.includes('src/cli.js'), 'tarball is missing the CLI');
+  assert(paths.includes('plugins/paseo/paseo-plugin.json'), 'tarball is missing the Paseo plugin manifest');
+  assert(paths.includes('plugins/paseo/index.client.tsx'), 'tarball is missing the Paseo client entry');
+  assert(paths.includes('plugins/paseo/index.server.ts'), 'tarball is missing the Paseo server entry');
+  assert(!paths.some((file) => file.startsWith('plugins/paseo/node_modules/')), 'tarball contains Paseo development dependencies');
+  assert(!paths.some((file) => /^plugins\/paseo\/.*\.test\.tsx?$/.test(file)), 'tarball contains Paseo tests');
   assert(paths.includes('dist/web/index.html'), 'tarball is missing board assets');
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
   assert(paths.includes('.agents/skills/lane-manager/SKILL.md'), 'tarball is missing the Lane Manager skill');
@@ -119,6 +124,8 @@ try {
     cwd: initializedProject, encoding: 'utf8',
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
   });
+  const packagedBoard = JSON.parse(runPackaged('board', '--json'));
+  assert(Array.isArray(packagedBoard.lanes) && Array.isArray(packagedBoard.goals), 'packaged JSON board is invalid');
   runPackaged('component', 'create', JSON.stringify({ title: 'Packaged persistence', contract: 'Return a stored ID' }));
   runPackaged('component', 'update', 'c1', JSON.stringify({ contract: 'Return a stored ID or no preference' }));
   assert.equal(JSON.parse(runPackaged('view', '#c1#r1', '--json')).contract, 'Return a stored ID');

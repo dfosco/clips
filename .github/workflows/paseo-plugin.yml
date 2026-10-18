@@ -1,0 +1,30 @@
+name: Paseo plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/paseo/**"
+      - ".github/workflows/paseo-plugin.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "plugins/paseo/**"
+      - ".github/workflows/paseo-plugin.yml"
+
+jobs:
+  typecheck-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Clips CLI dependencies for integration test
+        run: npm ci --ignore-scripts
+      - name: Install plugin development dependencies
+        run: npm install --prefix plugins/paseo --package-lock=false --ignore-scripts
+      - name: Typecheck plugin SDK boundaries
+        run: npm run typecheck --prefix plugins/paseo
+      - name: Test runtime mapping and board normalization
+        run: npm test --prefix plugins/paseo

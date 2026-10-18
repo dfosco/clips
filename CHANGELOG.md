@@ -8,6 +8,7 @@ after acceptance.
 
 ### Features
 
+- Add the optional Clips Workspaces Paseo plugin and read-only `clips board --json` interface.
 - Ask on every interactive `clips init` whether to install exported Clips skills
   in the project or user account, using Skillshop 2.1.0.
 - Accept `clips init --global` as the direct user-scope skill installation option.
