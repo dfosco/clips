@@ -24,7 +24,9 @@ vi.mock("react-native", () => ({
   View: ({ children, accessibilityRole }: any) => createElement("div", { role: accessibilityRole }, children),
   Text: ({ children }: any) => createElement("span", null, children),
   Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, role: accessibilityRole, disabled, onClick: onPress }, children),
-  TextInput: ({ accessibilityLabel }: any) => createElement("input", { "aria-label": accessibilityLabel }),
+  TextInput: ({ accessibilityLabel, value, onChangeText }: any) => createElement("input", {
+    "aria-label": accessibilityLabel, value, onInput: (event: any) => onChangeText?.(event.currentTarget.value),
+  }),
   ActivityIndicator: () => null,
 }));
 vi.mock("@tanstack/react-query", () => ({
@@ -61,6 +63,105 @@ beforeEach(() => {
 });
 
 describe("focused lane rendering", () => {
+  it.each([false, true])("shows Tasks only for expanded Goals and retains expansion through Back (compact: %s)", async (compact) => {
+    const secondTask = { ...task, ref: "#g002#t01", title: "Second Task" };
+    const secondGoal = { ...goal, ref: "#g002", title: "Second Goal", tasks: [secondTask] };
+    state.board.goals = [goal, secondGoal, outside];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const click = async (label: string) => {
+      const button = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
+      expect(button).not.toBeNull();
+      await act(async () => { button.click(); });
+    };
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact }, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      expect(container.textContent).not.toContain("Ship package");
+      expect(container.textContent).not.toContain("Second Task");
+      expect(container.querySelector('[aria-label="Show Goal details #g001"]')!.getAttribute("aria-expanded")).toBe("false");
+      await click("Show Goal details #g001");
+      expect(container.textContent).toContain("Ship package");
+      expect(container.textContent).not.toContain("Second Task");
+      expect(container.querySelector('[aria-label="Run in Paseo"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="Hide Goal details #g001"]')!.getAttribute("aria-expanded")).toBe("true");
+      await click("Show Goal details #g002");
+      await click("Hide Goal details #g001");
+      expect(container.textContent).not.toContain("Ship package");
+      expect(container.textContent).toContain("Second Task");
+      await click("Back to Clips");
+      expect(container.querySelector('[aria-label="Project lanes"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("Ship package");
+      expect(container.textContent).toContain("Second Task");
+      await click("More actions for lane #l001");
+      const focus = [...container.querySelectorAll("button")].find((button) => button.textContent === "Focus lane")!;
+      await act(async () => { focus.click(); });
+      expect(container.querySelector('[aria-label="Lane goals"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("Ship package");
+      expect(container.textContent).toContain("Second Task");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it.each(["search", "running"])("reveals matching Tasks by default for %s and honors explicit collapse", async (filter) => {
+    state.board.goals = [{ ...goal, tasks: [task, { ...task, ref: "#g001#t02", title: "Nonmatching Task" }] }];
+    state.runtime.agents = [{ id: "worker", workspaceId: "w1", status: "running", requiresAttention: false,
+      attentionReason: null, labels: { "clips.ref": task.ref, "clips.projectId": "p1" }, title: "Worker" }];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      await act(async () => {
+        if (filter === "search") {
+          const input = container.querySelector<HTMLInputElement>('[aria-label="Search Clips work"]')!;
+          input.value = "Ship package";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          [...container.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Running"))!.click();
+        }
+      });
+      expect(container.textContent).toContain("Ship package");
+      expect(container.textContent).not.toContain("Nonmatching Task");
+      const collapse = container.querySelector<HTMLButtonElement>('[aria-label="Hide Goal details #g001"]')!;
+      expect(collapse.getAttribute("aria-expanded")).toBe("true");
+      await act(async () => { collapse.click(); });
+      expect(container.textContent).not.toContain("Ship package");
+      const expand = container.querySelector<HTMLButtonElement>('[aria-label="Show Goal details #g001"]')!;
+      expect(expand.getAttribute("aria-expanded")).toBe("false");
+      await act(async () => { expand.click(); });
+      expect(container.textContent).toContain("Ship package");
+      expect(container.textContent).not.toContain("Nonmatching Task");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it.each([false, true])("hides Task-area empty states while collapsed (filtered: %s)", async (filtered) => {
+    state.board.goals = [{ ...goal, tasks: filtered ? [{ ...task, status: "closed" }] : [] }];
+    const emptyMessage = filtered ? "No Tasks match the current filter." : "No Tasks in this Goal yet.";
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      expect(container.textContent).not.toContain(emptyMessage);
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Show Goal details #g001"]')!.click(); });
+      expect(container.textContent).toContain(emptyMessage);
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Hide Goal details #g001"]')!.click(); });
+      expect(container.textContent).not.toContain(emptyMessage);
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
   it.each([false, true])("expands Lane and Goal context independently from details (compact: %s)", async (compact) => {
     const laneDescription = `Lane context. ${"Strategic scope and constraints. ".repeat(12)}Lane final sentence.`;
     const goalDescription = `Goal context. ${"Implementation outcome and boundaries. ".repeat(12)}Goal final sentence.`;
@@ -76,7 +177,7 @@ describe("focused lane rendering", () => {
       expect(container.textContent).not.toContain("Lane final sentence.");
       expect(container.textContent).not.toContain("Goal final sentence.");
       expect(container.textContent!.indexOf("Lane context.")).toBeLessThan(container.textContent!.indexOf("Running now"));
-      expect(container.textContent!.indexOf("Goal context.")).toBeLessThan(container.textContent!.indexOf("Ship package"));
+      expect(container.textContent).not.toContain("Ship package");
       const details = container.querySelector('[aria-label="Show Goal details #g001"]')!;
       for (const [kind, ref, fullText] of [["Lane", "#l001", laneDescription], ["Goal", "#g001", goalDescription]]) {
         const expand = container.querySelector<HTMLButtonElement>(`[aria-label="Expand ${kind} description ${ref}"]`)!;
@@ -92,6 +193,7 @@ describe("focused lane rendering", () => {
       expect(container.querySelector('[aria-label="Labels for #l001"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Back to Clips"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Run"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("Ship package");
     } finally {
       await act(async () => { root.unmount(); });
       (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
@@ -149,17 +251,17 @@ describe("focused lane rendering", () => {
     }
   });
 
-  it("places Back above lane title and exposes goal columns with their Tasks without expansion", () => {
+  it("places Back above lane title and exposes collapsed goal columns", () => {
     const html = render();
     expect(html.indexOf("Back to Clips")).toBeLessThan(html.indexOf("Publish releases"));
     expect(html).toContain('aria-label="Lane goals"');
     expect(html).toContain("Package publishing");
-    expect(html).toContain("Ship package");
+    expect(html).not.toContain("Ship package");
     expect(html).not.toContain("Unrelated goal");
     expect(html).not.toContain('aria-label="Project lanes"');
     expect(html).toContain('aria-label="More actions for goal #g001"');
     expect(html).toContain('aria-label="Show Goal details #g001"');
-    expect(html).toContain('aria-label="Run in Paseo"');
+    expect(html).toContain('aria-label="Run"');
   });
 
   it("shows assigned Lane labels and a Labels action in the workspace-focused header", () => {
@@ -211,7 +313,8 @@ describe("focused lane rendering", () => {
 
   it("keeps compact focus content and theme tokens available", () => {
     const html = renderToStaticMarkup(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact: true }, currentWorkspaceId: "w1" }));
-    expect(html).toContain("Ship package");
+    expect(html).toContain("Package publishing");
+    expect(html).not.toContain("Ship package");
     expect(html).toContain("Back to Clips");
   });
 

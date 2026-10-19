@@ -929,12 +929,14 @@ export function WorkScreen({
                   <View key={goal.ref} style={{ width: columnWidth, borderWidth: 1, borderColor: theme.colors.border,
                     borderRadius: 10, backgroundColor: theme.colors.surface1, overflow: "hidden" }}>
                     {renderWork(goal, 1, undefined, true)}
-                    {tasks.map((task) => renderWork(task, 2))}
-                    {!tasks.length ? (
-                      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 14 }}>
-                        {goal.tasks.length ? "No Tasks match the current filter." : "No Tasks in this Goal yet."}
-                      </Text>
-                    ) : null}
+                    {isExpanded(goal) ? <>
+                      {tasks.map((task) => renderWork(task, 2))}
+                      {!tasks.length ? (
+                        <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, padding: 14 }}>
+                          {goal.tasks.length ? "No Tasks match the current filter." : "No Tasks in this Goal yet."}
+                        </Text>
+                      ) : null}
+                    </> : null}
                   </View>
                 ))}
               </ScrollView>
