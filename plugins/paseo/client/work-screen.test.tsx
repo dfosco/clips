@@ -71,6 +71,82 @@ beforeEach(() => {
 });
 
 describe("focused lane rendering", () => {
+  it("counts active agents from the selected project and focused Lane in the rendered Running chip", async () => {
+    const projectId = "prj_4a7ad5e04079f99a";
+    const workspaceId = "wks_e3999fd72170a8c8";
+    const managerId = "527ca796-8b37-4a47-903c-249f92286a34";
+    const goalAgentId = "2c72b6a5-873a-4c79-ac7f-f854c37a3652";
+    const secondGoalAgentId = "f296f17b-2256-4fdb-9e5b-f1cbe8bb1607";
+    const focusedLane = {
+      ...lane, ref: "#l006", title: "Launch Hypercanvas demo", goalRefs: ["#g146", "#g144"],
+      managerClaim: { owners: [{ host: "host", runtime: "paseo", session_id: managerId }] },
+    };
+    const focusedGoal = { ...goal, ref: "#g146", title: "Extend autoplace and multi-selection controls", laneId: "l006", tasks: [] };
+    const secondGoal = { ...goal, ref: "#g144", title: "Repair Notebook selection, recent-list management, and first-open setup", laneId: "l006", tasks: [] };
+    const otherGoal = { ...goal, ref: "#g999", title: "Other project Goal", laneId: null, tasks: [] };
+    state.projects = [{ projectId, projectIds: [projectId], label: "Hypercanvas" }];
+    state.board = { lanes: [focusedLane], goals: [focusedGoal, secondGoal, otherGoal], warnings: [] };
+    state.runtime.workspaces = [
+      { id: workspaceId, projectId, name: "Focused Lane", branch: branchName(focusedLane), status: "ready" },
+      { id: "foreign-workspace", projectId: "prj_other", name: "Foreign", branch: "", status: "ready" },
+    ];
+    const agent = (id: string, ref: string, workspace: string, ownerProject: string, status = "running") => ({
+      id, workspaceId: workspace, status, requiresAttention: false, attentionReason: null,
+      labels: { "clips.ref": ref, "clips.kind": ref.startsWith("#l") ? "lane" : "goal", "clips.projectId": ownerProject },
+      title: id,
+    });
+    state.runtime.agents = [
+      agent(goalAgentId, "#g146", workspaceId, projectId),
+      { ...agent(managerId, "#l006", workspaceId, projectId, "idle"), labels: {} },
+      agent("foreign-active", "#g999", "foreign-workspace", "prj_other"),
+      agent(secondGoalAgentId, "#g144", workspaceId, projectId),
+    ];
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    const renderView = async () => root.render(createElement(WorkScreen, {
+      ...props, preferredProjectId: projectId, currentWorkspaceId: workspaceId,
+      currentWorkspaceProjectId: projectId,
+    }));
+    const runningChip = () => [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.startsWith("Running"))?.textContent;
+    try {
+      await act(async () => { await renderView(); });
+      expect(container.querySelector('[aria-label="Lane goals"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("Other project Goal");
+      expect(runningChip()).toBe("Running · 2");
+      await act(async () => {
+        [...container.querySelectorAll<HTMLButtonElement>("button")]
+          .find((button) => button.textContent?.startsWith("Running"))!.click();
+      });
+      expect(container.textContent).toContain("Extend autoplace and multi-selection controls");
+      expect(container.textContent).toContain("Repair Notebook selection, recent-list management, and first-open setup");
+
+      // The screenshot shows only #g146 while the full Lane includes #g144 too.
+      // Search narrows the rendered view and its count; clearing search restores both.
+      const search = container.querySelector<HTMLInputElement>('[aria-label="Search Clips work"]')!;
+      await act(async () => {
+        search.value = "#g146";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(container.textContent).toContain("Extend autoplace and multi-selection controls");
+      expect(container.textContent).not.toContain("Repair Notebook selection, recent-list management, and first-open setup");
+      expect(runningChip()).toBe("Running · 1");
+
+      await act(async () => {
+        search.value = "";
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      expect(container.textContent).toContain("Repair Notebook selection, recent-list management, and first-open setup");
+      expect(runningChip()).toBe("Running · 2");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
   it("keeps the Goal action menu over the card, without inserting space after a long description", async () => {
     const description = `Goal summary. ${"Long Goal context remains in the card. ".repeat(12)}Goal final sentence.`;
     state.board.goals = [{ ...goal, description }];

@@ -595,6 +595,7 @@ export function WorkScreen({
   const runtime = useRuntime(host.id);
   const [filter, setFilter] = useState<WorkFilter>("open");
   const [search, setSearch] = useState("");
+  const query = search.toLowerCase().trim();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [closedGoalsShown, setClosedGoalsShown] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<string | null>(null);
@@ -643,11 +644,31 @@ export function WorkScreen({
   const runningGoals = scopedGoals.filter((g) => execution(g).status === "running").length;
   const scopedLanes = (board.data?.lanes ?? []).filter((lane) => !laneInFocus || lane.ref === laneInFocus.ref);
   const runningLanes = scopedLanes.filter((lane) => execution(lane).status === "running").length;
-  const runningAgentCount = uniqueRunningAgentCount([
-    ...scopedGoals.flatMap((goal) => goal.tasks.map((task) => execution(task))),
-    ...scopedGoals.map(execution),
-    ...scopedLanes.map(execution),
-  ]);
+  const runningCountExecutions: Execution[] = [];
+  if (laneInFocus) {
+    const matching = goalGroup(laneInFocus, scopedGoals, "running", search, true, execution);
+    runningCountExecutions.push(execution(laneInFocus));
+    for (const { goal, tasks } of matching.entries) {
+      runningCountExecutions.push(execution(goal), ...tasks.map(execution));
+    }
+  } else {
+    const goalRefsInLanesForCount = new Set((board.data?.lanes ?? []).flatMap((lane) => lane.goalRefs));
+    const ungroupedGoals = (board.data?.goals ?? []).filter((goal) => !goalRefsInLanesForCount.has(goal.ref));
+    for (const lane of board.data?.lanes ?? []) {
+      const goals = (board.data?.goals ?? []).filter((goal) => lane.goalRefs.includes(goal.ref));
+      const matching = goalGroup(lane, goals, "running", search, true, execution);
+      if (!matching.showLane) continue;
+      runningCountExecutions.push(execution(lane));
+      for (const { goal, tasks } of matching.entries) {
+        runningCountExecutions.push(execution(goal), ...tasks.map(execution));
+      }
+    }
+    const matchingUngrouped = goalGroup(null, ungroupedGoals, "running", search, true, execution);
+    for (const { goal, tasks } of matchingUngrouped.entries) {
+      runningCountExecutions.push(execution(goal), ...tasks.map(execution));
+    }
+  }
+  const runningAgentCount = uniqueRunningAgentCount(runningCountExecutions);
 
   const create = useMutation({
     mutationFn: ({ ref, mode, workspaceId, agentConfig }: {
@@ -727,7 +748,6 @@ export function WorkScreen({
     create.mutate({ ref: launchRequest.ref, mode: "agent", workspaceId: launchRequest.workspaceId, agentConfig });
   };
 
-  const query = search.toLowerCase().trim();
   const hit = (work: Work) => !query || [work.title, work.ref, work.description, ...(work.labels ?? []).map((label) => label.name)].some((v) => v.toLowerCase().includes(query));
   const group = (lane: Lane | null, goals: Goal[], includeClosedGoals = false) =>
     goalGroup(lane, goals, filter, search, includeClosedGoals, execution);
