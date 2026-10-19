@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Clips Work</title>
+    <link rel="stylesheet" href="/canvas/style.css?instanceId=__INSTANCE_ID__&amp;token=__TOKEN__">
+    <script type="module" src="/canvas/app.js?instanceId=__INSTANCE_ID__&amp;token=__TOKEN__"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">C</span><div><strong>Clips Work</strong><small id="project-path">Choose a project with a Clips store</small></div></div>
+      <div class="top-actions">
+        <button id="refresh" class="quiet" type="button">Refresh</button>
+        <button id="choose-project" class="quiet" type="button">Project</button>
+        <button id="new-lane" class="primary" type="button">New Lane</button>
+        <button id="new-goal" class="primary" type="button">New Goal</button>
+      </div>
+    </header>
+    <main class="layout">
+      <aside class="sidebar" aria-label="Clips records">
+        <div class="sidebar-head"><h1>Work</h1><button id="new-task" class="quiet small" type="button">New Task</button></div>
+        <section id="record-tree" aria-live="polite"><p class="muted">Loading Clips records…</p></section>
+      </aside>
+      <section class="main-panel">
+        <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+        <div id="record-detail" class="record-detail"><p class="muted">Choose a Lane, Goal, or Task to see its context.</p></div>
+        <section class="session-directory" aria-labelledby="sessions-heading">
+          <div class="section-head"><div><h2 id="sessions-heading">Project sessions</h2><p class="muted">Copilot SDK does not expose running or input-needed status.</p></div></div>
+          <div id="project-sessions" class="session-list"></div>
+        </section>
+      </section>
+    </main>
+    <dialog id="create-dialog">
+      <form id="create-form">
+        <h2 id="create-title">Create record</h2>
+        <label>Title<input id="create-title-input" name="title" required maxlength="200"></label>
+        <label>Description<textarea id="create-description" name="description" rows="5" maxlength="12000"></textarea></label>
+        <div id="acceptance-field" hidden><label>Acceptance criteria, one per line<textarea id="create-acceptance" name="acceptanceCriteria" rows="4" maxlength="6000"></textarea></label></div>
+        <div id="parent-field" hidden><label id="parent-label">Parent Goal<select id="parent-goal"></select></label></div>
+        <div class="dialog-actions"><button class="quiet" id="create-cancel" type="button">Cancel</button><button class="primary" id="create-submit" type="submit">Create</button></div>
+      </form>
+    </dialog>
+    <dialog id="project-dialog">
+      <form id="project-form">
+        <h2>Choose a Clips project</h2>
+        <p class="muted">Use an absolute repository path with an initialized Clips store. Copilot’s working directory is used automatically when the host provides it.</p>
+        <label>Project path<input id="project-path-input" name="projectPath" required autocomplete="off" placeholder="/Users/you/work/project"></label>
+        <div class="dialog-actions"><button class="quiet" id="project-cancel" type="button">Cancel</button><button class="primary" type="submit">Open project</button></div>
+      </form>
+    </dialog>
+  </body>
+</html>

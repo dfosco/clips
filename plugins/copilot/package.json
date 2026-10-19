@@ -1,0 +1,16 @@
+{
+  "name": "@dfosco/clips-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "description": "GitHub Copilot App canvas adapter for canonical Clips records and sessions",
+  "scripts": {
+    "test": "node --test runtime/*.test.mjs canvas/*.test.mjs"
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.22"
+  }
+}
