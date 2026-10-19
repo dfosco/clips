@@ -2,8 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { changeProjectLabels, normalizeBoard } from "./backend";
-import { boardData, labelChange } from "../shared/contracts";
+import { changeProjectLabels, normalizeBoard, readProjectLabelUses } from "./backend";
+import { boardData, labelChange, labelUsesData } from "../shared/contracts";
 
 const state = vi.hoisted(() => ({ root: "", calls: [] as { bin: string; args: string[]; cwd?: string }[] }));
 const label = { id: "review", name: "Review", color: "#8b5cf6" };
@@ -11,8 +11,9 @@ vi.mock("@getpaseo/plugin/server", () => ({
   execCommand: async (bin: string, args: string[], opts: { cwd?: string }) => {
     state.calls.push({ bin, args, cwd: opts.cwd });
     if (bin === "git") return { stdout: path.join(state.root, ".git") };
+    if (args.includes("uses")) return { stdout: JSON.stringify({ id: "review", uses: [{ ref: "#g001", kind: "goal", status: "closed" }], count: 1 }) };
     if (args.includes("board")) return { stdout: JSON.stringify({ lanes: [], goals: [], labels: [], warnings: [] }) };
-    if (args.includes("delete")) throw { stderr: "Label review is assigned to #g001. Remove those assignments before deleting it.\nextra" };
+    if (args.includes("delete") && !args.some((arg) => arg.startsWith("--"))) throw { stderr: "Label review is assigned to #g001. Remove those assignments before deleting it.\nextra" };
     return { stdout: "{}" };
   },
 }));
@@ -54,6 +55,8 @@ describe("label RPC boundary", () => {
     { action: "edit", id: "review", name: "Renamed", color: "#123456" },
     { action: "add", ref: "#alice#g001#t01", id: "review" },
     { action: "remove", ref: "#l001", id: "review" },
+    { action: "delete", id: "review", replacement: { kind: "label", id: "keep" } },
+    { action: "delete", id: "review", replacement: { kind: "none" } },
   ] as const)("routes $action through fixed CLI arguments in the selected project", async (change) => {
     const result = await changeProjectLabels(paseo(), { projectId: "selected-project", change });
     const call = state.calls.find((call) => call.args.includes("label"))!;
@@ -61,6 +64,8 @@ describe("label RPC boundary", () => {
     const args = call.args.slice(call.args.indexOf("label") + 1);
     if (change.action === "create") expect(args).toEqual(["create", JSON.stringify({ name: change.name, color: change.color })]);
     else if (change.action === "edit") expect(args).toEqual(["edit", "review", JSON.stringify({ name: change.name, color: change.color })]);
+    else if (change.action === "delete") expect(args).toEqual(change.replacement.kind === "none"
+      ? ["delete", "review", "--remove-assignments"] : ["delete", "review", "--replace-with", "keep"]);
     else expect(args).toEqual([change.action, change.ref, "review"]);
     expect(result.labels).toEqual([]);
   });
@@ -72,5 +77,21 @@ describe("label RPC boundary", () => {
     await expect(changeProjectLabels(paseo(), { projectId: "unavailable", change: { action: "add", ref: "#g001", id: "review" } }))
       .rejects.toThrow("no longer available");
     expect(state.calls.filter((call) => call.args.includes("label"))).toHaveLength(before);
+  });
+
+  it("reads validated current uses through a read-only project-scoped CLI call", async () => {
+    const result = await readProjectLabelUses(paseo(), { projectId: "selected-project", id: "review" });
+    expect(labelUsesData.parse(result)).toEqual({
+      id: "review", count: 1, uses: [{ ref: "#g001", kind: "goal", status: "closed" }],
+    });
+    const call = state.calls.find((call) => call.args.includes("uses"))!;
+    expect(call.cwd).toBe(state.root);
+    expect(call.args.slice(call.args.indexOf("label") + 1)).toEqual(["uses", "review", "--json"]);
+  });
+
+  it("keeps deletion choice explicit and validates the none choice separately from label IDs", () => {
+    expect(labelChange.parse({ action: "delete", id: "review" })).toMatchObject({ action: "delete" });
+    expect(labelChange.parse({ action: "delete", id: "review", replacement: { kind: "none" } })).toMatchObject({ replacement: { kind: "none" } });
+    expect(() => labelChange.parse({ action: "delete", id: "review", replacement: { kind: "none", id: "none" } })).toThrow();
   });
 });

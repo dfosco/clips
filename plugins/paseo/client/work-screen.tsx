@@ -843,7 +843,7 @@ export function WorkScreen({
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Back to Clips</Text>
         </Pressable>
       ) : null}
-      {labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork}
+      {labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork} projectId={projectId}
         catalog={board.data?.labels ?? []} theme={theme} busy={labelMutation.isPending}
         onChange={(change) => labelMutation.mutateAsync({ hostId: host.id, projectId, change })}
         onClose={() => setLabelTarget(null)} /> : null}

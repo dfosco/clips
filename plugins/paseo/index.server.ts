@@ -1,7 +1,7 @@
 
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { agentOptionsRpc, boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc } from "./shared/contracts";
-import { closeWork, changeProjectLabels, projectList, readAgentOptions, readProjectBoard, startWork } from "./server/backend";
+import { agentOptionsRpc, boardRpc, labelUsesRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc } from "./shared/contracts";
+import { closeWork, changeProjectLabels, projectList, readAgentOptions, readProjectBoard, readProjectLabelUses, startWork } from "./server/backend";
 
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(preferences);
@@ -21,6 +21,7 @@ export default function contribute(server: PluginServerContext) {
     return closeWork(paseo, agentDefaults, input);
   });
   server.handle(labelsRpc, (input, { paseo }) => changeProjectLabels(paseo, input));
+  server.handle(labelUsesRpc, (input, { paseo }) => readProjectLabelUses(paseo, input));
   server.handle(startRpc, async (input, { paseo }) => {
     const state = await settings.read();
     const agentDefaults = state.status === "ready"

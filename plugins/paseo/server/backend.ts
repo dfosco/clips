@@ -6,7 +6,7 @@ import type { ManagerClaim } from "./lane-managers";
 import os from "node:os";
 import path from "node:path";
 import { execCommand, type PluginHandlerContext } from "@getpaseo/plugin/server";
-import { label, laneClosureData, type LabelChange, type AgentConfiguration, type Goal, type Lane, type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode } from "../shared/contracts";
+import { label, labelUsesData, laneClosureData, type LabelChange, type AgentConfiguration, type Goal, type Lane, type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode } from "../shared/contracts";
 import {
   FULL_ACCESS_MODE, resolvePermissionMode, type ProviderPermissionMode,
 } from "../shared/permission-modes";
@@ -188,7 +188,9 @@ export async function changeProjectLabels(paseo: Paseo, input: { projectId: stri
   const change = input.change;
   const args = change.action === "create" ? ["create", JSON.stringify({ name: change.name, color: change.color })]
     : change.action === "edit" ? ["edit", change.id, JSON.stringify({ name: change.name, color: change.color })]
-    : change.action === "delete" ? ["delete", change.id]
+    : change.action === "delete" ? ["delete", change.id, ...(change.replacement
+      ? change.replacement.kind === "none" ? ["--remove-assignments"] : ["--replace-with", change.replacement.id]
+      : [])]
     : [change.action, change.ref, change.id];
   try {
     await command(cli.bin, [...cli.prefix, "label", ...args], project.root);
@@ -196,6 +198,17 @@ export async function changeProjectLabels(paseo: Paseo, input: { projectId: stri
     throw new Error(`Cannot change Clips labels: ${errorText(error)}`);
   }
   return normalizeBoard(await clipsBoard(project.root));
+}
+
+export async function readProjectLabelUses(paseo: Paseo, input: { projectId: string; id: string }) {
+  const project = await findProject(paseo, input.projectId);
+  const cli = await findClips();
+  try {
+    const result = await command(cli.bin, [...cli.prefix, "label", "uses", input.id, "--json"], project.root);
+    return labelUsesData.parse(JSON.parse(result.stdout));
+  } catch (error) {
+    throw new Error(`Cannot read Clips label uses: ${errorText(error)}`);
+  }
 }
 
 type Workspace = WorkspaceInfo & { branch: string };

@@ -129,7 +129,10 @@ export const boardRpc = defineRpc({
 export const labelChange = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), name: label.shape.name, color: label.shape.color }),
   z.object({ action: z.literal("edit"), id: label.shape.id, name: label.shape.name, color: label.shape.color }),
-  z.object({ action: z.literal("delete"), id: label.shape.id }),
+  z.object({ action: z.literal("delete"), id: label.shape.id, replacement: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("label"), id: label.shape.id }).strict(),
+    z.object({ kind: z.literal("none") }).strict(),
+  ]).optional() }),
   z.object({ action: z.literal("add"), ref: z.string().min(1), id: label.shape.id }),
   z.object({ action: z.literal("remove"), ref: z.string().min(1), id: label.shape.id }),
 ]);
@@ -138,6 +141,16 @@ export const labelsRpc = defineRpc({
   name: "clips.labels.change",
   input: z.object({ projectId: z.string(), change: labelChange }),
   output: boardData,
+});
+export const labelUsesData = z.object({
+  id: label.shape.id,
+  uses: z.array(z.object({ ref: z.string(), kind: z.enum(["lane", "goal", "task"]), status: z.string() })),
+  count: z.number().int().nonnegative(),
+});
+export const labelUsesRpc = defineRpc({
+  name: "clips.labels.uses",
+  input: z.object({ projectId: z.string(), id: label.shape.id }),
+  output: labelUsesData,
 });
 export const START_MODES = ["workspace", "agent"] as const;
 export type StartMode = (typeof START_MODES)[number];

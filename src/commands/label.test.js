@@ -3,9 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assignLabel, deleteLabel, runLabelCommand } from './label.js';
+import { assignLabel, deleteLabel, labelUses, runLabelCommand } from './label.js';
 import { resolveViewRecord } from './view.js';
 import { parseRef } from '../lib/core.js';
+import { parseGoalFile } from '../lib/board.js';
 import { createLabel, updateLabel, labelCatalog, readLabelConfig } from '../lib/labels.js';
 import { readBoardData } from '../lib/board.js';
 import { readCurrentBoard } from './board.js';
@@ -138,6 +139,151 @@ describe('project label modules and real persistence', () => {
     fs.writeFileSync(path.join(dir, 'g001.jsonl'), 'broken JSON\n');
     expect(() => inRepo(root, () => deleteLabel('review'))).toThrow('Invalid journal');
     expect(catalog(root)).toHaveLength(1);
+  });
+
+  it('reports current uses with kind and status across lanes and namespaced closed records', () => {
+    const root = fixture();
+    create(root);
+    const db = path.join(root, '.clips', 'db');
+    fs.appendFileSync(path.join(db, 'tracks', 'r001.jsonl'), '\n' + json({ event: 'lane_status_changed', status: 'closed' }) + '\n' + json({ event: 'lane_updated', label_ids: ['review'] }) + '\n');
+    fs.appendFileSync(path.join(db, 'g001.jsonl'), [
+      { event: 'updated', label_ids: ['review'], status: 'closed' },
+      { event: 'task_updated', task_id: 't01', label_ids: ['review'], status: 'closed' },
+    ].map(json).join('\n') + '\n');
+    const alice = path.join(db, 'alice');
+    fs.mkdirSync(alice);
+    fs.writeFileSync(path.join(alice, 'g002.jsonl'), [
+      { event: 'goal_created', goal_id: 'g002', title: 'Namespaced', status: 'in_progress', label_ids: ['review'] },
+      { event: 'task_created', task_id: 't02', title: 'Namespaced task', status: 'closed' },
+      { event: 'task_updated', task_id: 't02', status: 'closed', label_ids: ['review'] },
+    ].map(json).join('\n') + '\n');
+    const result = inRepo(root, () => labelUses('review'));
+    expect(result.count).toBe(5);
+    expect(result.uses).toEqual(expect.arrayContaining([
+      { ref: '#l001', kind: 'lane', status: 'closed' },
+      { ref: '#g001', kind: 'goal', status: 'closed' },
+      { ref: '#g001#t01', kind: 'task', status: 'closed' },
+      { ref: '#alice#g002', kind: 'goal', status: 'in_progress' },
+      { ref: '#alice#g002#t02', kind: 'task', status: 'closed' },
+    ]));
+  });
+
+  it('replaces or removes assignments append-only, deduplicates targets, and preserves acceptance', () => {
+    const root = fixture();
+    create(root);
+    createLabel({ id: 'none', name: 'None', color: '#000000' }, root);
+    createLabel({ id: 'keep', name: 'Keep', color: '#123456' }, root);
+    const receipt = { artifact: 'fixture', accepted_by: 'test-agent', summary: 'Checked', criteria: [] };
+    const db = path.join(root, '.clips', 'db');
+    fs.appendFileSync(path.join(db, 'g001.jsonl'), [
+      { event: 'task_updated', task_id: 't01', status: 'closed', acceptance: receipt, label_ids: ['review'] },
+      { event: 'updated', status: 'closed', acceptance: receipt, label_ids: ['review', 'keep'] },
+    ].map(json).join('\n') + '\n');
+    fs.appendFileSync(path.join(db, 'tracks', 'r001.jsonl'), '\n' + json({ event: 'lane_status_changed', status: 'closed' }) + '\n' + json({ event: 'lane_updated', label_ids: ['review', 'keep'] }) + '\n');
+    const alice = path.join(db, 'alice');
+    fs.mkdirSync(alice);
+    fs.writeFileSync(path.join(alice, 'g002.jsonl'), [
+      { event: 'goal_created', goal_id: 'g002', title: 'Namespaced', status: 'open' },
+      { event: 'task_created', task_id: 't02', title: 'Namespaced task', status: 'closed' },
+      { event: 'task_updated', task_id: 't02', status: 'closed', acceptance: receipt, label_ids: ['review', 'keep'] },
+      { event: 'updated', status: 'closed', acceptance: receipt, label_ids: ['review'] },
+    ].map(json).join('\n') + '\n');
+    const originalGoalLines = fs.readFileSync(path.join(db, 'g001.jsonl'), 'utf8');
+    inRepo(root, () => deleteLabel('review', { kind: 'label', id: 'keep' }));
+    expect(catalog(root).map((label) => label.id)).toEqual(['none', 'keep']);
+    expect(record(root, 'goal')).toMatchObject({ status: 'closed', acceptance: receipt, label_ids: ['keep'] });
+    expect(record(root, 'task')).toMatchObject({ status: 'closed', acceptance: receipt, label_ids: ['keep'] });
+    expect(record(root, 'lane').label_ids).toEqual(['keep']);
+    const namespaced = parseGoalFile(path.join(alice, 'g002.jsonl'), 'g002');
+    expect(namespaced).toMatchObject({ status: 'closed', acceptance: receipt, label_ids: ['keep'] });
+    expect(namespaced.tasks.t02).toMatchObject({ status: 'closed', acceptance: receipt, label_ids: ['keep'] });
+    expect(fs.readFileSync(path.join(db, 'g001.jsonl'), 'utf8').startsWith(originalGoalLines)).toBe(true);
+
+    // An active label whose ID/name is "none" does not collide with explicit removal.
+    inRepo(root, () => assignLabel('#g1', 'none', true));
+    inRepo(root, () => deleteLabel('none', { kind: 'none' }));
+    expect(record(root, 'goal').label_ids).toEqual(['keep']);
+  });
+
+  it('refuses invalid/self/stale replacement choices and retains the legacy no-choice guard', () => {
+    const root = fixture();
+    create(root);
+    createLabel({ id: 'keep', name: 'Keep', color: '#123456' }, root);
+    inRepo(root, () => assignLabel('#g1', 'review', true));
+    expect(() => inRepo(root, () => deleteLabel('review'))).toThrow('Remove those assignments');
+    for (const replacement of [
+      { kind: 'label', id: 'review' }, { kind: 'label', id: 'stale' }, { kind: 'bogus' },
+    ]) expect(() => inRepo(root, () => deleteLabel('review', replacement))).toThrow();
+    expect(catalog(root).map((label) => label.id)).toEqual(['review', 'keep']);
+    expect(record(root, 'goal').label_ids).toEqual(['review']);
+  });
+
+  it('keeps the source label when one migration append fails, then retry converges', () => {
+    const root = fixture();
+    create(root);
+    createLabel({ id: 'keep', name: 'Keep', color: '#123456' }, root);
+    inRepo(root, () => {
+      assignLabel('#g1', 'review', true);
+      assignLabel('#g1#t1', 'review', true);
+    });
+    const db = path.join(root, '.clips', 'db');
+    const alice = path.join(db, 'alice');
+    fs.mkdirSync(alice);
+    fs.writeFileSync(path.join(alice, 'g002.jsonl'), [
+      { event: 'goal_created', goal_id: 'g002', title: 'Namespaced', status: 'closed', label_ids: ['review'] },
+    ].map(json).join('\n') + '\n');
+    const originalAppend = fs.appendFileSync;
+    let failed = false;
+    const appendSpy = vi.spyOn(fs, 'appendFileSync').mockImplementation((file, ...args) => {
+      if (!failed && String(file).endsWith(path.join('alice', 'g002.jsonl'))) {
+        failed = true;
+        throw new Error('simulated append failure');
+      }
+      return originalAppend.call(fs, file, ...args);
+    });
+    try {
+      expect(() => inRepo(root, () => deleteLabel('review', { kind: 'label', id: 'keep' }))).toThrow('simulated append failure');
+    } finally { appendSpy.mockRestore(); }
+    expect(catalog(root).map((label) => label.id)).toEqual(['review', 'keep']);
+    expect(record(root, 'goal').label_ids).toEqual(['keep']);
+    expect(record(root, 'task').label_ids).toEqual(['keep']);
+    expect(parseGoalFile(path.join(alice, 'g002.jsonl'), 'g002').label_ids).toEqual(['review']);
+    inRepo(root, () => deleteLabel('review', { kind: 'label', id: 'keep' }));
+    expect(catalog(root).map((label) => label.id)).toEqual(['keep']);
+    expect(parseGoalFile(path.join(alice, 'g002.jsonl'), 'g002').label_ids).toEqual(['keep']);
+  });
+
+  it('fails under the catalog lock before appending and allows a safe retry', () => {
+    const root = fixture();
+    create(root);
+    createLabel({ id: 'keep', name: 'Keep', color: '#123456' }, root);
+    inRepo(root, () => assignLabel('#g1', 'review', true));
+    const config = path.join(root, '.clips', 'clips.config.json');
+    const journal = path.join(root, '.clips', 'db', 'g001.jsonl');
+    const journalBefore = fs.readFileSync(journal, 'utf8');
+    fs.writeFileSync(`${config}.lock`, 'another label writer');
+    expect(() => inRepo(root, () => deleteLabel('review', { kind: 'label', id: 'keep' }))).toThrow('being written');
+    expect(catalog(root).map((label) => label.id)).toEqual(['review', 'keep']);
+    expect(fs.readFileSync(journal, 'utf8')).toBe(journalBefore);
+    fs.unlinkSync(`${config}.lock`);
+    inRepo(root, () => deleteLabel('review', { kind: 'label', id: 'keep' }));
+    expect(record(root, 'goal').label_ids).toEqual(['keep']);
+    expect(catalog(root).map((label) => label.id)).toEqual(['keep']);
+  });
+
+  it('routes uses and explicit delete choices through the CLI without a sentinel collision', () => {
+    const root = fixture();
+    create(root);
+    createLabel({ id: 'none', name: 'None', color: '#000000' }, root);
+    inRepo(root, () => assignLabel('#g1', 'review', true));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      inRepo(root, () => runLabelCommand(['uses', 'review', '--json']));
+      expect(JSON.parse(log.mock.calls.at(-1)[0])).toMatchObject({ id: 'review', count: 1, uses: [{ ref: '#g001', kind: 'goal', status: 'open' }] });
+      inRepo(root, () => runLabelCommand(['delete', 'review', '--remove-assignments']));
+      expect(record(root, 'goal').label_ids).toEqual([]);
+      expect(catalog(root).map((label) => label.id)).toEqual(['none']);
+    } finally { log.mockRestore(); }
   });
 
   it('loads legacy records, keeps catalogs isolated, and preserves extension content', () => {
