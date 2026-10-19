@@ -111,12 +111,16 @@ test('unverified Copilot App capability and unreadable Lane ownership fail close
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-canvas-capability-'));
   const f = fixture();
   f.runtime.hostCapabilities = async () => ({ appSessionVisibilityVerified: false, hostIdConfigured: false });
+  f.sessions.push({ id: 'session-1', sessionId: 'session-1', appVisible: 'unverified', navigationUrl: 'ghapp://sessions/session-1' });
   const service = createCanvasService({ runtime: f.runtime, dataDir });
   t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
   await service.open({ instanceId: 'unverified', sessionId: 'host', session: { workingDirectory: '/repo' } });
   assert.equal((await service.state('unverified')).hostCapabilities.appSessionVisibilityVerified, false);
   await assert.rejects(service.dispatch('unverified', 'launch', { ref: '#g001' }), /not been verified|disabled until this host has verified/);
-  await assert.rejects(service.dispatch('unverified', 'open_session', { sessionId: 'session-1' }), /visibility has not been verified/);
+  assert.deepEqual(await service.dispatch('unverified', 'open_session', { sessionId: 'session-1' }), {
+    sessionId: 'session-1', url: 'ghapp://sessions/session-1', appVisibility: 'unverified',
+  });
+  await assert.rejects(service.dispatch('unverified', 'steer', { sessionId: 'session-1', prompt: 'Continue' }), /visibility has not been verified/);
   assert.equal(f.calls.some((call) => call[0] === 'launchRecord'), false);
 
   f.runtime.hostCapabilities = async () => ({ appSessionVisibilityVerified: true, hostIdConfigured: true });

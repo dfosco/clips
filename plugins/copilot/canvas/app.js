@@ -64,10 +64,14 @@ function sessionCard(session, claimed = false) {
   const id = session.id || session.sessionId;
   const title = session.summary || `Copilot session ${id}`;
   const ownerContact = session.contact ? `<small>${escapeHtml(session.contact)}</small>` : '';
-  const navigable = session.steerable === true && session.navigationUrl;
+  const navigable = session.navigationUrl;
+  const navigationLabel = session.appVisible === 'verified_by_host_check' ? 'Go to agent' : 'Open in Copilot App';
+  const navigationNote = session.appVisible === 'verified_by_host_check'
+    ? ''
+    : '<small>App visibility is unverified; this opens the documented session link.</small>';
   return `<article class="session-card">
     <div><strong>${escapeHtml(title)}</strong><code>${escapeHtml(id)}</code><small>${escapeHtml(session.statusLabel || 'Status not exposed by Copilot SDK')}${session.appVisibilityLabel ? ` · ${escapeHtml(session.appVisibilityLabel)}` : ''}</small><small>${escapeHtml(session.workingDirectory || 'Working directory unavailable')} · Copilot App workspace identity is not exposed by the SDK</small>${ownerContact}</div>
-    <div class="session-actions">${navigable ? `<a class="button quiet" href="${escapeHtml(session.navigationUrl)}" data-open-session="${escapeHtml(id)}">Go to agent</a>` : '<button class="quiet" type="button" disabled title="Copilot App visibility is not verified on this host">Go to agent</button>'}<button class="quiet" type="button" data-steer="${escapeHtml(id)}" ${session.steerable === true ? '' : 'disabled title="Copilot App steering is not verified on this host"'}>Steer</button></div>
+    <div class="session-actions">${navigable ? `<a class="button quiet" href="${escapeHtml(session.navigationUrl)}" data-open-session="${escapeHtml(id)}">${navigationLabel}</a>${navigationNote}` : '<button class="quiet" type="button" disabled title="No Copilot App session link is available">Go to agent</button>'}<button class="quiet" type="button" data-steer="${escapeHtml(id)}" ${session.steerable === true ? '' : 'disabled title="Copilot App steering is not verified on this host"'}>Steer</button></div>
   </article>`;
 }
 
@@ -119,7 +123,7 @@ function renderDetail() {
   const hostVerified = currentState.hostCapabilities?.appSessionVisibilityVerified === true;
   const launchDisabled = !hostVerified || (isLane && (hasOwners || record.manager_claim_error || !record.manager_claim || currentState.hostCapabilities?.hostIdConfigured !== true)) || (!isLane && related.length > 0);
   const launchReason = !hostVerified
-    ? 'Starting and steering are disabled until SDK sessions are confirmed visible and steerable in the Copilot App on this host.'
+    ? 'Starting and steering are disabled until SDK sessions are confirmed visible and steerable in the Copilot App on this host. Existing sessions can still be opened through their documented app links while visibility remains unverified.'
     : isLane && currentState.hostCapabilities?.hostIdConfigured !== true
       ? 'Lane management also requires an observed Copilot host identity.'
       : !isLane && related.length > 0

@@ -212,7 +212,9 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     }
     if (action === 'steer' || action === 'open_session') {
       const capability = runtime.hostCapabilities ? await runtime.hostCapabilities() : null;
-      if (capability?.appSessionVisibilityVerified !== true) throw new Error('Copilot App session visibility has not been verified on this host; navigation and steering are disabled.');
+      if (action === 'steer' && capability?.appSessionVisibilityVerified !== true) {
+        throw new Error('Copilot App session visibility has not been verified on this host; steering is disabled. Use the session deep link to check native navigation.');
+      }
       const id = String(input.sessionId || '').trim();
       const sessions = (await runtime.listSessions(instance.projectPath)).sessions || [];
       const session = sessions.find((candidate) => sessionId(candidate) === id);
