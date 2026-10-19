@@ -7,14 +7,17 @@ description: Use the Clips Lane Manager canvas in GitHub Copilot App while prese
 
 Install or update the maintained checkout's local extension and shared skill
 links with `node scripts/install-copilot.js`. It runs the extension's locked
-production dependency install (`npm ci --omit=dev`) before exposing the source
+production dependency install (`npm ci --omit=dev --include=optional`) before exposing the source
 links. GitHub documents user-scoped extensions under `~/.copilot/extensions`;
 the installer places the extension at
 `~/.copilot/extensions/clips-workspaces` and links guidance at
 `~/.copilot/skills/{clips,lane-manager,clips-copilot}`. It does not change
-Copilot settings or start the extension. The official docs do not specify a
-reload command. Operationally, after installing or updating, relaunch the
-Copilot App, then open the canvas in a new App session and verify it appears.
+Copilot settings or start the extension. After source updates, run
+`extensions_reload` in the actual Copilot session, then reopen the same canvas
+instance. An extension can use its public `session.rpc.extensions.reload()`;
+a separate SDK resume does not reload the App's live provider. Refresh only
+rereads data. Use `inspect_clips_runtime` to check loaded module hashes,
+interpreter and actual session metadata, then verify board/focus operations.
 To restore the prior local paths, run
 `node scripts/install-copilot.js --rollback`. The installer receipt is kept at
 `~/.clips/copilot-workspaces-install.json` (or under `$CLIPS_HOME`).
@@ -52,7 +55,7 @@ edit Clips journals directly or create a second board database.
   actually exposes.
 - For Lane Manager work, inspect the canonical claim and use the actual host,
   runtime, and session identity. Claim an unowned Lane before management;
-  reuse the current session's claim for direct launches. A conflict or missing
+  reuse the current session's claim for current-session sends. A conflict or missing
   identity blocks management and takeover. Engineering contributions may
   proceed without owning the Lane, subject to coordination with its manager.
 - A running record should navigate to its observed session. Do not launch a
@@ -66,6 +69,15 @@ edit Clips journals directly or create a second board database.
 
 ## Canvas focus
 
-Focus is scoped to the Copilot-provided open-canvas instance ID. Keep separate
+Focus is scoped to the actual Copilot session, open-canvas instance and selected project. Project selection is scoped to session and instance. Keep separate
 focus for separate open canvases and users. Store only the selected record/Lane;
 the canonical CLI remains authoritative for record contents and status.
+
+The canvas sends work to its current joined session; it does not create a new
+App dev session. Keep manager and implementation roles in separate sessions.
+Current public RPCs expose `metadata.snapshot/activity`, `model.getCurrent`,
+`mode.get`, and `workspaces.getWorkspace`. Read actual results without changing
+settings. Joining alone proves neither App visibility nor top-level parentage.
+If Node cannot be found by the packaged extension, set `CLIPS_NODE_PATH` to an
+installed Node 18+ executable and reload. Never pass `src/cli.js` to Copilot as
+though its packaged process.execPath were a Node interpreter.

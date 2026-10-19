@@ -3,6 +3,7 @@ const instanceId = params.get('instanceId');
 const token = params.get('token');
 const $ = (selector) => document.querySelector(selector);
 let currentState = null;
+let selectedProjectPath = '';
 let createKind = null;
 
 async function call(action, input = {}) {
@@ -65,19 +66,19 @@ function sessionCard(session, claimed = false) {
   const title = session.summary || `Copilot session ${id}`;
   const ownerContact = session.contact ? `<small>${escapeHtml(session.contact)}</small>` : '';
   const navigable = session.navigationUrl;
-  const navigationLabel = session.appVisible === 'verified_by_host_check' ? 'Go to agent' : 'Open in Copilot App';
+  const navigationLabel = session.joined ? 'Open current session' : session.appVisible === 'verified_by_host_check' ? 'Go to agent' : 'Open in Copilot App';
   const navigationNote = session.appVisible === 'verified_by_host_check'
     ? ''
     : '<small>App visibility is unverified; this opens the documented session link.</small>';
   return `<article class="session-card">
-    <div><strong>${escapeHtml(title)}</strong><code>${escapeHtml(id)}</code><small>${escapeHtml(session.statusLabel || 'Status not exposed by Copilot SDK')}${session.appVisibilityLabel ? ` · ${escapeHtml(session.appVisibilityLabel)}` : ''}</small><small>${escapeHtml(session.workingDirectory || 'Working directory unavailable')} · Copilot App workspace identity is not exposed by the SDK</small>${ownerContact}</div>
+    <div><strong>${escapeHtml(title)}</strong><code>${escapeHtml(id)}</code><small>${escapeHtml(session.statusLabel || 'Status not exposed by Copilot SDK')}${session.appVisibilityLabel ? ` · ${escapeHtml(session.appVisibilityLabel)}` : ''}</small><small>${escapeHtml(session.workingDirectory || 'Working directory unavailable')} · ${escapeHtml(session.workspaceId ? `Workspace ${session.workspaceId}` : 'Workspace identity unavailable')}</small>${session.model?.modelId ? `<small>Model: ${escapeHtml(session.model.modelId)}${session.model.reasoningEffort ? ` · ${escapeHtml(session.model.reasoningEffort)}` : ''}${session.mode ? ` · ${escapeHtml(typeof session.mode === 'string' ? session.mode : JSON.stringify(session.mode))}` : ''}</small>` : ''}${ownerContact}</div>
     <div class="session-actions">${navigable ? `<a class="button quiet" href="${escapeHtml(session.navigationUrl)}" data-open-session="${escapeHtml(id)}">${navigationLabel}</a>${navigationNote}` : '<button class="quiet" type="button" disabled title="No Copilot App session link is available">Go to agent</button>'}<button class="quiet" type="button" data-steer="${escapeHtml(id)}" ${session.steerable === true ? '' : 'disabled title="Copilot App steering is not verified on this host"'}>Steer</button></div>
   </article>`;
 }
 
 function renderSessions() {
   const sessions = currentState.projectSessions || [];
-  $('#project-sessions').innerHTML = sessions.length ? sessions.map((session) => sessionCard(session)).join('') : '<p class="muted">No Copilot sessions are listed for this project. A newly started session is recorded only after the SDK returns its real session ID.</p>';
+  $('#project-sessions').innerHTML = sessions.length ? sessions.map((session) => sessionCard(session)).join('') : '<p class="muted">No Copilot sessions are listed for this project. Open its canvas from the intended Copilot session.</p>';
   document.querySelectorAll('[data-open-session]').forEach((anchor) => anchor.addEventListener('click', async (event) => {
     event.preventDefault();
     try {
@@ -119,11 +120,11 @@ function renderDetail() {
   const parentGoal = outline.kind === 'goal' ? record : outline.kind === 'task' ? currentState.goals.find((goal) => goal.ref === record.goal_ref) : null;
   const strategicLane = parentGoal?.lane_id ? currentState.lanes.find((lane) => lane.lane_id === parentGoal.lane_id) : null;
   const hasOwners = (record.manager_claim?.owners || []).length > 0;
-  const launchLabel = isLane ? 'Start Lane Manager' : 'Start Copilot session';
-  const hostVerified = currentState.hostCapabilities?.appSessionVisibilityVerified === true;
+  const launchLabel = isLane ? 'Use this session as manager' : 'Send work to this session';
+  const hostVerified = currentState.hostCapabilities?.canSendToCurrentSession === true;
   const launchDisabled = !hostVerified || (isLane && (hasOwners || record.manager_claim_error || !record.manager_claim || currentState.hostCapabilities?.hostIdConfigured !== true)) || (!isLane && related.length > 0);
   const launchReason = !hostVerified
-    ? 'Starting and steering are disabled until SDK sessions are confirmed visible and steerable in the Copilot App on this host. Existing sessions can still be opened through their documented app links while visibility remains unverified.'
+    ? 'Sending work requires the current joined session. Creating a separate App dev session is not supported here. Open one in Copilot, then open its Clips canvas.'
     : isLane && currentState.hostCapabilities?.hostIdConfigured !== true
       ? 'Lane management also requires an observed Copilot host identity.'
       : !isLane && related.length > 0
@@ -132,7 +133,7 @@ function renderDetail() {
           ? 'This Lane is already claimed. Contact or navigate to its owner; this canvas will not replace it.'
           : isLane && (!record.manager_claim || record.manager_claim_error)
             ? 'Lane ownership cannot be read, so a manager must not be started.'
-            : '';
+            : 'This sends work to the current session and preserves its model and settings. It does not create a separate dev session.';
   const statusOptions = outline.kind === 'lane' ? ['open', 'in_progress', 'not_planned', 'duplicate'] : ['open', 'in_progress', 'closed', 'not_planned', 'duplicate'];
   const tasks = outline.kind === 'goal' ? outline.tasks : [];
   $('#record-detail').innerHTML = `
@@ -146,7 +147,7 @@ function renderDetail() {
     ${isLane ? `<section class="context-section"><h3>Lane Managers</h3>${renderManager(record)}</section>` : ''}
     ${outline.kind === 'lane' ? `<section class="context-section"><h3>Goals</h3><div class="focused-goals">${outline.goals.length ? outline.goals.map((goal) => recordButton({ ...goal, kind: 'goal' }, false)).join('') : '<p class="muted">No Goals in this Lane.</p>'}</div></section>` : ''}
     ${outline.kind === 'goal' ? `<section class="context-section"><h3>Tasks <span class="count">${tasks.length}</span></h3><p class="muted">Tasks are shown only while their parent Goal is focused.</p><div class="focused-tasks">${tasks.length ? tasks.map((task) => recordButton({ ...task, kind: 'task' }, false)).join('') : '<p class="muted">No Tasks in this Goal.</p>'}</div></section>` : ''}
-    <section class="context-section agent-section"><div class="section-head"><div><h3>${isLane ? 'Claimed manager sessions' : 'Sessions bound to this record'}</h3><p class="muted">Only durable Lane claims or exact IDs launched here are attributed to this record. Copilot sessions use this project path; the SDK does not expose an App-managed workspace ID.</p></div><button id="launch-record" class="primary" type="button" ${launchDisabled ? 'disabled' : ''}>${escapeHtml(launchLabel)}</button></div>
+    <section class="context-section agent-section"><div class="section-head"><div><h3>${isLane ? 'Claimed manager sessions' : 'Sessions bound to this record'}</h3><p class="muted">Only durable Lane claims or exact session bindings are attributed to this record. Sending work preserves the current session workspace and settings.</p></div><button id="launch-record" class="primary" type="button" ${launchDisabled ? 'disabled' : ''}>${escapeHtml(launchLabel)}</button></div>
       ${launchReason ? `<p class="notice">${escapeHtml(launchReason)}</p>` : ''}
       ${related.length ? `<div class="session-list">${related.map((session) => sessionCard(session, isLane)).join('')}</div>` : isLane && hasOwners ? '<p class="notice">A manager is claimed but its session is not visible in this project session list. Contact the owner; no replacement action is available.</p>' : '<p class="muted">No session is durably bound to this record.</p>'}
     </section>
@@ -166,10 +167,12 @@ function renderDetail() {
 }
 
 function render() {
+  selectedProjectPath = currentState.projectPath;
   $('#project-path').textContent = currentState.projectPath;
   renderTree();
   renderDetail();
   renderSessions();
+  $('#session-warnings').textContent = (currentState.warnings || []).join(' ');
 }
 
 function showMessage(text, isError = false) {
@@ -187,7 +190,7 @@ async function act(action, input = {}) {
     if (result?.state) currentState = result.state;
     else if (action === 'refresh') currentState = result;
     else currentState = await call('refresh');
-    if (action === 'launch') showMessage(`Started Copilot session ${result.session?.id || result.session?.sessionId}; App visibility is unverified.`);
+    if (action === 'launch') showMessage(`Sent work to current session ${result.session?.id || result.session?.sessionId}.`);
     else if (action === 'steer') showMessage('Message sent to the selected Copilot SDK session.');
     else if (action === 'set_status') showMessage('Clips record status updated.');
     else if (action.endsWith('_label')) showMessage('Clips label assignment updated.');
@@ -200,6 +203,7 @@ async function act(action, input = {}) {
 }
 
 function openCreate(kind) {
+  if (!currentState) { showMessage('Choose an initialized Clips project before creating records.', true); return; }
   createKind = kind;
   const title = kind === 'lane' ? 'Create Lane' : kind === 'goal' ? 'Create Goal' : 'Create Task';
   $('#create-title').textContent = title;
@@ -229,7 +233,7 @@ function openCreate(kind) {
 
 $('#refresh').addEventListener('click', () => act('refresh').catch(() => {}));
 $('#choose-project').addEventListener('click', () => {
-  $('#project-path-input').value = currentState?.projectPath || '';
+  $('#project-path-input').value = currentState?.projectPath || selectedProjectPath;
   $('#project-dialog').showModal();
 });
 $('#project-cancel').addEventListener('click', () => $('#project-dialog').close());
@@ -260,8 +264,12 @@ $('#create-form').addEventListener('submit', async (event) => {
   } catch {}
 });
 
-act('refresh').catch((error) => {
+call('context').then((context) => {
+  selectedProjectPath = context.projectPath || '';
+  $('#project-path').textContent = selectedProjectPath || 'Choose a Clips project';
+  $('#project-path-input').value = selectedProjectPath;
+}).then(() => act('refresh')).catch((error) => {
   $('#record-tree').innerHTML = `<p class="notice danger">Could not read the canonical Clips board: ${escapeHtml(error.message)}</p><p class="muted">Open this canvas from a Copilot session whose working directory is the intended repository, or supply a project path when the canvas is opened.</p>`;
-  if (/working directory|project path/i.test(error.message)) $('#project-dialog').showModal();
+  if (/working directory|project path|No Clips store/i.test(error.message)) $('#project-dialog').showModal();
 });
 window.setInterval(() => { if (!document.hidden) act('refresh').catch(() => {}); }, 20000);

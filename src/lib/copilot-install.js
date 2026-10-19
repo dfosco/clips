@@ -3,9 +3,46 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 export const COPILOT_SKILL_NAMES = ['clips', 'lane-manager'];
 const STATE_VERSION = 1;
+
+export function copilotSdkPlatform() {
+  const { platform, arch } = process;
+  if (arch !== 'arm64' && arch !== 'x64') throw new Error(`Unsupported Copilot SDK architecture: ${arch}`);
+  if (platform === 'linux') {
+    const musl = process.report?.getReport()?.header?.glibcVersionRuntime === undefined;
+    return `${musl ? 'linuxmusl' : 'linux'}-${arch}`;
+  }
+  if (platform === 'darwin' || platform === 'win32') return `${platform}-${arch}`;
+  throw new Error(`Unsupported Copilot SDK platform: ${platform}-${arch}`);
+}
+
+function resolveSdkPlatformPackage(pluginRoot, platformName) {
+  const sdkRoot = path.join(pluginRoot, 'node_modules', '@github', 'copilot-sdk');
+  const sdkRuntime = path.join(sdkRoot, 'dist', 'runtimeArtifacts.js');
+  const requireFromSdk = createRequire(sdkRuntime);
+  const packageName = `@github/copilot-sdk-${platformName}`;
+  const candidate = (requireFromSdk.resolve.paths(packageName) || [])
+    .map(base => path.join(base, ...packageName.split('/')))
+    .find(base => fs.existsSync(path.join(base, 'package.json')));
+  if (!candidate) {
+    throw new Error(`Copilot SDK platform package ${packageName} is not resolvable from ${sdkRuntime}`);
+  }
+  const sdk = JSON.parse(fs.readFileSync(path.join(sdkRoot, 'package.json'), 'utf8'));
+  const platformPackage = JSON.parse(fs.readFileSync(path.join(candidate, 'package.json'), 'utf8'));
+  if (platformPackage.version !== sdk.version) {
+    throw new Error(`Copilot SDK platform package ${packageName}@${platformPackage.version} does not match SDK ${sdk.version}`);
+  }
+  const prebuildDir = path.join(candidate, 'prebuilds', platformName);
+  const wrapper = path.join(prebuildDir, platformName.startsWith('win32') ? 'copilot-runtime.exe' : 'copilot-runtime');
+  const runtimeNode = path.join(prebuildDir, 'runtime.node');
+  if (!fs.existsSync(wrapper) || !fs.existsSync(runtimeNode)) {
+    throw new Error(`Copilot SDK platform package ${packageName} is missing its runtime files`);
+  }
+  return { packageName, packageRoot: candidate, wrapper, runtimeNode };
+}
 
 export function provisionCopilotDependencies(repositoryRoot, {
   runNpm = execFileSync,
@@ -15,15 +52,25 @@ export function provisionCopilotDependencies(repositoryRoot, {
   const lockPath = path.join(pluginRoot, 'package-lock.json');
   const manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
   const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+  const sdkVersion = manifest.dependencies?.['@github/copilot-sdk'];
+  const platformName = copilotSdkPlatform();
+  const platformPackageName = `@github/copilot-sdk-${platformName}`;
+  const lockedSdk = lock.packages?.['node_modules/@github/copilot-sdk'];
+  const lockedPlatform = lock.packages?.[`node_modules/${platformPackageName}`];
   if (!manifest.dependencies?.['@github/copilot-sdk']) {
     throw new Error('Copilot extension package.json must declare @github/copilot-sdk');
   }
   if (!Number.isInteger(lock.lockfileVersion) || lock.lockfileVersion < 2 ||
-      lock.packages?.['']?.dependencies?.['@github/copilot-sdk'] !== manifest.dependencies['@github/copilot-sdk']) {
-    throw new Error('Copilot package-lock.json is missing or does not match the SDK dependency in package.json');
+      lock.packages?.['']?.dependencies?.['@github/copilot-sdk'] !== sdkVersion ||
+      lockedSdk?.version !== sdkVersion ||
+      lockedSdk?.optionalDependencies?.[platformPackageName] !== sdkVersion ||
+      !lockedPlatform?.optional || lockedPlatform.version !== sdkVersion) {
+    throw new Error(`Copilot package-lock.json must lock ${platformPackageName}@${sdkVersion} as an optional SDK package`);
   }
-  runNpm('npm', ['ci', '--omit=dev', '--prefix', pluginRoot], { stdio: 'inherit' });
-  return { pluginRoot, packagePath, lockPath, command: ['npm', 'ci', '--omit=dev', '--prefix', pluginRoot] };
+  const command = ['npm', 'ci', '--omit=dev', '--include=optional', '--prefix', pluginRoot];
+  runNpm('npm', command.slice(1), { stdio: 'inherit' });
+  const platformPackage = resolveSdkPlatformPackage(pluginRoot, platformName);
+  return { pluginRoot, packagePath, lockPath, platformPackage, command };
 }
 
 function readState(stateFile) {
@@ -92,7 +139,13 @@ function replaceWithLink({ target, source, backupRoot, name }) {
 function rollbackApplied(entries) {
   for (const entry of [...entries].reverse()) {
     if (!entry.changed || !entry.created) continue;
-    if (!targetEntry(entry.target)) continue;
+    if (!targetEntry(entry.target)) {
+      if (entry.backup && targetEntry(entry.backup)) {
+        fs.mkdirSync(path.dirname(entry.target), { recursive: true });
+        fs.renameSync(entry.backup, entry.target);
+      }
+      continue;
+    }
     if (!fs.lstatSync(entry.target).isSymbolicLink() || !pointsTo(entry.target, entry.source)) {
       throw new Error(`Copilot install rollback stopped: ${entry.target} no longer points to ${entry.source}`);
     }
@@ -151,6 +204,10 @@ export function installCopilot({
       applied.push(result);
       return result;
     });
+    const installedPlatformPackage = resolveSdkPlatformPackage(
+      path.join(copilotHome, 'extensions', 'clips-workspaces'),
+      copilotSdkPlatform(),
+    );
     const state = {
       version: STATE_VERSION,
       repository: root,
@@ -158,7 +215,7 @@ export function installCopilot({
       targets: results.map(({ target, source, created, backup }) => ({ target, source, created, backup })),
     };
     atomicJson(stateFile, state);
-    return { stateFile, dependencies, results };
+    return { stateFile, dependencies: { ...dependencies, installedPlatformPackage }, results };
   } catch (error) {
     try { rollbackApplied(applied); }
     catch (rollbackError) { error.message += `; rollback also failed: ${rollbackError.message}`; }

@@ -30,7 +30,7 @@ test('launch prompt keeps record and parent context explicit', () => {
   assert.match(prompt, /Task #g001#t01/);
   assert.match(prompt, /Parent Goal: #g001/);
   assert.match(prompt, /Strategic Lane: #l001/);
-  assert.match(prompt, /top-level work session/);
+  assert.match(prompt, /does not prove native App visibility or top-level parentage/);
 });
 
 test('long-description rule keeps small and empty text simple', () => {

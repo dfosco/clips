@@ -1,13 +1,17 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const execFile = promisify(nodeExecFile);
 const moduleRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const requireFromRuntime = createRequire(import.meta.url);
+const loadedSourceHash = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
 const recordCommandPattern = /^(board|view|history|goal|task|lane|label|component|track)$/;
 const allowedCommands = new Set([
   "board", "view", "history",
@@ -28,9 +32,66 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+/**
+ * Resolve the SDK's locked platform runtime from this extension package. The
+ * Copilot App exposes its own SDK through COPILOT_SDK_PATH; that SDK's bundled
+ * resolver searches beside the App bundle and cannot see the extension's npm
+ * optional dependency. The public SDK accepts an explicit RuntimeConnection
+ * executable, so use the matching executable from this extension's install.
+ */
+export function resolveSdkRuntimeExecutable({
+  platform = process.platform,
+  arch = process.arch,
+  musl = platform === 'linux' && process.report?.getReport()?.header?.glibcVersionRuntime === undefined,
+  resolvePackage = (specifier) => requireFromRuntime.resolve(specifier),
+  exists = existsSync,
+} = {}) {
+  if (!["darwin", "linux", "win32"].includes(platform) || !["arm64", "x64"].includes(arch)) {
+    throw new Error(`The Copilot SDK has no supported runtime package for ${platform}-${arch}.`);
+  }
+  const runtimePlatform = `${platform === 'linux' && musl ? 'linuxmusl' : platform}-${arch}`;
+  const packageName = `@github/copilot-sdk-${runtimePlatform}`;
+  let packageJson;
+  try {
+    packageJson = resolvePackage(`${packageName}/package.json`);
+  } catch (error) {
+    throw new Error(`Could not resolve ${packageName} from the installed Clips extension. Run node scripts/install-copilot.js to install its locked platform package.`, { cause: error });
+  }
+  const executable = path.join(path.dirname(packageJson), "prebuilds", runtimePlatform, platform === "win32" ? "copilot-runtime.exe" : "copilot-runtime");
+  if (!exists(executable)) {
+    throw new Error(`${packageName} is installed without its Copilot runtime executable at ${executable}. Reinstall with node scripts/install-copilot.js.`);
+  }
+  return executable;
+}
+
 function errorMessage(error) {
   const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
   return stderr || (error instanceof Error ? error.message : String(error));
+}
+
+// Extension hosts may embed JavaScript in the Copilot executable. execPath is
+// therefore not necessarily an interpreter that accepts a JS entry point.
+export async function resolveNodeExecutable({
+  configured = process.env.CLIPS_NODE_PATH,
+  executable = process.execPath,
+  env = process.env,
+  run = execFile,
+} = {}) {
+  const candidates = configured ? [configured] : [
+    env.npm_node_execpath,
+    /^(node|nodejs)(\.exe)?$/i.test(path.basename(executable)) ? executable : null,
+    'node', '/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node',
+  ];
+  for (const candidate of [...new Set(candidates.filter(Boolean))]) {
+    try {
+      const version = await run(candidate, ['--version'], { timeout: 5000, maxBuffer: 4096 });
+      if (!/^v\d+\.\d+\.\d+\s*$/.test(version.stdout)) continue;
+      const { stdout } = await run(candidate, ['-p', 'JSON.stringify({node:process.versions.node,execPath:process.execPath})'], { timeout: 5000, maxBuffer: 4096 });
+      const value = JSON.parse(stdout.trim());
+      if (Number(value.node?.split('.')[0]) >= 18 && path.isAbsolute(value.execPath)) return value.execPath;
+    } catch { /* Try the next installed interpreter, never the embedded host. */ }
+  }
+  throw new Error(`Node.js 18 or newer is required to run Clips.${configured ? ` CLIPS_NODE_PATH (${configured}) is not a working Node interpreter.` : ''} Install Node or set CLIPS_NODE_PATH to its absolute executable path, then reload the extension.`);
 }
 
 async function realpath(input) {
@@ -93,7 +154,7 @@ function isReadCommand(args) {
     args[0] === "task" && args[1] === "show";
 }
 
-function normalizeSession(metadata, binding, appSessionVisibilityVerified = false) {
+function normalizeSession(metadata, binding, { appSessionVisibilityVerified = false, joinedForegroundSession = false } = {}) {
   const context = metadata.context ?? {};
   const sessionId = metadata.sessionId;
   return {
@@ -114,9 +175,11 @@ function normalizeSession(metadata, binding, appSessionVisibilityVerified = fals
     summary: metadata.summary ?? null,
     status: "unknown",
     workspaceId: null,
-    steerable: appSessionVisibilityVerified,
+    steerable: joinedForegroundSession,
     sdkSteerable: true,
+    joined: joinedForegroundSession,
     appVisible: appSessionVisibilityVerified ? "verified_by_host_check" : "unverified",
+    parentage: "unknown",
     navigationUrl: `ghapp://sessions/${encodeURIComponent(sessionId)}`,
   };
 }
@@ -144,13 +207,20 @@ export function appSessionUrl(sessionId) {
  * are read or written here.
  */
 export async function createClipsRuntime(options = {}) {
+  const diagnostic = (event) => options.onDiagnostic?.({ ...event, pid: process.pid, processExecutable: process.execPath, runtimeSourceSha256: loadedSourceHash });
   const injectedClient = options.client;
+  const hostSession = options.hostSession ?? null;
+  if (hostSession && (!safeId(hostSession.sessionId) || typeof hostSession.send !== "function")) {
+    throw new Error("hostSession must be the actual session returned by Copilot SDK joinSession().");
+  }
   const cliRunner = options.cliRunner ?? ((bin, args, cwd) => execFile(bin, args, { cwd, maxBuffer: 8 * 1024 * 1024 }));
   const copilotHome = process.env.COPILOT_HOME || path.join(os.homedir(), ".copilot");
   const dataRoot = options.dataRoot ?? path.join(copilotHome, "clips-runtime");
   let client = injectedClient;
   let ownsClient = false;
   let started = false;
+  let nodeExecutable;
+  const nodePath = () => nodeExecutable ??= resolveNodeExecutable({ configured: options.nodePath ?? process.env.CLIPS_NODE_PATH });
   const configuredHostId = options.hostId ?? process.env.CLIPS_COPILOT_HOST_ID;
   const hostId = safeId(configuredHostId) ? configuredHostId.trim() : null;
   const hostIdentitySource = options.hostId ? "runtime option" : process.env.CLIPS_COPILOT_HOST_ID ? "CLIPS_COPILOT_HOST_ID" : null;
@@ -159,8 +229,12 @@ export async function createClipsRuntime(options = {}) {
 
   async function getClient() {
     if (!client) {
-      const sdk = await import("@github/copilot-sdk");
-      client = new sdk.CopilotClient(process.env.COPILOT_HOME ? { baseDirectory: copilotHome } : {});
+      const sdk = options.loadSdk ? await options.loadSdk() : await import("@github/copilot-sdk");
+      const clientOptions = {
+        connection: sdk.RuntimeConnection.forStdio({ path: (options.runtimeExecutableResolver ?? resolveSdkRuntimeExecutable)() }),
+      };
+      if (process.env.COPILOT_HOME) clientOptions.baseDirectory = copilotHome;
+      client = new sdk.CopilotClient(clientOptions);
       ownsClient = true;
     }
     if (!started) {
@@ -172,19 +246,16 @@ export async function createClipsRuntime(options = {}) {
 
   async function cliPath(projectPath) {
     if (options.cliPath) return options.cliPath.endsWith(".js")
-      ? { bin: process.execPath, prefix: [path.resolve(options.cliPath)] }
+      ? { bin: await nodePath(), prefix: [path.resolve(options.cliPath)] }
       : { bin: options.cliPath, prefix: [] };
     const configured = process.env.CLIPS_CLI_PATH?.trim();
     if (configured) {
       return configured.endsWith(".js")
-        ? { bin: process.execPath, prefix: [path.resolve(configured)] }
+        ? { bin: await nodePath(), prefix: [path.resolve(configured)] }
         : { bin: configured, prefix: [] };
     }
     const local = path.join(moduleRoot, "src", "cli.js");
-    try {
-      await fs.access(local);
-      return { bin: process.execPath, prefix: [local] };
-    } catch { /* use the installed executable below */ }
+    if (existsSync(local)) return { bin: await nodePath(), prefix: [local] };
     const candidates = ["clips", path.join(os.homedir(), ".local", "bin", "clips"), "/opt/homebrew/bin/clips", "/usr/local/bin/clips"];
     for (const candidate of candidates) {
       try {
@@ -203,8 +274,11 @@ export async function createClipsRuntime(options = {}) {
     let result;
     try {
       result = await cliRunner(cli.bin, finalArgs, context.cwd);
+      diagnostic({ event: 'clips.command.completed', projectPath: context.cwd, executable: cli.bin, command: args[0], ref: args[0] === 'view' ? args[1] : undefined });
     } catch (error) {
-      throw new Error(`Clips command failed in ${context.cwd}: ${errorMessage(error)}`);
+      const message = errorMessage(error);
+      if (message.includes('No Clips store')) throw new Error(`No Clips store in the selected project (${context.cwd}). Choose an initialized Clips project, or run clips init there to create one. The canvas has not changed your project.`);
+      throw new Error(`Clips command failed in ${context.cwd}: ${message}`);
     }
     const output = asString(result?.stdout).trim();
     if (!output) return { success: true };
@@ -212,23 +286,20 @@ export async function createClipsRuntime(options = {}) {
     try { return JSON.parse(output); } catch { return output; }
   }
 
-  async function bindingFile(sessionId) {
-    return path.join(dataRoot, "bindings", `${sha256(sessionId)}.json`);
+  async function bindingFile(binding) {
+    const key = [binding.session_id, binding.repository_id, binding.ref, binding.kind].join("\0");
+    return path.join(dataRoot, "bindings", `${sha256(key)}.json`);
   }
 
-  async function readBinding(sessionId) {
-    try {
-      const value = JSON.parse(await fs.readFile(await bindingFile(sessionId), "utf8"));
-      if (value.version !== 1 || value.session_id !== sessionId) return null;
-      return value;
-    } catch (error) {
-      if (error?.code === "ENOENT") return null;
-      throw new Error(`Copilot session binding is unreadable for ${sessionId}: ${errorMessage(error)}`);
-    }
+  async function readBinding(sessionId, repositoryId, ref, kind) {
+    const matches = (await listBindings()).filter((binding) => binding.session_id === sessionId &&
+      binding.repository_id === repositoryId && binding.project_id === repositoryId && binding.ref === ref && binding.kind === kind);
+    if (matches.length > 1) throw new Error(`Several local bindings exist for Copilot session ${sessionId} and ${ref}; inspect the local runtime metadata before steering.`);
+    return matches[0] ?? null;
   }
 
   async function writeBinding(binding) {
-    const filename = await bindingFile(binding.session_id);
+    const filename = await bindingFile(binding);
     await fs.mkdir(path.dirname(filename), { recursive: true, mode: 0o700 });
     const temporary = `${filename}.${process.pid}.${randomUUID()}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(binding, null, 2)}\n`, { mode: 0o600, flag: "wx" });
@@ -264,16 +335,11 @@ export async function createClipsRuntime(options = {}) {
       return value.version === 1 && value.app_session?.verified === true &&
         safeId(value.app_session?.app_version) && safeId(value.app_session?.session_id) &&
         safeId(value.app_session?.verified_by) && value.app_session?.opened_in_app === true &&
-        value.app_session?.steered_in_app === true;
+        value.app_session?.steered_in_app === true ? value.app_session : null;
     } catch (error) {
-      if (error?.code === "ENOENT") return false;
+      if (error?.code === "ENOENT") return null;
       throw new Error(`Copilot host capability setting is unreadable: ${errorMessage(error)}`);
     }
-  }
-
-  async function isAppSessionVerified() {
-    appSessionVisibilityVerified = await readHostCapabilities();
-    return appSessionVisibilityVerified;
   }
 
   async function recordHostVerification(evidence) {
@@ -303,11 +369,38 @@ export async function createClipsRuntime(options = {}) {
     await fs.writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     try { await fs.rename(temporary, capabilityFile); }
     catch (error) { await fs.rm(temporary, { force: true }); throw error; }
-    appSessionVisibilityVerified = await readHostCapabilities();
+    appSessionVisibilityVerified = Boolean(await readHostCapabilities());
     return { appSessionVisibilityVerified, capabilityFile };
   }
 
-  appSessionVisibilityVerified = await readHostCapabilities();
+  appSessionVisibilityVerified = Boolean(await readHostCapabilities());
+
+  async function currentSession() {
+    if (!hostSession) return null;
+    // Read the joined runtime without changing its model or interaction mode.
+    const snapshot = hostSession.rpc?.metadata?.snapshot
+      ? await hostSession.rpc.metadata.snapshot()
+      : await (await getClient()).getSessionMetadata(hostSession.sessionId);
+    if (!snapshot || snapshot.sessionId !== hostSession.sessionId) throw new Error('Joined session metadata does not match its actual session ID.');
+    const readOptional = async (read) => {
+      try { return read ? await read() : null; } catch { return null; }
+    };
+    const [workspace, model, activity] = await Promise.all([
+      readOptional(hostSession.rpc?.workspaces?.getWorkspace),
+      readOptional(hostSession.rpc?.model?.getCurrent),
+      readOptional(hostSession.rpc?.metadata?.activity),
+    ]);
+    const result = {
+      ...snapshot,
+      context: snapshot.context ?? { workingDirectory: snapshot.workingDirectory, gitRoot: workspace?.workspace?.git_root, repository: workspace?.workspace?.repository, branch: workspace?.workspace?.branch },
+      workspaceId: workspace?.workspace?.id ?? null,
+      model: model ?? (snapshot.selectedModel ? { modelId: snapshot.selectedModel } : null),
+      mode: snapshot.currentMode ?? null,
+      status: typeof activity?.hasActiveWork === 'boolean' ? (activity.hasActiveWork ? 'running' : 'idle') : 'unknown',
+    };
+    diagnostic({ event: 'clips.session.observed', sessionId: result.sessionId, workingDirectory: result.context?.workingDirectory, workspaceId: result.workspaceId, model: result.model, mode: result.mode, status: result.status });
+    return result;
+  }
 
   async function listBindings() {
     const dir = path.join(dataRoot, "bindings");
@@ -344,113 +437,121 @@ export async function createClipsRuntime(options = {}) {
 
   async function listSessions(projectPath) {
     const context = await gitContext(projectPath);
-    appSessionVisibilityVerified = await isAppSessionVerified();
-    const sdkClient = await getClient();
-    const [metadata, bindings] = await Promise.all([sdkClient.listSessions(), listBindings()]);
-    const bindingById = new Map(bindings.map((binding) => [binding.session_id, binding]));
+    const hostVerification = await readHostCapabilities();
+    appSessionVisibilityVerified = Boolean(hostVerification);
+    const warnings = [];
+    const [catalog, bindings, joined] = await Promise.all([
+      getClient().then((sdkClient) => sdkClient.listSessions()).catch((error) => { warnings.push(`Other session metadata is unavailable: ${errorMessage(error)}`); return []; }),
+      listBindings(),
+      currentSession().catch((error) => { warnings.push(`Current session readback failed: ${errorMessage(error)}`); return null; }),
+    ]);
+    const metadata = joined ? [...catalog.filter((item) => item.sessionId !== joined.sessionId), joined] : catalog;
     const entries = [];
     for (const session of metadata) {
-      const binding = bindingById.get(session.sessionId);
+      const sessionBindings = bindings.filter((binding) => binding.session_id === session.sessionId);
       const sessionRoot = session.context?.gitRoot || session.context?.workingDirectory;
       if (!sessionRoot) continue;
       let sessionContext;
       try { sessionContext = await gitContext(sessionRoot); } catch { continue; }
       if (sessionContext.commonDir !== context.commonDir) continue;
-      if (binding && (binding.repository_id !== context.commonDir || binding.project_id !== context.commonDir)) continue;
-      entries.push(normalizeSession(session, binding ?? null, appSessionVisibilityVerified));
+      const projectBindings = sessionBindings.filter((binding) => binding.repository_id === context.commonDir && binding.project_id === context.commonDir);
+      if (sessionBindings.length > 0 && projectBindings.length === 0) continue;
+      const candidates = projectBindings.length > 0 ? projectBindings : [null];
+      for (const binding of candidates) {
+        const joinedForegroundSession = session.sessionId === hostSession?.sessionId;
+        const verified = hostVerification?.session_id === session.sessionId;
+        const normalized = normalizeSession(session, binding, { appSessionVisibilityVerified: verified, joinedForegroundSession });
+        if (joinedForegroundSession && joined) Object.assign(normalized, { status: joined.status, workspaceId: joined.workspaceId, model: joined.model, mode: joined.mode });
+        entries.push(normalized);
+      }
     }
     return {
       sessions: entries.sort((a, b) => (b.modifiedAt ?? "").localeCompare(a.modifiedAt ?? "")),
       appSessionVisibilityVerified,
       hostIdConfigured: Boolean(hostId),
+      warnings,
     };
   }
 
-  async function resume(sessionId) {
-    if (!safeId(sessionId)) throw new Error("A Copilot session ID is required.");
-    const sdkClient = await getClient();
-    return sdkClient.resumeSession(sessionId, {});
-  }
-
   async function steerSession(sessionId, prompt) {
-    if (!await isAppSessionVerified()) {
-      throw new Error("Copilot App session visibility and user steering have not been verified on this host; direct session steering is disabled.");
-    }
     if (!safePrompt(prompt)) throw new Error("A valid prompt is required to steer a Copilot session (1–100,000 characters; ordinary line breaks are allowed).");
-    const session = await resume(sessionId);
-    await session.send(prompt);
+    if (sessionId === hostSession?.sessionId) {
+      await hostSession.send(prompt);
+      return;
+    }
+    throw new Error("Only the currently joined Copilot session can be steered from this canvas. Open the target session and its Clips canvas. A prior visibility check is not a live host connection.");
   }
 
   async function launchRecord(input) {
-    if (!await isAppSessionVerified()) {
-      throw new Error("Copilot App visibility and user steering for SDK-created sessions have not been verified on this host; launch is disabled.");
+    if (!hostSession) {
+      throw new Error("This extension is not joined to a Copilot session. Open the Clips canvas inside the intended session before sending work.");
     }
     validateSessionConfig(input);
+    if (input.model !== undefined || input.reasoningEffort !== undefined) throw new Error('Work uses the current session model and settings. Change them in the host before sending work.');
     const context = await gitContext(input.projectPath);
     const record = await viewRecord(input.ref, context.cwd);
-    const kind = record?.kind || (input.ref.startsWith("#l") ? "lane" : input.ref.includes("#t") ? "task" : "goal");
+    if (!record || record.ref !== input.ref) throw new Error(`Clips did not return the exact requested record ${input.ref}; refusing to bind a Copilot session to a different record.`);
+    const lastPart = input.ref.split('#').at(-1);
+    const expectedKind = /^l\d+$/.test(lastPart) ? 'lane' : /^t\d+$/.test(lastPart) ? 'task' : /^g\d+$/.test(lastPart) ? 'goal' : null;
+    if (!expectedKind) throw new Error('Work requires a current Lane, Goal, or Task reference.');
+    const kind = record.kind || expectedKind;
+    if (kind !== expectedKind) throw new Error(`Clips record ${input.ref} resolved to kind ${kind}, expected ${expectedKind}; refusing to bind a Copilot session.`);
     if (kind === "lane" && !hostId) {
       throw new Error("Cannot manage this Lane: the Copilot host exposes no verified host ID. Configure an observed host ID before claiming ownership.");
     }
-    const release = await acquireRecordLaunchLock(context.commonDir, input.ref);
-    try { return await launchRecordUnlocked(input, context, record, kind); }
-    finally { await release(); }
+    const releaseSession = await acquireRecordLaunchLock('joined-session', hostSession.sessionId);
+    try {
+      const release = await acquireRecordLaunchLock(context.commonDir, input.ref);
+      try { return await launchRecordUnlocked(input, context, record, kind); }
+      finally { await release(); }
+    } finally { await releaseSession(); }
   }
 
   async function launchRecordUnlocked(input, context, record, kind) {
-    const sdkClient = await getClient();
     const bindings = await listBindings();
     const bound = bindings.filter((binding) => binding.repository_id === context.commonDir && binding.project_id === context.commonDir && binding.ref === input.ref && binding.kind === kind);
+    const sessionId = hostSession.sessionId;
+    const conflicting = bindings.find((binding) => binding.session_id === sessionId && (binding.repository_id !== context.commonDir || binding.kind !== kind || (kind !== 'lane' && binding.ref !== input.ref)));
+    if (conflicting) throw new Error(`This session already owns ${conflicting.ref} (${conflicting.kind}). Open a separate session for ${input.ref}; Lane managers and dev owners must remain separate. This action does not create sessions.`);
+    const sessionMetadata = await currentSession();
+    if (!sessionMetadata) throw new Error(`Joined Copilot App session ${sessionId} is missing from the SDK session catalog; refusing to bind work to an unverified session.`);
+    const sessionRoot = sessionMetadata.context?.gitRoot || sessionMetadata.context?.workingDirectory;
+    let sessionProject;
+    try { sessionProject = sessionRoot ? await gitContext(sessionRoot) : null; } catch { sessionProject = null; }
+    if (!sessionProject || sessionProject.commonDir !== context.commonDir) {
+      throw new Error(`Joined Copilot App session ${sessionId} does not belong to this Git project; refusing to steer it.`);
+    }
+    const metadataApi = hostSession.rpc?.metadata;
+    const clientMetadata = metadataApi?.getClientMetadata ? await metadataApi.getClientMetadata() : null;
+    if (clientMetadata?.['clips/ref'] && (clientMetadata['clips/project'] !== context.commonDir || clientMetadata['clips/kind'] !== kind || (kind !== 'lane' && clientMetadata['clips/ref'] !== input.ref))) {
+      throw new Error(`This session is already bound to ${clientMetadata['clips/ref']} in its runtime metadata. Open a separate session; the existing role will not be replaced.`);
+    }
+    const currentBinding = await readBinding(sessionId, context.commonDir, input.ref, kind);
 
     if (kind === "lane") {
       const inspected = await recordCommand(["lane", "manager", "inspect", input.ref], context.cwd);
       const owners = Array.isArray(inspected?.owners) ? inspected.owners : [];
       if (owners.length > 0) {
-        const mine = owners.find((owner) => owner.runtime === "copilot-sdk" && owner.host === hostId);
+        const mine = owners.find((owner) => owner.runtime === "copilot-sdk" && owner.host === hostId && owner.session_id === sessionId);
         if (!mine) throw new Error(`Lane ${input.ref} already has a manager. Contact its recorded owner; this launch will not replace or bypass that claim.`);
-        const session = await sdkClient.getSessionMetadata(mine.session_id);
-        if (!session) throw new Error(`Lane ${input.ref} remains claimed by Copilot session ${mine.session_id}, which is unavailable. Resolve the existing claim with explicit authorization; do not launch a replacement.`);
-        const existingBinding = await readBinding(mine.session_id);
+        const existingBinding = currentBinding;
         if (!existingBinding || existingBinding.session_id !== mine.session_id || existingBinding.repository_id !== context.commonDir ||
           existingBinding.project_id !== context.commonDir || existingBinding.ref !== input.ref || existingBinding.kind !== "lane") {
           throw new Error(`Lane ${input.ref} is claimed by session ${mine.session_id}, but its local project/record/kind binding cannot be verified. Refusing to steer or relabel it.`);
         }
-        const ownerRoot = session.context?.gitRoot || session.context?.workingDirectory;
-        let ownerContext;
-        try { ownerContext = ownerRoot ? await gitContext(ownerRoot) : null; } catch { ownerContext = null; }
-        if (!ownerContext || ownerContext.commonDir !== context.commonDir) {
-          throw new Error(`Lane ${input.ref} is claimed by session ${mine.session_id}, but its observed Git project does not match. Refusing to steer it.`);
-        }
-        const handle = await sdkClient.resumeSession(mine.session_id, {});
-        const binding = existingBinding;
-        await handle.send(input.prompt);
-        return normalizeSession(session, binding, appSessionVisibilityVerified);
+        await hostSession.send(input.prompt);
+        return normalizeSession(sessionMetadata, existingBinding, { joinedForegroundSession: true });
       }
     }
 
-    if (bound.length > 1) throw new Error(`Several Copilot sessions are already bound to ${input.ref}; choose one with Go to agent before steering.`);
-    if (bound.length === 1) {
-      const existing = await sdkClient.getSessionMetadata(bound[0].session_id);
-      if (existing) {
-        const existingRoot = existing.context?.gitRoot || existing.context?.workingDirectory;
-        let existingProject;
-        try { existingProject = existingRoot ? await gitContext(existingRoot) : null; } catch { existingProject = null; }
-        if (!existingProject || existingProject.commonDir !== context.commonDir || bound[0].repository_id !== context.commonDir ||
-          bound[0].project_id !== context.commonDir || bound[0].ref !== input.ref || bound[0].kind !== kind) {
-          throw new Error(`Existing Copilot session ${bound[0].session_id} cannot be verified against ${input.ref}, its record kind, and this Git project. Refusing to steer it.`);
-        }
-        const handle = await sdkClient.resumeSession(bound[0].session_id, {});
-        await handle.send(input.prompt);
-        return normalizeSession(existing, bound[0]);
-      }
+    if (bound.some((binding) => binding.session_id !== sessionId)) {
+      throw new Error(`Record ${input.ref} is already bound to another Copilot session. Open that session in the App before steering it; this action will not start a duplicate.`);
+    }
+    if (bound.length > 1) throw new Error(`Several local bindings exist for ${input.ref}; inspect the local runtime metadata before steering.`);
+    if (bound.length === 1 && !currentBinding) {
+      throw new Error(`Existing Copilot session binding for ${input.ref} cannot be verified against the joined session, record kind, and this Git project.`);
     }
 
-    const title = (input.title?.trim() || `${input.ref} ${record?.title || "Clips work"}`)
-      .replace(/[\u0000-\u001f\u007f"]/g, " ").trim().slice(0, 100);
-    const config = { workingDirectory: context.cwd, name: title || input.ref };
-    if (input.model) config.model = input.model;
-    if (input.reasoningEffort) config.reasoningEffort = input.reasoningEffort;
-    const session = await sdkClient.createSession(config);
     const host = hostId;
     const binding = {
       version: 1,
@@ -459,7 +560,7 @@ export async function createClipsRuntime(options = {}) {
       project_root: context.root,
       ref: input.ref,
       kind,
-      session_id: session.sessionId,
+      session_id: sessionId,
       host,
       runtime: "copilot-sdk",
       host_identity_source: hostIdentitySource,
@@ -474,34 +575,41 @@ export async function createClipsRuntime(options = {}) {
         actor: {
           host,
           runtime: "copilot-sdk",
-          session_id: session.sessionId,
+          session_id: sessionId,
           host_identity_source: hostIdentitySource,
           host_identity_authenticated: false,
-          contact: `Copilot session ${session.sessionId} (${appSessionUrl(session.sessionId)})`,
+          contact: `Copilot session ${sessionId} (${appSessionUrl(sessionId)})`,
         },
       };
       try {
         await recordCommand(["lane", "manager", "claim", input.ref, JSON.stringify(claim)], context.cwd);
       } catch (error) {
-        throw new Error(`Lane claim failed after creating idle Copilot session ${session.sessionId}; no manager prompt was sent. ${errorMessage(error)}`);
+        throw new Error(`Lane claim failed for joined Copilot App session ${sessionId}; no manager prompt was sent. ${errorMessage(error)}`);
       }
     }
 
     // Keep a binding before send. If delivery fails, users can resume the exact
     // actual session and a Lane claim remains visibly attached to its owner.
     await writeBinding(binding);
-    try { await session.send(input.prompt); }
-    catch (error) {
-      throw new Error(`Copilot session ${session.sessionId} was created${kind === "lane" ? " and retains the Lane claim" : ""}, but the prompt was not delivered: ${errorMessage(error)}. Resume this session; do not create a replacement.`);
+    if (metadataApi?.updateClientMetadata && kind !== 'lane') {
+      const expected = { 'clips/ref': input.ref, 'clips/project': context.commonDir, 'clips/kind': kind };
+      await metadataApi.updateClientMetadata({ set: expected });
+      const readback = await metadataApi.getClientMetadata();
+      if (Object.entries(expected).some(([key, value]) => readback[key] !== value)) throw new Error('Joined session binding readback did not match. No prompt was sent.');
     }
-    return normalizeSession({
-      sessionId: session.sessionId,
-      startTime: new Date(), modifiedTime: new Date(),
-      context: { workingDirectory: context.cwd, gitRoot: context.root },
-    }, binding, appSessionVisibilityVerified);
+    try { await hostSession.send(input.prompt); }
+    catch (error) {
+      throw new Error(`Copilot session ${sessionId}${kind === "lane" ? " retains the Lane claim" : " is bound to the record"}, but the prompt was not delivered: ${errorMessage(error)}. Resume this session; do not create a replacement.`);
+    }
+    return normalizeSession(sessionMetadata, binding, { joinedForegroundSession: true });
   }
 
   return {
+    currentSession,
+    async diagnostics() {
+      const current = await currentSession();
+      return { pid: process.pid, parentPid: process.ppid, processExecutable: process.execPath, nodeExecutable: await nodePath(), runtimeSourceSha256: loadedSourceHash, currentSession: current, bindings: (await listBindings()).filter((binding) => binding.session_id === hostSession?.sessionId) };
+    },
     listBoard,
     viewRecord,
     recordCommand,
@@ -510,13 +618,19 @@ export async function createClipsRuntime(options = {}) {
     steerSession,
     appSessionUrl,
     async hostCapabilities() {
-      appSessionVisibilityVerified = await isAppSessionVerified();
+      const hostVerification = await readHostCapabilities();
+      appSessionVisibilityVerified = Boolean(hostVerification);
       return {
         appSessionVisibilityVerified,
+        currentSessionId: hostSession?.sessionId ?? null,
+        currentSessionJoined: Boolean(hostSession),
+        canSendToCurrentSession: Boolean(hostSession),
+        canCreateAppSession: false,
+        parentage: 'unknown',
         hostIdConfigured: Boolean(hostId),
         hostIdentitySource,
         hostIdentityAuthenticated: false,
-        verificationSource: appSessionVisibilityVerified ? "user-local Copilot App open-and-steer check" : null,
+        verificationSource: hostVerification ? "user-local Copilot App open-and-steer check" : null,
       };
     },
     recordHostVerification,

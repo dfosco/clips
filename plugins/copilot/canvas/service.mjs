@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,11 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { findRecord, focusOutline, recordPrompt, relatedSessions, RECORD_STATUSES } from './model.mjs';
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
+const loadedSourceHash = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
 const assets = new Map([
   ['/canvas/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/canvas/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);
-const allowedActions = new Set(['refresh', 'set_project', 'focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
+const allowedActions = new Set(['context', 'diagnostics', 'refresh', 'set_project', 'focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
 const sessionId = (session) => session?.id || session?.sessionId || null;
@@ -42,22 +44,23 @@ function safeRef(ref) {
 function recordCommandForStatus(record, status) {
   if (record.kind === 'lane') {
     if (!new Set(['open', 'in_progress', 'not_planned', 'duplicate']).has(status)) throw new Error(`Unsupported Lane status: ${status}`);
-    return ['lane', 'status', record.lane_id, status];
+    return ['lane', 'status', record.ref, status];
   }
   if (!RECORD_STATUSES.has(status)) throw new Error(`Unsupported Clips status: ${status}`);
-  if (record.kind === 'goal') return ['goal', 'status', record.goal_id, status];
-  if (record.kind === 'task') return ['task', 'status', record.goal_id, record.task_id, status];
+  if (record.kind === 'goal') return ['goal', 'status', record.ref, status];
+  if (record.kind === 'task') return ['task', 'status', record.ref, status];
   throw new Error('Only Lanes, Goals, and Tasks have status controls.');
 }
 
-export function createCanvasService({ runtime, dataDir = localDataRoot(), serverFactory = createServer } = {}) {
+export function createCanvasService({ runtime, dataDir = localDataRoot(), serverFactory = createServer, onDiagnostic } = {}) {
   if (!runtime) throw new TypeError('A Clips runtime adapter is required.');
   const instances = new Map();
   let server;
   let origin;
 
-  const focusPath = (instanceId) => path.join(dataDir, 'focus', `${hash(instanceId)}.json`);
-  const projectPathFile = (instanceId) => path.join(dataDir, 'projects', `${hash(instanceId)}.json`);
+  const panelKey = (instance) => JSON.stringify([instance.sessionId, instance.instanceId]);
+  const focusPath = (instance) => path.join(dataDir, 'focus', `${hash(JSON.stringify([instance.sessionId, instance.instanceId, instance.projectPath]))}.json`);
+  const projectPathFile = (instance) => path.join(dataDir, 'projects', `${hash(panelKey(instance))}.json`);
   const bindingsPath = (projectPath) => path.join(dataDir, 'sessions', `${hash(path.resolve(projectPath))}.json`);
 
   async function requireProject(instance) {
@@ -69,7 +72,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     await requireProject(instance);
     const board = await runtime.listBoard(instance.projectPath);
     if (!findRecord(board, ref)) throw new Error(`Record ${ref} is not present in this project's Clips board.`);
-    await writeJson(focusPath(instance.instanceId), { ref, updatedAt: new Date().toISOString() });
+    await writeJson(focusPath(instance), { ref, updatedAt: new Date().toISOString() });
     return ref;
   }
 
@@ -77,8 +80,8 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     await requireProject(instance);
     const [board, savedFocus, sessionResult, bindings, hostCapabilities] = await Promise.all([
       runtime.listBoard(instance.projectPath),
-      readJson(focusPath(instance.instanceId), { ref: null }),
-      runtime.listSessions(instance.projectPath),
+      readJson(focusPath(instance), { ref: null }),
+      runtime.listSessions(instance.projectPath).catch((error) => ({ sessions: [], warnings: [`Session catalog unavailable: ${error.message}`] })),
       readJson(bindingsPath(instance.projectPath), {}),
       runtime.hostCapabilities ? runtime.hostCapabilities() : Promise.resolve(null),
     ]);
@@ -86,6 +89,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     const outline = focusOutline(board, focus);
     const sessions = sessionResult.sessions || [];
     const related = outline ? relatedSessions(outline.record, sessions, bindings) : [];
+    onDiagnostic?.({ event: 'clips.canvas.state', serviceSourceSha256: loadedSourceHash, sessionId: instance.sessionId, instanceId: instance.instanceId, projectPath: instance.projectPath, focus, goals: (board.goals || []).length, lanes: (board.lanes || []).length });
     return {
       projectPath: instance.projectPath,
       instanceId: instance.instanceId,
@@ -105,7 +109,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       lanes: board.lanes || [],
       goals: board.goals || [],
       labels: board.labels || [],
-      warnings: board.warnings || [],
+      warnings: [...(board.warnings || []), ...(sessionResult.warnings || [])],
       relatedSessions: related.map((session) => ({ ...session, statusLabel: session.status === 'unknown' ? 'Status not exposed by Copilot SDK' : session.status, appVisibilityLabel: session.appVisible === 'unverified' ? 'Copilot App visibility unverified' : undefined })),
       projectSessions: sessions.map((session) => ({ ...session, statusLabel: session.status === 'unknown' ? 'Status not exposed by Copilot SDK' : session.status, appVisibilityLabel: session.appVisible === 'unverified' ? 'Copilot App visibility unverified' : undefined })),
     };
@@ -122,6 +126,8 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
 
   async function dispatch(instance, action, input = {}) {
     if (!allowedActions.has(action)) throw new Error(`Unsupported canvas action: ${action}`);
+    if (action === 'context') return { projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId };
+    if (action === 'diagnostics') return { serviceSourceSha256: loadedSourceHash, projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId, runtime: await runtime.diagnostics() };
     if (action === 'refresh') return buildState(instance);
     if (action === 'set_project') {
       const selectedPath = String(input.projectPath || '').trim();
@@ -129,7 +135,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const resolved = path.resolve(selectedPath);
       await runtime.listBoard(resolved);
       instance.projectPath = resolved;
-      await writeJson(projectPathFile(instance.instanceId), { projectPath: resolved, updatedAt: new Date().toISOString() });
+      await writeJson(projectPathFile(instance), { projectPath: resolved, openInputPath: instance.openInputPath, updatedAt: new Date().toISOString() });
       return buildState(instance);
     }
     if (action === 'focus') {
@@ -178,12 +184,12 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const goalRef = safeRef(input.goal_ref);
       const { record: parent } = await selected(instance, goalRef);
       if (parent.kind !== 'goal') throw new Error('A Task must be created under a Goal.');
-      const result = await runtime.recordCommand(['task', 'create', parent.goal_id, JSON.stringify(data)], instance.projectPath);
+      const result = await runtime.recordCommand(['task', 'create', parent.ref, JSON.stringify(data)], instance.projectPath);
       return { result, state: await buildState(instance) };
     }
     if (action === 'launch') {
       const capability = runtime.hostCapabilities ? await runtime.hostCapabilities() : null;
-      if (capability?.appSessionVisibilityVerified !== true) throw new Error('Starting or resuming Copilot work is disabled until this host has verified that SDK sessions open and can be steered in the Copilot App.');
+      if (capability?.canSendToCurrentSession !== true) throw new Error('Sending work requires a joined current session. This canvas does not create a new App session.');
       const { board, record } = await selected(instance, input.ref);
       if (record.kind === 'lane' && (record.manager_claim?.owners || []).length) {
         throw new Error(`Lane ${record.ref} already has a claimed manager. Open or contact the listed owner; this canvas will not replace it.`);
@@ -212,14 +218,12 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     }
     if (action === 'steer' || action === 'open_session') {
       const capability = runtime.hostCapabilities ? await runtime.hostCapabilities() : null;
-      if (action === 'steer' && capability?.appSessionVisibilityVerified !== true) {
-        throw new Error('Copilot App session visibility has not been verified on this host; steering is disabled. Use the session deep link to check native navigation.');
-      }
       const id = String(input.sessionId || '').trim();
       const sessions = (await runtime.listSessions(instance.projectPath)).sessions || [];
       const session = sessions.find((candidate) => sessionId(candidate) === id);
       if (!session) throw new Error('That session is not in the current project session list. Refresh before opening or steering it.');
       if (action === 'open_session') return { sessionId: id, url: runtime.appSessionUrl(id), appVisibility: session.appVisible || 'unverified' };
+      if (session.steerable !== true) throw new Error('This session is not joined here and its App steering has not been verified. Open its canvas to send a message through that session.');
       const prompt = String(input.prompt || '').trim();
       if (!prompt) throw new Error('Enter a message to steer this session.');
       if (prompt.length > 12000) throw new Error('Steering message is too long.');
@@ -294,10 +298,17 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     async open(ctx) {
       if (!ctx?.instanceId || !ctx.sessionId) throw new Error('Copilot did not provide a canvas instance and session ID.');
       const input = ctx.input && typeof ctx.input === 'object' ? ctx.input : {};
-      const persisted = await readJson(projectPathFile(ctx.instanceId), { projectPath: null });
-      const sourcePath = ctx.session?.workingDirectory || input.projectPath || persisted.projectPath;
+      const existing = instances.get(ctx.instanceId);
+      if (existing && existing.sessionId !== ctx.sessionId) throw new Error('This canvas provider belongs to a different session.');
+      if (existing) return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${existing.token}` };
+      const persisted = await readJson(projectPathFile(ctx), { projectPath: null });
+      const openInputPath = input.projectPath ? path.resolve(input.projectPath) : null;
+      const explicitNewInput = openInputPath && openInputPath !== persisted.openInputPath;
+      const current = !explicitNewInput && !persisted.projectPath && !openInputPath && runtime.currentSession ? await runtime.currentSession().catch(() => null) : null;
+      const sourcePath = explicitNewInput ? openInputPath : persisted.projectPath || openInputPath || ctx.session?.workingDirectory || current?.context?.workingDirectory;
       const projectPath = sourcePath ? path.resolve(sourcePath) : null;
-      instances.set(ctx.instanceId, { instanceId: ctx.instanceId, sessionId: ctx.sessionId, projectPath, token: randomBytes(32).toString('hex') });
+      instances.set(ctx.instanceId, { instanceId: ctx.instanceId, sessionId: ctx.sessionId, projectPath, openInputPath, token: randomBytes(32).toString('hex') });
+      await writeJson(projectPathFile(ctx), { projectPath, openInputPath });
       await startServer();
       const instance = instances.get(ctx.instanceId);
       return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${instance.token}` };
@@ -306,6 +317,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     async action(ctx) {
       const instance = instances.get(ctx.instanceId);
       if (!instance) throw new Error('Open Clips Work in this canvas instance first.');
+      if (ctx.sessionId && ctx.sessionId !== instance.sessionId) throw new Error('Canvas action belongs to a different session.');
       return dispatch(instance, ctx.actionName, ctx.input || {});
     },
     async dispatch(instanceId, action, input) {

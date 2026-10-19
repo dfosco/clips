@@ -1,65 +1,55 @@
 # Copilot runtime adapter
 
-`index.mjs` exports `createClipsRuntime(options)`. The returned adapter implements
-the canvas contract (`listBoard`, `viewRecord`, `recordCommand`, `listSessions`,
-`launchRecord`, `steerSession`, and `appSessionUrl`) plus host capability and
-cleanup helpers. Board and record operations invoke the canonical Clips CLI in
-the selected repository. The adapter does not read or write `.clips` journals.
+`createClipsRuntime` supplies canonical board/record commands, saved-session
+navigation, joined-session work delivery and read-only diagnostics. All Clips
+mutations use the checkout CLI in the explicitly selected Git project. No
+adapter writes workflow journals or chooses the source repo as a fallback.
 
-## Host configuration and verified actions
+## Interpreter and dependency resolution
 
-The runtime creates an SDK client lazily. `COPILOT_HOME` is passed through to the
-SDK's documented `baseDirectory` option and stores user-local adapter state under
-`$COPILOT_HOME/clips-runtime` (default `~/.copilot/clips-runtime`).
-`CLIPS_CLI_PATH` can identify the maintained `src/cli.js` or an installed `clips`
-executable. An embedding application can also pass `cliPath`.
+`CLIPS_CLI_PATH` selects `src/cli.js` or an installed executable. JS entry points
+run through a verified Node 18+ executable. The packaged Copilot extension
+executable is not Node; it is never reused merely because it is process.execPath.
+`CLIPS_NODE_PATH` selects a specific interpreter. Otherwise discovery checks an
+npm-provided Node, a Node host, PATH, and conventional system installation paths.
+An invalid explicit setting fails with a repair instruction.
 
-Session list, launch, and steer controls remain disabled until the user has
-confirmed that an actual SDK session opens in and can be steered from the native
-Copilot App. After that real check, the embedding host can call:
+The SDK client is a lazily started, metadata-only catalog sidecar. The App
+redirects SDK imports to its bundle; its default runtime search cannot see this
+extension's optional platform package. Supply the locked extension-relative
+executable through `RuntimeConnection.forStdio({path})`. Catalog failures become
+warnings and do not suppress the board or replace the joined session.
 
-```js
-await runtime.recordHostVerification({
-  appVersion: "<observed app version>",
-  sessionId: "<actual SDK session ID opened and steered in the app>",
-  verifiedBy: "<user identity>",
-  openedInApp: true,
-  steeredInApp: true,
-});
-```
+## Current-session behavior and limits
 
-This writes a mode-0600 user-local capability record. The method checks that the
-session ID exists in the SDK catalog, but the App observations and verifier are
-asserted metadata, not cryptographic proof. No such verification has been made
-for this development candidate. The canvas should read
-`runtime.hostCapabilities()` or the `appSessionVisibilityVerified` result from
-`listSessions` and display disabled controls while it is false.
+The extension injects the actual `joinSession()` handle. `launchRecord` sends to
+that handle after verifying the project and exact record. It creates no session.
+A manager cannot receive dev work in the same session. Dev sessions cannot be
+silently reassigned. Canonical policy permits a manager to hold several Lane
+claims. Per-record and per-session locks serialize local sends; crash locks
+require checking the recorded process before removing that exact stale lock.
 
-The current SDK does not expose a Copilot App host ID. Lane Manager creation
-therefore requires an explicit `options.hostId` or `CLIPS_COPILOT_HOST_ID` value
-from a future supported host context. The adapter marks that source as configured
-and unauthenticated; it does not substitute a hostname. Without the value, Lane
-claim/launch is rejected before creating a session. Claims otherwise use the
-actual SDK session ID and canonical `clips lane manager` revision-checked CLI
-commands.
+Current-session metadata, activity, model/reasoning and workspace come from
+public `session.rpc.metadata.snapshot/activity`, `model.getCurrent`, and
+`workspaces.getWorkspace`. Mode comes from the metadata snapshot. Missing RPCs
+or fields remain unavailable. These getters do not alter settings. Goal/Task
+binding uses exact `clips/ref`, `clips/project`, `clips/kind` client metadata with
+readback where available, plus a private mode-0600 local index under
+`$COPILOT_HOME/clips-runtime`. Unrelated metadata is preserved.
 
-The SDK's session catalogue exposes context, timestamps, and a summary, but not
-running/idle/attention state. Session status is always `unknown`; consumers must
-not derive execution state from timestamps or summaries. The public API exposes
-no Copilot App worktree allocator. New sessions use the selected project path as
-their `workingDirectory`, so this adapter does not claim isolated workspaces.
-Model and reasoning settings are passed only when the caller explicitly supplies
-them; otherwise SDK defaults remain in effect. This does not inherit the App's
-current selected model or mode because no documented getter is available.
+Joining demonstrates send capability, not App visibility or top-level
+parentage. `canSendToCurrentSession` and `appSessionVisibilityVerified` are
+separate. Historical `recordHostVerification` records apply only to the exact
+session checked; they never enable sidecar steering. Other sessions are navigation-only until their own canvas joins them. No verification record is manufactured by joining. Other
+session status is unknown. The public API does not provide verified top-level
+App dev creation or an App host ID. Lane claims require a configured, actually
+observed host ID; no hostname or invented capability substitutes for it.
 
-Record bindings are a separate, mode-0600 user-local index. Each binding records
-the canonical Git common directory, full Clips ref and kind, plus the actual SDK
-session ID. It lets the adapter avoid unrelated sessions; it is not a Clips
-record and is not treated as authenticated host metadata. Claimed manager reuse
-requires both this binding and matching observed SDK Git context. Missing or
-conflicting evidence fails closed.
+## Reload and evidence
 
-Per-record launches are serialized across adapter processes with an exclusive
-user-local lock held through prompt delivery. A process crash leaves the lock
-in place; first verify that no launch is active, then remove that exact lock to
-recover. The adapter never guesses whether a recorded lock is stale.
+After source edits, call `extensions_reload` in the actual Copilot session, or
+`session.rpc.extensions.reload()` on that joined connection. Then reopen the
+same Clips Work canvas instance. Refresh only rereads data from loaded code.
+The `inspect_clips_runtime` action reports loaded module hashes, actual
+process/interpreter identity, current metadata and bindings. Successful
+source installation alone is not successful native activation.

@@ -35,7 +35,8 @@ export function recordPrompt(record, context = {}) {
     parent.trim(),
     description ? `Description:\n${description}` : '',
     context.lane ? `Strategic Lane: ${context.lane.ref} — ${context.lane.title}` : '',
-    'Use the canonical Clips CLI and record store. Read the record and blockers before acting. Keep this Copilot App session as the steerable top-level work session. Report concrete implementation, checks, and any blocked behavior; do not claim runtime or visual checks that were not performed.',
+    'Use the canonical Clips CLI and record store. Read the record and blockers before acting. This message uses the current joined Copilot session; joining does not prove native App visibility or top-level parentage. Report concrete results and checks without claiming unperformed runtime or visual verification.',
+    kind === 'lane' ? 'Remain coordination-only. Delegate complete outcomes to separately verified top-level dev sessions. Do not implement Goal work in this manager session. If the host has no supported way to create or steer those sessions, report that dependency.' : 'Own the requested engineering outcome and its verification. Follow the current user authorization and the canonical Clips task contracts.',
   ].filter(Boolean).join('\n\n');
 }
 

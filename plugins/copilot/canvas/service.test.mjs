@@ -17,7 +17,7 @@ function fixture() {
     warnings: [],
   };
   const runtime = {
-    async hostCapabilities() { return { appSessionVisibilityVerified: true, hostIdConfigured: true }; },
+    async hostCapabilities() { return { appSessionVisibilityVerified: true, canSendToCurrentSession: true, hostIdConfigured: true }; },
     async listBoard(projectPath) { calls.push(['listBoard', projectPath]); return board; },
     async viewRecord(ref, projectPath) { calls.push(['viewRecord', ref, projectPath]); return { ref, title: 'Full record' }; },
     async recordCommand(args, projectPath) { calls.push(['recordCommand', args, projectPath]); return { ok: true }; },
@@ -68,10 +68,10 @@ test('human and agent actions share canonical record operations and reject unsaf
   await service.action({ instanceId: 'actions', actionName: 'add_label', input: { ref: '#g001', labelId: 'urgent' } });
   const create = await service.dispatch('actions', 'create_task', { goal_ref: '#g001', title: 'New Task', description: 'Details', acceptance_criteria: ['The action is observable.'] });
   assert.ok(create.state);
-  assert.deepEqual(f.calls.find((call) => call[0] === 'recordCommand' && call[1][0] === 'task')[1].slice(0, 4), ['task', 'status', 'g001', 't01']);
+  assert.deepEqual(f.calls.find((call) => call[0] === 'recordCommand' && call[1][0] === 'task')[1].slice(0, 4), ['task', 'status', '#g001#t01', 'in_progress']);
   assert.deepEqual(f.calls.find((call) => call[0] === 'recordCommand' && call[1][0] === 'label')[1], ['label', 'add', '#g001', 'urgent']);
   const taskCreate = f.calls.find((call) => call[0] === 'recordCommand' && call[1][0] === 'task' && call[1][1] === 'create')[1];
-  assert.equal(taskCreate[2], 'g001');
+  assert.equal(taskCreate[2], '#g001');
   assert.deepEqual(JSON.parse(taskCreate[3]).acceptance_criteria, ['The action is observable.']);
   await assert.rejects(service.dispatch('actions', 'create_task', { goal_ref: '#g001', title: 'Weak Task' }), /needs 1–12 observable acceptance criteria/);
   await assert.rejects(service.dispatch('actions', 'set_status', { ref: '#g001', status: 'force' }), /Unsupported Clips status/);
@@ -116,14 +116,14 @@ test('unverified Copilot App capability and unreadable Lane ownership fail close
   t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
   await service.open({ instanceId: 'unverified', sessionId: 'host', session: { workingDirectory: '/repo' } });
   assert.equal((await service.state('unverified')).hostCapabilities.appSessionVisibilityVerified, false);
-  await assert.rejects(service.dispatch('unverified', 'launch', { ref: '#g001' }), /not been verified|disabled until this host has verified/);
+  await assert.rejects(service.dispatch('unverified', 'launch', { ref: '#g001' }), /requires a joined current session/);
   assert.deepEqual(await service.dispatch('unverified', 'open_session', { sessionId: 'session-1' }), {
     sessionId: 'session-1', url: 'ghapp://sessions/session-1', appVisibility: 'unverified',
   });
-  await assert.rejects(service.dispatch('unverified', 'steer', { sessionId: 'session-1', prompt: 'Continue' }), /visibility has not been verified/);
+  await assert.rejects(service.dispatch('unverified', 'steer', { sessionId: 'session-1', prompt: 'Continue' }), /not joined here/);
   assert.equal(f.calls.some((call) => call[0] === 'launchRecord'), false);
 
-  f.runtime.hostCapabilities = async () => ({ appSessionVisibilityVerified: true, hostIdConfigured: true });
+  f.runtime.hostCapabilities = async () => ({ appSessionVisibilityVerified: true, canSendToCurrentSession: true, hostIdConfigured: true });
   f.board.lanes[0].manager_claim = null;
   f.board.lanes[0].manager_claim_error = 'corrupt claim';
   await assert.rejects(service.dispatch('unverified', 'launch', { ref: '#l001' }), /Ownership for Lane.*unavailable/);
@@ -149,4 +149,60 @@ test('local canvas bridge requires its per-process token and binds routes to ope
   await service.open({ instanceId: 'other-instance', sessionId: 'other-host', session: { workingDirectory: '/repo' } });
   const crossInstance = await fetch(`${canvasUrl.origin}/api/other-instance?token=${encodeURIComponent(token)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'focus', input: { ref: '#l001' } }) });
   assert.equal(crossInstance.status, 403, 'one open canvas token cannot mutate another canvas instance');
+});
+
+test('same panel IDs in different sessions and projects retain independent focus and project choice', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-panel-scope-'));
+  const f = fixture();
+  const services = [];
+  const make = () => { const service = createCanvasService({ runtime: f.runtime, dataDir }); services.push(service); return service; };
+  t.after(async () => { await Promise.all(services.map(service => service.shutdown())); await rm(dataDir, { recursive: true, force: true }); });
+  const a = make();
+  const ctx = { instanceId: 'same', sessionId: 'session-a', input: { projectPath: '/initial' }, session: { workingDirectory: '/host-cwd' } };
+  const first = await a.open(ctx);
+  await a.dispatch('same', 'focus', { ref: '#g001' });
+  assert.equal((await a.open(ctx)).url, first.url, 'reopening preserves the live token');
+  await a.dispatch('same', 'set_project', { projectPath: '/chosen' });
+  assert.equal((await a.state('same')).focus, null, 'focus does not cross projects');
+  await a.dispatch('same', 'focus', { ref: '#l001' });
+  const b = make();
+  await b.open({ ...ctx, sessionId: 'session-b' });
+  assert.equal((await b.state('same')).focus, null);
+  assert.equal((await b.state('same')).projectPath, '/initial');
+  await a.shutdown();
+  const reopened = make();
+  await reopened.open(ctx);
+  assert.equal((await reopened.state('same')).projectPath, '/chosen');
+  assert.equal((await reopened.state('same')).focus, '#l001');
+  await reopened.dispatch('same', 'set_project', { projectPath: '/initial' });
+  assert.equal((await reopened.state('same')).focus, '#g001');
+});
+
+test('canonical board survives a session catalog outage with an explicit warning', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-catalog-outage-'));
+  const f = fixture();
+  f.runtime.listSessions = async () => { throw new Error('catalog unavailable'); };
+  const service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'panel', sessionId: 'host', input: { projectPath: '/repo' } });
+  const state = await service.state('panel');
+  assert.equal(state.goals[0].ref, '#g001');
+  assert.match(state.warnings[0], /catalog unavailable/);
+});
+
+test('namespaced status and Task creation preserve the exact selected canonical ref', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-namespaced-actions-'));
+  const f = fixture();
+  f.board.goals[0].ref = '#alice#g001';
+  f.board.goals[0].tasks[0].ref = '#alice#g001#t01';
+  const service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'panel', sessionId: 'host', input: { projectPath: '/repo' } });
+  await service.dispatch('panel', 'set_status', { ref: '#alice#g001', status: 'in_progress' });
+  await service.dispatch('panel', 'set_status', { ref: '#alice#g001#t01', status: 'in_progress' });
+  await service.dispatch('panel', 'create_task', { goal_ref: '#alice#g001', title: 'Task', acceptance_criteria: ['Observable.'] });
+  const commands = f.calls.filter(([kind]) => kind === 'recordCommand').map(([, args]) => args);
+  assert.deepEqual(commands[0], ['goal', 'status', '#alice#g001', 'in_progress']);
+  assert.deepEqual(commands[1], ['task', 'status', '#alice#g001#t01', 'in_progress']);
+  assert.equal(commands[2][2], '#alice#g001');
 });
