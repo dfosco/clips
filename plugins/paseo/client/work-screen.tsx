@@ -15,6 +15,7 @@ import { navigateToAgent, useRuntime } from "./runtime";
 import { focusScope, focusedLane, goalGroup, isActive, revealStartedWorkspace, workspaceLane, type LaneFocus, type WorkFilter } from "./lane-focus";
 import { getFocusIntent, getWorkspaceFocusIntent, projectAfterFocusIntent, requestLaneFocus, subscribeFocusIntent } from "./focus-intent";
 import { LabelChips, LabelManager } from "./labels";
+import { uniqueRunningAgentCount } from "./running-count";
 
 type Theme = PluginSurfaceProps["theme"];
 type Start = (ref: string, mode: StartMode, workspaceId?: string) => void;
@@ -135,19 +136,27 @@ function WorkRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [workspaceChoicesOpen, setWorkspaceChoicesOpen] = useState(false);
   const [agentChoicesOpen, setAgentChoicesOpen] = useState(false);
+  const [menuTop, setMenuTop] = useState(48);
   const canStart = isActive(work.status);
-  const hasWorkspace = Boolean(execution.workspaceId);
+  const hasWorkspace = Boolean(execution.workspaceId &&
+    availableWorkspaces.some((workspace) => workspace.id === execution.workspaceId));
   const running = execution.status === "running";
   const needsInput = execution.status === "attention";
   const managerOwners = work.kind === "lane" ? work.managerClaim?.owners ?? [] : [];
   const managerError = work.kind === "lane" ? work.managerClaimError : null;
   const managed = managerOwners.length > 0;
   const occupied = running || needsInput || managed || Boolean(managerError);
-  const activeAgents = managed ? execution.agents : execution.agents.filter(isActiveAgent);
+  const navigableAgents = execution.agents.filter((agent) => Boolean(agent.workspaceId &&
+    availableWorkspaces.some((workspace) => workspace.id === agent.workspaceId)) &&
+    agent.attentionReason !== "error" && agent.attentionReason !== "finished" &&
+    (agent.status === "idle" || isActiveAgent(agent)));
   const canStartAgent = loaded && canStart && !occupied;
 
   return (
     <View style={{
+      position: menuOpen || workspaceChoicesOpen || agentChoicesOpen ? "relative" : undefined,
+      zIndex: menuOpen || workspaceChoicesOpen || agentChoicesOpen ? 10 : undefined,
+      elevation: menuOpen || workspaceChoicesOpen || agentChoicesOpen ? 10 : undefined,
       paddingLeft: 12 + Math.max(0, level - 1) * 12,
       paddingRight: 12,
       paddingVertical: level === 2 ? 10 : 14,
@@ -155,7 +164,10 @@ function WorkRow({
       borderBottomColor: theme.colors.border,
       gap: 8,
     }}>
-      <View style={{
+      <View onLayout={(event) => {
+        const { y, height } = event.nativeEvent.layout;
+        setMenuTop(y + height - 4);
+      }} style={{
         flexDirection: compact ? "column" : "row",
         alignItems: compact ? "stretch" : "center",
         gap: 10,
@@ -190,24 +202,26 @@ function WorkRow({
           </View>
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          {managed && loaded && !activeAgents.length ? (
+          {managed && loaded && !navigableAgents.length ? (
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>● Manager unavailable</Text>
           ) : managed && execution.status === "idle" ? (
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>● Manager idle</Text>
           ) : managerError ? (
             <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>Ownership unavailable</Text>
           ) : <RuntimeLabel execution={execution} theme={theme} loaded={loaded} />}
-          <Action label="Labels" accessibilityLabel={`Labels for ${work.ref}`} theme={theme} subtle onPress={onLabels} />
-          {occupied && onOpenAgent && activeAgents.length ? (
-            <Action label="Go to agent" theme={theme} disabled={!onOpenAgent || !activeAgents.length}
+          {navigableAgents.length && onOpenAgent ? (
+            <Action label="Go to agent" theme={theme} disabled={!onOpenAgent || !navigableAgents.length}
               onPress={() => {
-                if (activeAgents.length === 1) onOpenAgent?.(activeAgents[0]);
-                else setAgentChoicesOpen((open) => !open);
+                if (navigableAgents.length === 1) onOpenAgent?.(navigableAgents[0]);
+                else {
+                  setWorkspaceChoicesOpen(false);
+                  setAgentChoicesOpen((open) => !open);
+                }
               }} />
           ) : null}
-          {occupied && (!onOpenAgent || !activeAgents.length) ? (
+          {occupied && (!onOpenAgent || !navigableAgents.length) ? (
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-              {!activeAgents.length ? "Agent unavailable; contact the manager" : "Agent navigation unavailable in this Paseo client"}
+              {!navigableAgents.length ? "Agent unavailable; contact the manager" : "Agent navigation unavailable in this Paseo client"}
             </Text>
           ) : null}
           {hasWorkspace && !occupied ? (
@@ -231,7 +245,10 @@ function WorkRow({
               label="Run in workspace"
               theme={theme}
               disabled={busy}
-              onPress={() => setWorkspaceChoicesOpen((open) => !open)}
+              onPress={() => {
+                setAgentChoicesOpen(false);
+                setWorkspaceChoicesOpen((open) => !open);
+              }}
             />
           ) : null}
           {work.kind === "task" && canStartAgent ? (
@@ -251,20 +268,19 @@ function WorkRow({
               onPress={() => onStart(work.ref, "workspace")}
             />
           ) : null}
-          {work.kind !== "task" ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`More actions for ${work.kind} ${work.ref}`}
-              accessibilityState={{ expanded: menuOpen }}
-              onPress={() => {
-                setMenuOpen((open) => !open);
-                setWorkspaceChoicesOpen(false);
-              }}
-              style={{ padding: 8, borderRadius: 7, backgroundColor: menuOpen ? theme.colors.surface2 : "transparent" }}
-            >
-              <Icon name="MoreVertical" size={17} color={theme.colors.foregroundMuted} />
-            </Pressable>
-          ) : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`More actions for ${work.kind} ${work.ref}`}
+            accessibilityState={{ expanded: menuOpen }}
+            onPress={() => {
+              setMenuOpen((open) => !open);
+              setWorkspaceChoicesOpen(false);
+              setAgentChoicesOpen(false);
+            }}
+            style={{ padding: 8, borderRadius: 7, backgroundColor: menuOpen ? theme.colors.surface2 : "transparent" }}
+          >
+            <Icon name="MoreVertical" size={17} color={theme.colors.foregroundMuted} />
+          </Pressable>
         </View>
       </View>
       {work.kind === "goal" ? <RecordContext key={work.ref} work={work} theme={theme} /> : null}
@@ -272,41 +288,50 @@ function WorkRow({
         Managers: {managerOwners.map((owner) => owner.contact || `${owner.runtime} ${owner.session_id} on ${owner.host}`).join("; ")}
       </Text> : null}
       {managerError ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{managerError}</Text> : null}
-      {menuOpen && work.kind !== "task" ? (
+      {menuOpen ? (
         <View accessibilityRole="menu" style={{
-          alignSelf: "flex-end", minWidth: 190, padding: 5, gap: 2,
+          position: "absolute", top: menuTop, right: 12, zIndex: 20, elevation: 20,
+          width: 220, maxWidth: "100%", maxHeight: 240,
+          padding: 5, gap: 2,
           borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8,
           backgroundColor: theme.colors.surface0,
         }}>
-          {work.kind === "lane" ? (
-            <MenuItem label="Focus lane" theme={theme} onPress={() => {
+          <ScrollView style={{ maxHeight: 230 }}>
+            <MenuItem label="Labels" theme={theme} onPress={() => {
               setMenuOpen(false);
-              onFocusLane(work);
+              onLabels();
             }} />
-          ) : null}
-          {work.kind === "lane" && closedGoalsCount > 0 && onToggleClosedGoals ? (
-            <MenuItem label={closedGoalsVisible ? "Hide closed goals" : "Show closed goals"} theme={theme}
-              onPress={() => {
+            {work.kind === "lane" ? (
+              <MenuItem label="Focus lane" theme={theme} onPress={() => {
                 setMenuOpen(false);
-                onToggleClosedGoals();
+                onFocusLane(work);
               }} />
-          ) : null}
-          <MenuItem label={work.kind === "lane" ? "Close lane…" : "Close goal"} theme={theme}
-            disabled={busy || work.status === "closed"} onPress={() => {
-            setMenuOpen(false);
-            onClose(work);
-          }} />
-          {canStartAgent ? <MenuItem label="Create workspace" theme={theme} disabled={busy} onPress={() => {
-            setMenuOpen(false);
-            onStart(work.ref, "workspace");
-          }} /> : null}
+            ) : null}
+            {work.kind === "lane" && closedGoalsCount > 0 && onToggleClosedGoals ? (
+              <MenuItem label={closedGoalsVisible ? "Hide closed goals" : "Show closed goals"} theme={theme}
+                onPress={() => {
+                  setMenuOpen(false);
+                  onToggleClosedGoals();
+                }} />
+            ) : null}
+            {work.kind !== "task" ? <MenuItem label={work.kind === "lane" ? "Close lane…" : "Close goal"} theme={theme}
+              disabled={busy || work.status === "closed"} onPress={() => {
+                setMenuOpen(false);
+                onClose(work);
+              }} /> : null}
+            {canStartAgent && work.kind !== "task" ? <MenuItem label="Create workspace" theme={theme} disabled={busy} onPress={() => {
+              setMenuOpen(false);
+              onStart(work.ref, "workspace");
+            }} /> : null}
+          </ScrollView>
         </View>
       ) : null}
-      {agentChoicesOpen && occupied && activeAgents.length > 1 ? (
-        <View accessibilityRole="menu" style={{ alignSelf: "flex-end", minWidth: 220, padding: 5,
+      {agentChoicesOpen && navigableAgents.length > 1 ? (
+        <View accessibilityRole="menu" style={{ position: "absolute", top: menuTop, right: 12,
+          zIndex: 20, elevation: 20, width: 240, maxWidth: "100%", padding: 5,
           borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, backgroundColor: theme.colors.surface0 }}>
           <ScrollView style={{ maxHeight: 220 }}>
-            {activeAgents.map((agent) => (
+            {navigableAgents.map((agent) => (
               <MenuItem key={agent.id} label={`${agent.title || agent.id} · ${agent.status} · ${agent.workspaceId}`}
                 theme={theme} onPress={() => { setAgentChoicesOpen(false); onOpenAgent?.(agent); }} />
             ))}
@@ -315,7 +340,8 @@ function WorkRow({
       ) : null}
       {workspaceChoicesOpen && canStartAgent && work.kind !== "task" ? (
         <View accessibilityRole="menu" style={{
-          alignSelf: "flex-end", minWidth: 220, padding: 5,
+          position: "absolute", top: menuTop, right: 12, zIndex: 20, elevation: 20,
+          width: 240, maxWidth: "100%", maxHeight: 240, padding: 5,
           borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8,
           backgroundColor: theme.colors.surface0,
         }}>
@@ -576,6 +602,7 @@ export function WorkScreen({
   const [launchRequest, setLaunchRequest] = useState<{ ref: string; title: string; workspaceId?: string } | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
   const [focus, setFocus] = useState<LaneFocus | null>(null);
+  const [focusedLaneMenuOpen, setFocusedLaneMenuOpen] = useState(false);
   const scope = focusScope(host.id, projectId, currentWorkspaceId);
   const focusIntent = useSyncExternalStore(subscribeFocusIntent, () => getFocusIntent(scope), () => getFocusIntent(scope));
   const automaticLane = workspaceLane(board.data?.lanes ?? [], project?.projectIds ?? [], currentWorkspaceId,
@@ -614,7 +641,13 @@ export function WorkScreen({
   const scopedGoals = (board.data?.goals ?? []).filter((goal) => !laneInFocus || laneInFocus.goalRefs.includes(goal.ref));
   const runningTasks = scopedGoals.flatMap((g) => g.tasks).filter((t) => execution(t).status === "running").length;
   const runningGoals = scopedGoals.filter((g) => execution(g).status === "running").length;
-  const runningLanes = (board.data?.lanes ?? []).filter((lane) => (!laneInFocus || lane.ref === laneInFocus.ref) && execution(lane).status === "running").length;
+  const scopedLanes = (board.data?.lanes ?? []).filter((lane) => !laneInFocus || lane.ref === laneInFocus.ref);
+  const runningLanes = scopedLanes.filter((lane) => execution(lane).status === "running").length;
+  const runningAgentCount = uniqueRunningAgentCount([
+    ...scopedGoals.flatMap((goal) => goal.tasks.map((task) => execution(task))),
+    ...scopedGoals.map(execution),
+    ...scopedLanes.map(execution),
+  ]);
 
   const create = useMutation({
     mutationFn: ({ ref, mode, workspaceId, agentConfig }: {
@@ -754,7 +787,7 @@ export function WorkScreen({
     <View key={goal.ref} style={{
       margin: 12, marginTop: 0,
       borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8,
-      backgroundColor: theme.colors.surface0, overflow: "hidden",
+      backgroundColor: theme.colors.surface0, overflow: "visible",
     }}>
       {renderWork(goal, 1)}
       {isExpanded(goal) ? tasks.map((task) => renderWork(task, 2)) : null}
@@ -802,22 +835,40 @@ export function WorkScreen({
           </Text>
           {laneInFocus ? <LabelChips labels={laneInFocus.labels ?? []} theme={theme} /> : null}
         </View>
-        {laneInFocus && projectId ? (
-          <Action label="Labels" accessibilityLabel={`Labels for ${laneInFocus.ref}`} theme={theme} subtle
-            onPress={() => setLabelTarget({ hostId: host.id, projectId, ref: laneInFocus.ref })} />
-        ) : null}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh Clips and Paseo"
-          onPress={() => {
-            void cache.invalidateQueries({ queryKey: ["clips.projects", host.id] });
-            void cache.invalidateQueries({ queryKey: ["clips.board", host.id] });
-            void cache.invalidateQueries({ queryKey: ["clips-runtime", host.id] });
-          }}
-          style={{ padding: 8 }}
-        >
-          <Icon name="RefreshCw" size={18} color={theme.colors.foregroundMuted} />
-        </Pressable>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 4, position: "relative",
+          zIndex: focusedLaneMenuOpen ? 10 : undefined, elevation: focusedLaneMenuOpen ? 10 : undefined }}>
+          {laneInFocus && projectId ? <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`More actions for lane ${laneInFocus.ref}`}
+            accessibilityState={{ expanded: focusedLaneMenuOpen }}
+            onPress={() => setFocusedLaneMenuOpen((open) => !open)}
+            style={{ padding: 8, borderRadius: 7, backgroundColor: focusedLaneMenuOpen ? theme.colors.surface2 : "transparent" }}
+          >
+            <Icon name="MoreVertical" size={17} color={theme.colors.foregroundMuted} />
+          </Pressable> : null}
+          {focusedLaneMenuOpen && laneInFocus && projectId ? <View accessibilityRole="menu" style={{
+            position: "absolute", top: 36, right: 0, zIndex: 20, elevation: 20,
+            width: 190, maxWidth: "100%", padding: 5, gap: 2,
+            borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, backgroundColor: theme.colors.surface0,
+          }}>
+            <MenuItem label="Labels" theme={theme} onPress={() => {
+              setFocusedLaneMenuOpen(false);
+              setLabelTarget({ hostId: host.id, projectId, ref: laneInFocus.ref });
+            }} />
+          </View> : null}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh Clips and Paseo"
+            onPress={() => {
+              void cache.invalidateQueries({ queryKey: ["clips.projects", host.id] });
+              void cache.invalidateQueries({ queryKey: ["clips.board", host.id] });
+              void cache.invalidateQueries({ queryKey: ["clips-runtime", host.id] });
+            }}
+            style={{ padding: 8 }}
+          >
+            <Icon name="RefreshCw" size={18} color={theme.colors.foregroundMuted} />
+          </Pressable>
+        </View>
         {onOpenSettings ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Clips settings" onPress={onOpenSettings} style={{ padding: 8 }}>
             <Icon name="Settings" size={18} color={theme.colors.foregroundMuted} />
@@ -872,7 +923,7 @@ export function WorkScreen({
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
               <FilterChip title="Open" selected={filter === "open"} onPress={() => setFilter("open")} theme={theme} />
               <FilterChip title="Running"
-                count={runtime.data && runningTasks + runningGoals + runningLanes > 0 ? runningTasks + runningGoals + runningLanes : undefined}
+                count={runtime.data && runningAgentCount > 0 ? runningAgentCount : undefined}
                 selected={filter === "running"} onPress={() => setFilter("running")} theme={theme} />
               <FilterChip title="All" selected={filter === "all"} onPress={() => setFilter("all")} theme={theme} />
             </View>
@@ -927,7 +978,7 @@ export function WorkScreen({
                 contentContainerStyle={{ gap: 16, alignItems: "flex-start", paddingBottom: 12 }}>
                 {focusGroup.entries.map(({ goal, tasks }) => (
                   <View key={goal.ref} style={{ width: columnWidth, borderWidth: 1, borderColor: theme.colors.border,
-                    borderRadius: 10, backgroundColor: theme.colors.surface1, overflow: "hidden" }}>
+                    borderRadius: 10, backgroundColor: theme.colors.surface1, overflow: "visible" }}>
                     {renderWork(goal, 1, undefined, true)}
                     {isExpanded(goal) ? <>
                       {tasks.map((task) => renderWork(task, 2))}
@@ -964,7 +1015,7 @@ export function WorkScreen({
               <View key={lane.ref} style={{
                 width: columnWidth,
                 borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10,
-                backgroundColor: theme.colors.surface1, overflow: "hidden",
+                backgroundColor: theme.colors.surface1, overflow: "visible",
               }}>
                 {renderWork(lane, 0, {
                   count: filter === "open" ? closedGoals.length : 0,
@@ -1007,7 +1058,7 @@ export function WorkScreen({
               <View style={{
                 width: columnWidth,
                 borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10,
-                backgroundColor: theme.colors.surface1, overflow: "hidden",
+                backgroundColor: theme.colors.surface1, overflow: "visible",
               }}>
                 <View style={{ paddingHorizontal: 13, paddingTop: 13, paddingBottom: entries.length > 0 ? 4 : 13, gap: 5 }}>
                   <Text style={{ color: theme.colors.foregroundMuted, fontWeight: "600", fontSize: 13 }}>

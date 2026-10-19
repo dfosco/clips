@@ -18,10 +18,18 @@ vi.mock("@getpaseo/plugin/client/react-native", () => ({
   }),
   TextInput: ({ accessibilityLabel, placeholder }: any) => createElement("input", { "aria-label": accessibilityLabel, placeholder }),
   useToast: () => ({ show: vi.fn() }),
-  ScrollView: ({ children, accessibilityLabel }: any) => createElement("section", { "aria-label": accessibilityLabel }, children),
+  ScrollView: ({ children, accessibilityLabel, style }: any) => createElement("section", {
+    "aria-label": accessibilityLabel,
+    "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
+  }, children),
 }));
 vi.mock("react-native", () => ({
-  View: ({ children, accessibilityRole }: any) => createElement("div", { role: accessibilityRole }, children),
+  View: ({ children, accessibilityRole, style }: any) => createElement("div", {
+    role: accessibilityRole,
+    "data-position": style?.position,
+    "data-max-width": style?.maxWidth == null ? undefined : String(style.maxWidth),
+    "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
+  }, children),
   Text: ({ children }: any) => createElement("span", null, children),
   Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, role: accessibilityRole, disabled, onClick: onPress }, children),
   TextInput: ({ accessibilityLabel, value, onChangeText }: any) => createElement("input", {
@@ -63,6 +71,81 @@ beforeEach(() => {
 });
 
 describe("focused lane rendering", () => {
+  it("keeps the Goal action menu over the card, without inserting space after a long description", async () => {
+    const description = `Goal summary. ${"Long Goal context remains in the card. ".repeat(12)}Goal final sentence.`;
+    state.board.goals = [{ ...goal, description }];
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact: true }, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      expect(container.textContent).not.toContain("Goal final sentence.");
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Goal description #g001"]')!.click(); });
+      expect(container.textContent).toContain("Goal final sentence.");
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="More actions for goal #g001"]')!.click(); });
+
+      const menu = container.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      // The menu must overlay its Goal card instead of joining RecordContext in normal flow.
+      expect(["absolute", "fixed"]).toContain(menu!.dataset.position);
+      expect(menu!.dataset.maxWidth).toBe("100%");
+      expect(menu!.dataset.maxHeight).toBe("240");
+      expect(container.textContent).toContain("Goal summary.");
+      expect(container.textContent).toContain("Goal final sentence.");
+      expect(container.querySelector('[aria-label="More actions for goal #g001"]')!.getAttribute("aria-expanded")).toBe("true");
+
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="More actions for goal #g001"]')!.click(); });
+      expect(container.querySelector('[role="menu"]')).toBeNull();
+      expect(container.textContent).toContain("Goal final sentence.");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it("selecting Close goal dismisses the menu and opens the existing close dialog", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="More actions for goal #g001"]')!.click(); });
+      const close = [...container.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === "Close goal");
+      expect(close).toBeDefined();
+      await act(async () => { close!.click(); });
+      expect(container.querySelector('[role="menu"]')).toBeNull();
+      expect(container.querySelector('[aria-label="Close goal"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="More actions for goal #g001"]')!.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it("keeps workspace choices in an overlay scroll container in compact layout", async () => {
+    state.runtime.workspaces = Array.from({ length: 12 }, (_, index) => ({
+      id: `workspace-${index}`, projectId: "p1", name: `Workspace ${index}`, branch: "feature/example", status: "ready",
+    }));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact: true } })); });
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Run in workspace"]')!.click(); });
+      const menu = container.querySelector<HTMLElement>('[role="menu"]');
+      expect(menu).not.toBeNull();
+      expect(menu!.dataset.position).toBe("absolute");
+      expect(menu!.querySelector("[data-max-height]")?.getAttribute("data-max-height")).toBe("220");
+      expect(menu!.querySelectorAll('[role="menuitem"]')).toHaveLength(12);
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
   it.each([false, true])("shows Tasks only for expanded Goals and retains expansion through Back (compact: %s)", async (compact) => {
     const secondTask = { ...task, ref: "#g002#t01", title: "Second Task" };
     const secondGoal = { ...goal, ref: "#g002", title: "Second Goal", tasks: [secondTask] };
@@ -190,7 +273,8 @@ describe("focused lane rendering", () => {
         await act(async () => { collapse.click(); });
         expect(container.textContent).not.toContain(kind + " final sentence.");
       }
-      expect(container.querySelector('[aria-label="Labels for #l001"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="More actions for lane #l001"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="Labels for #l001"]')).toBeNull();
       expect(container.querySelector('[aria-label="Back to Clips"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Run"]')).not.toBeNull();
       expect(container.textContent).not.toContain("Ship package");
@@ -215,6 +299,10 @@ describe("focused lane rendering", () => {
 
   it("chooses the exact agent across workspaces and restores launches after execution ends", async () => {
     state.board = { lanes: [], goals: [{ ...goal, laneId: null, tasks: [] }], warnings: [] };
+    state.runtime.workspaces = [
+      { id: "w1", projectId: "p1", name: "First workspace", branch: "", status: "ready" },
+      { id: "w2", projectId: "p1", name: "Second workspace", branch: "", status: "ready" },
+    ];
     state.runtime.agents = [
       { id: "first", workspaceId: "w1", status: "running", requiresAttention: false, attentionReason: null, labels: { "clips.ref": goal.ref, "clips.projectId": "p1" }, title: "First worker" },
       { id: "second", workspaceId: "w2", status: "attention", requiresAttention: true, attentionReason: "permission", labels: { "clips.ref": goal.ref, "clips.projectId": "p1" }, title: "Second worker" },
@@ -251,6 +339,86 @@ describe("focused lane rendering", () => {
     }
   });
 
+  it("keeps idle-agent and workspace choice menus mutually exclusive", async () => {
+    state.board = { lanes: [], goals: [{ ...goal, laneId: null, tasks: [] }], warnings: [] };
+    state.runtime.workspaces = [
+      { id: "w1", projectId: "p1", name: "First workspace", branch: "", status: "ready" },
+      { id: "w2", projectId: "p1", name: "Second workspace", branch: "", status: "ready" },
+    ];
+    state.runtime.agents = ["first", "second"].map((id, index) => ({
+      id, workspaceId: index ? "w2" : "w1", status: "idle", requiresAttention: false, attentionReason: null,
+      labels: { "clips.ref": goal.ref, "clips.projectId": "p1" }, title: `${id} idle worker`,
+    }));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      const navigation = { openWorkspace: vi.fn(), openAgent: vi.fn() };
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, navigation, layout: { ...props.layout, compact: true } })); });
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Go to agent"]')!.click(); });
+      expect(container.querySelector('[role="menu"]')?.textContent).toContain("first idle worker");
+      expect(container.querySelector('[role="menu"]')?.textContent).not.toContain("First workspace");
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Run in workspace"]')!.click(); });
+      expect(container.querySelectorAll('[role="menu"]')).toHaveLength(1);
+      expect(container.querySelector('[role="menu"]')?.textContent).toContain("First workspace");
+      expect(container.querySelector('[role="menu"]')?.textContent).not.toContain("first idle worker");
+      await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Go to agent"]')!.click(); });
+      expect(container.querySelectorAll('[role="menu"]')).toHaveLength(1);
+      expect(container.querySelector('[role="menu"]')?.textContent).toContain("first idle worker");
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it("shows Go to agent for a valid idle associated agent and opens it without starting another", async () => {
+    state.board = { lanes: [], goals: [{ ...goal, laneId: null, tasks: [] }], warnings: [] };
+    state.runtime.agents = [{ id: "idle-worker", workspaceId: "w1", status: "idle", requiresAttention: false,
+      attentionReason: null, labels: { "clips.ref": goal.ref, "clips.projectId": "p1" }, title: "Idle worker" }];
+    const calls: string[] = [];
+    const navigation = {
+      openWorkspace: ({ workspaceId }: { workspaceId: string }) => { calls.push(`workspace:${workspaceId}`); },
+      openAgent: ({ agentId }: { agentId: string }) => { calls.push(`agent:${agentId}`); },
+    };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, navigation, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      expect(container.textContent).toContain("Workspace idle");
+      expect(container.textContent).not.toContain("● Running ·");
+      const go = container.querySelector<HTMLButtonElement>('button[aria-label="Go to agent"]');
+      expect(go).not.toBeNull();
+      await act(async () => { go!.click(); });
+      expect(calls).toEqual(["workspace:w1", "agent:idle-worker"]);
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it.each(["missing workspace", "foreign project", "finished agent"]) (
+    "does not offer Go to agent for a %s target", (caseName) => {
+      state.board = { lanes: [], goals: [{ ...goal, laneId: null, tasks: [] }], warnings: [] };
+      const agent = { id: "stale", workspaceId: "w1", status: "idle", requiresAttention: false,
+        attentionReason: null, labels: { "clips.ref": goal.ref, "clips.projectId": "p1" }, title: "Stale worker" };
+      if (caseName === "missing workspace") agent.workspaceId = "missing";
+      if (caseName === "foreign project") {
+        agent.workspaceId = "foreign";
+        agent.labels["clips.projectId"] = "p2";
+        state.runtime.workspaces = [...state.runtime.workspaces,
+          { id: "foreign", projectId: "p2", name: "Foreign workspace", branch: "", status: "ready" }];
+      }
+      if (caseName === "finished agent") agent.attentionReason = "finished" as any;
+      state.runtime.agents = [agent];
+      const html = renderToStaticMarkup(createElement(WorkScreen, { ...props,
+        navigation: { openWorkspace: vi.fn(), openAgent: vi.fn() }, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" }));
+      expect(html).not.toContain('aria-label="Go to agent"');
+      if (caseName === "missing workspace") expect(html).not.toContain('aria-label="Open workspace"');
+    });
+
   it("places Back above lane title and exposes collapsed goal columns", () => {
     const html = render();
     expect(html.indexOf("Back to Clips")).toBeLessThan(html.indexOf("Publish releases"));
@@ -264,14 +432,15 @@ describe("focused lane rendering", () => {
     expect(html).toContain('aria-label="Run"');
   });
 
-  it("shows assigned Lane labels and a Labels action in the workspace-focused header", () => {
+  it("shows assigned Lane labels and a kebab action in the workspace-focused header", () => {
     state.board.lanes = [{ ...lane, labels: [{ id: "review", name: "Ready to review", color: "#8b5cf6" }] }];
     const html = render();
     expect(html).toContain("Ready to review");
-    expect(html).toContain('aria-label="Labels for #l001"');
+    expect(html).toContain('aria-label="More actions for lane #l001"');
+    expect(html).not.toContain('aria-label="Labels for #l001"');
   });
 
-  it("opens the Lane label manager from the workspace-focused header", async () => {
+  it("opens the focused Lane label manager from its kebab menu", async () => {
     const review = { id: "review", name: "Ready to review", color: "#8b5cf6" };
     state.board.lanes = [{ ...lane, labels: [review] }];
     state.board.labels = [review];
@@ -281,11 +450,49 @@ describe("focused lane rendering", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     try {
       await act(async () => { root.render(createElement(WorkScreen, { ...props, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
-      const labels = container.querySelector<HTMLButtonElement>('button[aria-label="Labels for #l001"]');
-      expect(labels).not.toBeNull();
+      const kebab = container.querySelector<HTMLButtonElement>('button[aria-label="More actions for lane #l001"]');
+      expect(kebab).not.toBeNull();
+      await act(async () => { kebab!.click(); });
+      const labels = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((button) => button.textContent === "Labels");
+      expect(labels).toBeDefined();
       await act(async () => { labels!.click(); });
       expect(container.querySelector('[aria-label="Labels · #l001"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Assign Ready to review to #l001"]')).not.toBeNull();
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it.each([
+    { kind: "lane", ref: "#l001" },
+    { kind: "goal", ref: "#g001" },
+    { kind: "task", ref: "#g001#t01" },
+  ])("keeps Labels accessible from the $kind kebab menu", async ({ kind, ref }) => {
+    const review = { id: "review", name: "Ready to review", color: "#8b5cf6" };
+    state.board = {
+      lanes: [{ ...lane, labels: [review] }],
+      goals: [{ ...goal, labels: [review], tasks: [{ ...task, labels: [review] }] }, outside],
+      labels: [review], warnings: [],
+    };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, props)); });
+      if (kind === "task") {
+        await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click(); });
+      }
+      expect(container.querySelector(`[aria-label="Labels for ${ref}"]`)).toBeNull();
+      await act(async () => { container.querySelector<HTMLButtonElement>(`[aria-label="More actions for ${kind} ${ref}"]`)!.click(); });
+      const labels = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((button) => button.textContent === "Labels");
+      expect(labels).toBeDefined();
+      await act(async () => { labels!.click(); });
+      expect(container.querySelector(`[aria-label="Labels · ${ref}"]`)).not.toBeNull();
+      expect(container.querySelector(`[aria-label="Assign Ready to review to ${ref}"]`)).not.toBeNull();
     } finally {
       await act(async () => { root.unmount(); });
       (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
