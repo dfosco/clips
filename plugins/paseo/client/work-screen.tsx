@@ -79,6 +79,31 @@ function RuntimeLabel({ execution, theme, loaded }: { execution: Execution; them
   return <Text style={{ color, fontSize: 12, fontWeight: execution.status === "running" ? "600" : "400" }}>{labels[execution.status]}</Text>;
 }
 
+function RecordContext({ work, theme }: { work: Lane | Goal; theme: Theme }) {
+  const [expanded, setExpanded] = useState(false);
+  const description = work.description.trim();
+  if (!description) return null;
+  const long = description.length > 240;
+  const kind = work.kind === "lane" ? "Lane" : "Goal";
+  return (
+    <View style={{ gap: 4 }}>
+      <Text selectable style={{ color: theme.colors.foregroundMuted, fontSize: 13, lineHeight: 19 }}>
+        {long && !expanded ? short(description, 240) : description}
+      </Text>
+      {long ? (
+        <Pressable accessibilityRole="button"
+          accessibilityLabel={`${expanded ? "Collapse" : "Expand"} ${kind} description ${work.ref}`}
+          accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)}
+          style={{ alignSelf: "flex-start", paddingVertical: 6, paddingRight: 8 }}>
+          <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
+            {expanded ? "Show less" : "Show more"}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function WorkRow({
   work, level, execution, loaded, expanded, onToggle, onStart, onOpen, onOpenAgent, onClose, onFocusLane,
   onToggleClosedGoals, closedGoalsCount = 0, closedGoalsVisible = false,
@@ -157,7 +182,7 @@ function WorkRow({
               {work.title}
             </Text>
             <LabelChips labels={work.labels ?? []} theme={theme} />
-            {!expanded && work.description ? (
+            {work.kind !== "goal" && !expanded && work.description ? (
               <Text numberOfLines={2} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 }}>
                 {short(work.description)}
               </Text>
@@ -242,6 +267,7 @@ function WorkRow({
           ) : null}
         </View>
       </View>
+      {work.kind === "goal" ? <RecordContext key={work.ref} work={work} theme={theme} /> : null}
       {managed ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
         Managers: {managerOwners.map((owner) => owner.contact || `${owner.runtime} ${owner.session_id} on ${owner.host}`).join("; ")}
       </Text> : null}
@@ -309,7 +335,7 @@ function WorkRow({
       ) : null}
       {expanded ? (
         <View style={{ paddingLeft: 23, gap: 9 }}>
-          {work.description ? <Text style={{ fontSize: 13, lineHeight: 19, color: theme.colors.foreground }}>{work.description}</Text> : null}
+          {work.kind !== "goal" && work.description ? <Text style={{ fontSize: 13, lineHeight: 19, color: theme.colors.foreground }}>{work.description}</Text> : null}
           {work.scope ? <Detail title="Scope" value={work.scope} theme={theme} /> : null}
           {work.plan ? <Detail title="Plan" value={work.plan} theme={theme} /> : null}
           {work.decisions ? <Detail title="Decisions" value={work.decisions} theme={theme} /> : null}
@@ -798,6 +824,7 @@ export function WorkScreen({
           </Pressable>
         ) : null}
       </View>
+      {laneInFocus ? <RecordContext key={laneInFocus.ref} work={laneInFocus} theme={theme} /> : null}
       {projects.isLoading ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
       {projects.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not find Clips projects: {message(projects.error)}</Text> : null}
       {projects.data && !projects.data.projects.length ? (

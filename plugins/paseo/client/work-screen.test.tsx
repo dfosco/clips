@@ -23,7 +23,7 @@ vi.mock("@getpaseo/plugin/client/react-native", () => ({
 vi.mock("react-native", () => ({
   View: ({ children, accessibilityRole }: any) => createElement("div", { role: accessibilityRole }, children),
   Text: ({ children }: any) => createElement("span", null, children),
-  Pressable: ({ children, accessibilityLabel, accessibilityRole, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, role: accessibilityRole, disabled, onClick: onPress }, children),
+  Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, role: accessibilityRole, disabled, onClick: onPress }, children),
   TextInput: ({ accessibilityLabel }: any) => createElement("input", { "aria-label": accessibilityLabel }),
   ActivityIndicator: () => null,
 }));
@@ -61,6 +61,56 @@ beforeEach(() => {
 });
 
 describe("focused lane rendering", () => {
+  it.each([false, true])("expands Lane and Goal context independently from details (compact: %s)", async (compact) => {
+    const laneDescription = `Lane context. ${"Strategic scope and constraints. ".repeat(12)}Lane final sentence.`;
+    const goalDescription = `Goal context. ${"Implementation outcome and boundaries. ".repeat(12)}Goal final sentence.`;
+    state.board = { lanes: [{ ...lane, description: laneDescription }], goals: [{ ...goal, description: goalDescription }], warnings: [] };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => { root.render(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact }, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
+      expect(container.textContent).toContain("Lane context.");
+      expect(container.textContent).toContain("Goal context.");
+      expect(container.textContent).not.toContain("Lane final sentence.");
+      expect(container.textContent).not.toContain("Goal final sentence.");
+      expect(container.textContent!.indexOf("Lane context.")).toBeLessThan(container.textContent!.indexOf("Running now"));
+      expect(container.textContent!.indexOf("Goal context.")).toBeLessThan(container.textContent!.indexOf("Ship package"));
+      const details = container.querySelector('[aria-label="Show Goal details #g001"]')!;
+      for (const [kind, ref, fullText] of [["Lane", "#l001", laneDescription], ["Goal", "#g001", goalDescription]]) {
+        const expand = container.querySelector<HTMLButtonElement>(`[aria-label="Expand ${kind} description ${ref}"]`)!;
+        expect(expand.getAttribute("aria-expanded")).toBe("false");
+        await act(async () => { expand.click(); });
+        expect(container.textContent).toContain(fullText);
+        const collapse = container.querySelector<HTMLButtonElement>(`[aria-label="Collapse ${kind} description ${ref}"]`)!;
+        expect(collapse.getAttribute("aria-expanded")).toBe("true");
+        expect(details.getAttribute("aria-expanded")).toBe("false");
+        await act(async () => { collapse.click(); });
+        expect(container.textContent).not.toContain(kind + " final sentence.");
+      }
+      expect(container.querySelector('[aria-label="Labels for #l001"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="Back to Clips"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="Run"]')).not.toBeNull();
+    } finally {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    }
+  });
+
+  it("shows short descriptions once and omits empty context without expansion controls", () => {
+    state.board = { lanes: [{ ...lane, description: "Lane summary." }], goals: [{ ...goal, description: "Goal summary." }], warnings: [] };
+    const html = render();
+    expect(html.split("Lane summary.")).toHaveLength(2);
+    expect(html.split("Goal summary.")).toHaveLength(2);
+    expect(html).not.toContain("Expand Lane description");
+    expect(html).not.toContain("Expand Goal description");
+    state.board = { lanes: [{ ...lane, description: "  " }], goals: [{ ...goal, description: "\n" }], warnings: [] };
+    const empty = render();
+    expect(empty).not.toContain("Show more");
+    expect(empty).not.toContain("Collapse Goal description");
+  });
+
   it("chooses the exact agent across workspaces and restores launches after execution ends", async () => {
     state.board = { lanes: [], goals: [{ ...goal, laneId: null, tasks: [] }], warnings: [] };
     state.runtime.agents = [
