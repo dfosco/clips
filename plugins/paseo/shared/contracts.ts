@@ -1,16 +1,66 @@
 
 import { defineRpc, defineSettings } from "@getpaseo/plugin";
 import { z } from "zod";
+import { FULL_ACCESS_MODE } from "./permission-modes";
+
+const featureValue = z.union([z.boolean(), z.string()]);
+const providerFeature = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("toggle"),
+    id: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+    value: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("select"),
+    id: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+    value: z.string().nullable(),
+    options: z.array(z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string().optional(),
+      isDefault: z.boolean().optional(),
+    })),
+  }),
+]);
 
 export const preferences = defineSettings({
   id: "preferences",
   scope: "host",
-  version: 1,
+  version: 3,
+  migrate: (values, fromVersion) => {
+    const current = typeof values === "object" && values !== null ? values : {};
+    return {
+      ...current,
+      ...(fromVersion < 2 ? { thinkingOptionId: "", featureValues: {} } : {}),
+      ...(fromVersion < 3 ? { modeId: FULL_ACCESS_MODE } : {}),
+    };
+  },
   schema: z.object({
     agent: z.string().default(""),
+    thinkingOptionId: z.string().default(""),
+    featureValues: z.record(z.string(), featureValue).default({}),
+    modeId: z.string().default(FULL_ACCESS_MODE),
   }),
 });
 export type Preferences = z.infer<typeof preferences.schema>;
+export const agentConfiguration = z.object({
+  provider: z.string(),
+  thinkingOptionId: z.string().optional(),
+  featureValues: z.record(z.string(), featureValue).default({}),
+  modeId: z.string().optional(),
+});
+export type AgentConfiguration = z.infer<typeof agentConfiguration>;
+
+const permissionMode = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+  colorTier: z.string().optional(),
+});
 
 const criterion = z.object({ id: z.string(), description: z.string() });
 export const label = z.object({
@@ -37,9 +87,17 @@ export const goal = workItem.extend({
   laneId: z.string().nullable(),
   tasks: z.array(task),
 });
+export const managerOwner = z.object({
+  host: z.string(), runtime: z.string(), session_id: z.string(),
+  workspace_id: z.string().optional(), contact: z.string().optional(), claimed_at: z.string().optional(),
+});
+export const managerClaim = z.object({ revision: z.number(), owners: z.array(managerOwner) });
 export const lane = workItem.extend({
   kind: z.literal("lane"),
   goalRefs: z.array(z.string()),
+  productGoals: z.array(z.string()),
+  managerClaim: managerClaim.nullable().optional(),
+  managerClaimError: z.string().nullable().optional(),
 });
 export type Task = z.infer<typeof task>;
 export type Goal = z.infer<typeof goal>;
@@ -86,7 +144,14 @@ export type StartMode = (typeof START_MODES)[number];
 
 export const startRpc = defineRpc({
   name: "clips.start",
-  input: z.object({ projectId: z.string(), ref: z.string(), mode: z.enum(START_MODES) }),
+  input: z.object({
+    projectId: z.string(),
+    ref: z.string(),
+    mode: z.enum(START_MODES),
+    workspaceId: z.string().optional(),
+    agentConfig: agentConfiguration.optional(),
+    hostId: z.string().optional(),
+  }),
   output: z.object({
     workspaceId: z.string(),
     branch: z.string(),
@@ -94,5 +159,43 @@ export const startRpc = defineRpc({
     agent: z.string().nullable(),
     reused: z.boolean(),
     alreadyRunning: z.boolean(),
+  }),
+});
+
+export const agentOptionsRpc = defineRpc({
+  name: "clips.agent-options",
+  input: z.object({ projectId: z.string().optional(), provider: z.string(), thinkingOptionId: z.string().optional() }),
+  output: z.object({
+    thinkingOptions: z.array(z.object({ id: z.string(), label: z.string(), description: z.string().optional() })),
+    defaultThinkingOptionId: z.string().nullable(),
+    speedFeature: providerFeature.nullable(),
+    featureError: z.string().nullable(),
+    permissionModes: z.array(permissionMode),
+    defaultModeId: z.string().nullable(),
+    modeError: z.string().nullable(),
+  }),
+});
+
+export const laneClosureData = z.object({
+  summary: z.string(),
+  decision_log: z.string(),
+  system_overview: z.string(),
+  product_goals_achieved: z.array(z.string()),
+});
+export type LaneClosureData = z.infer<typeof laneClosureData>;
+
+export const closeRpc = defineRpc({
+  name: "clips.close",
+  input: z.object({
+    projectId: z.string(),
+    ref: z.string(),
+    laneClosure: laneClosureData.optional(),
+    autoCompleteClosure: z.boolean().default(false),
+  }),
+  output: z.object({
+    ref: z.string(),
+    status: z.literal("closed"),
+    autoCompleteStatus: z.enum(["not_requested", "not_needed", "started", "failed"]),
+    autoCompleteError: z.string().nullable(),
   }),
 });

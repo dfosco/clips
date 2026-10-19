@@ -326,6 +326,27 @@ installs go to `~/.agents/skills` and replace existing copies, including
 local additions. Imports are independent filesystem snapshots; there is no
 live subscription to the source library or retroactive revocation.
 
+For Lane Manager development on this machine, install the maintained checkout
+as a live skill instead of a snapshot:
+
+```bash
+node scripts/install-lane-manager.js
+```
+
+This links only Lane Manager from `~/.agents/skills` and
+`${CODEX_HOME:-~/.codex}/skills` to this checkout. Existing copies are moved to
+`~/.clips/skill-backups/` (`CLIPS_HOME` overrides the `.clips` root); repeating
+the command leaves current links unchanged. Source edits become visible through
+both paths immediately. No npm publication or `npm link` is involved. Codex
+supports linked skill folders and detects skill changes; restart it if discovery
+does not refresh. Instructions already loaded into a conversation are not
+rewritten by a filesystem change. See [OpenAI's skill discovery documentation](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).
+
+The checkout CLI's `init` preserves a live Lane Manager link or its canonical
+checkout directory. Production mode switching refuses to refresh a project with
+such a source because a saved older CLI may overwrite it. This protection does
+not cover invoking an old package or a third-party skill installer directly.
+
 The CLI requires the published `skillshop@2.1.0` package. The dependency
 lockfile records its npm registry integrity checksum.
 

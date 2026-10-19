@@ -1,9 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getSystemClipsDir } from './registry.js';
+import { isLiveLaneManager } from './lane-manager-install.js';
+import { getRepoRoot } from './core.js';
 
 const PACKAGE_NAME = '@dfosco/clips';
 const CHECKOUT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -65,11 +68,12 @@ function skillFiles(packageRoot) {
   return files;
 }
 
-function reconcileSkills(project, previous = {}, selected = {}, agentDir = '.agents') {
+export function reconcileSkills(project, previous = {}, selected = {}, agentDir = '.agents') {
   const root = path.resolve(project, agentDir, 'skills');
   if (!root.startsWith(`${project}${path.sep}`)) throw new Error(`Agent directory is outside project: ${agentDir}`);
   for (const [relative, digest] of Object.entries(previous)) {
     if (Object.hasOwn(selected, relative)) continue;
+    if (relative.split(path.sep)[0] === 'lane-manager' && isLiveLaneManager(path.join(root, 'lane-manager'))) continue;
     const file = path.join(root, relative);
     if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.lstatSync(file).isFile()) continue;
     const actual = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -133,7 +137,16 @@ export function switchInstallation(mode, argv = []) {
     console.log(`Usage: clips ${mode} [--project <repo>]${mode === 'dev' ? ' [--checkout <clips-repo>]' : ''}`);
     return;
   }
-  const project = fs.realpathSync(path.resolve(args.project || process.cwd()));
+  // init writes to the common repository root, including from nested worktrees.
+  const project = fs.realpathSync(getRepoRoot(path.resolve(args.project || process.cwd())));
+  const agentDir = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
+    catch { return '.agents'; }
+  })();
+  // A saved older CLI may not understand live links. Refuse before invoking it.
+  if (mode === 'prod' && isLiveLaneManager(path.resolve(project, agentDir, 'skills', 'lane-manager'))) {
+    throw new Error('Cannot refresh production skills over a live Lane Manager source. Keep the live installation or choose a project without that source link.');
+  }
   const globalPath = globalPackagePath();
   let state = saveInstalledPackage(globalPath, readState());
   const checkout = devCheckout(args, state);
@@ -150,10 +163,6 @@ export function switchInstallation(mode, argv = []) {
   run(process.execPath, [activeCli, 'init', '--skills-scope', 'project'], { cwd: project, stdio: 'inherit', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
   const selectedRoot = mode === 'dev' ? checkout : prod.root;
   const selectedFiles = skillFiles(selectedRoot);
-  const agentDir = (() => {
-    try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
-    catch { return '.agents'; }
-  })();
   reconcileSkills(project, state.projects?.[project]?.files, selectedFiles, agentDir);
   state = { ...state, mode, dev_checkout: checkout, projects: { ...state.projects, [project]: { files: selectedFiles } } };
   writeState(state);
@@ -167,6 +176,21 @@ export function dispatchProd(argv) {
   try {
     if (!state.dev_checkout || fs.realpathSync(state.dev_checkout) !== fs.realpathSync(CHECKOUT_ROOT)) return null;
   } catch { return null; }
+  if (argv[0] === 'init') {
+    const scopeIndex = argv.indexOf('--skills-scope');
+    const userScope = argv.includes('--global') || (scopeIndex !== -1 && argv[scopeIndex + 1] === 'user');
+    const projectScope = scopeIndex !== -1 && argv[scopeIndex + 1] === 'project';
+    const project = fs.realpathSync(getRepoRoot());
+    const agentDir = (() => {
+      try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
+      catch { return '.agents'; }
+    })();
+    const liveUser = isLiveLaneManager(path.join(os.homedir(), '.agents', 'skills', 'lane-manager'));
+    const liveProject = isLiveLaneManager(path.resolve(project, agentDir, 'skills', 'lane-manager'));
+    if ((userScope && liveUser) || (projectScope && liveProject) || (!userScope && !projectScope && (liveUser || liveProject))) {
+      throw new Error('Cannot run saved production init over a live Lane Manager source. Use the checkout CLI in development mode to preserve it.');
+    }
+  }
   const prod = state.prod_package && packageAt(state.prod_package);
   if (!prod) throw new Error('Saved npm installation is missing. Run clips dev to repair the installation.');
   const result = spawnSync(process.execPath, [path.join(prod.root, 'src', 'cli.js'), ...argv], { stdio: 'inherit' });

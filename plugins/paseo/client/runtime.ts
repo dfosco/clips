@@ -96,3 +96,12 @@ export function useRuntime(hostId: string) {
     refetchInterval: 15_000,
   });
 }
+
+/** Use the host's navigation so an agent in another workspace is revealed before focusing it. */
+export function navigateToAgent(agent: AgentInfo, navigation: {
+  openWorkspace: (input: { workspaceId: string }) => void;
+  openAgent: (input: { agentId: string }) => void;
+}): void {
+  if (agent.workspaceId) navigation.openWorkspace({ workspaceId: agent.workspaceId });
+  navigation.openAgent({ agentId: agent.id });
+}

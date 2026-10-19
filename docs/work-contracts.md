@@ -10,6 +10,7 @@ It is not a claim that an older installed CLI supports every command below.
 - [Identity and revisions](#identity-and-revisions)
 - [Acceptance](#acceptance)
 - [Dependencies and coordination](#dependencies-and-coordination)
+- [Lane management ownership](#lane-management-ownership)
 - [Compatibility and storage](#compatibility-and-storage)
 
 ## Core records
@@ -353,6 +354,65 @@ results and proposed updates. Keep execution state in task status, owner,
 blockers, and result; keep cross-task coordination in the goal plan. An existing
 squad log or host handoff can hold transient context. No separate execution-note
 record is required.
+
+## Lane management ownership
+
+Lane lifecycle status, manager ownership, and observed agent activity are separate.
+Stopped or unavailable sessions retain their management claim. A claim coordinates
+decisions; it does not prohibit another agent from contributing to a Task.
+Contributors must contact existing managers before overlapping decisions or changes.
+If an authorized messaging route is unavailable, report that limitation rather than
+silently claiming ownership or inventing a successful exchange.
+
+Inspect with `clips lane manager inspect '#l1' --json`; list with
+`clips lane manager list --json`. An unowned Lane returns revision 0. Mutations
+accept one JSON argument, `--file <path>`, or `--stdin`, and output the updated
+claim as JSON. Every mutation requires the revision just inspected:
+
+```json
+{
+  "expected_revision": 0,
+  "actor": {
+    "host": "observed-host-id",
+    "runtime": "paseo",
+    "session_id": "actual-agent-id",
+    "workspace_id": "actual-workspace-id",
+    "contact": "supported coordination route"
+  }
+}
+```
+
+| Command | Behavior and additional input |
+|---|---|
+| `clips lane manager claim '#l1' <json>` | Claims an unowned Lane; repeating the same identity is idempotent |
+| `clips lane manager share '#l1' <json>` | Current manager adds `owner`, another observed manager identity |
+| `clips lane manager release '#l1' <json>` | Removes only the calling `actor`; preserves coowners |
+| `clips lane manager handover '#l1' <json>` | Replaces `from` (defaults to `actor`) with `owner`; requires `authorization: {"by":"user identity","reason":"explicit instruction"}` |
+
+The tuple `host`, `runtime`, `session_id` identifies a manager. `workspace_id`
+and `contact` are optional navigation/coordination hints. Use observed identity
+values. One session can claim several Lanes. Sharing is explicit and requires an
+existing manager; handover always requires a recorded user instruction permitting
+that replacement. The metadata records the asserted authority; it is not an
+authentication mechanism. Never infer permission to take over from a stale or
+disconnected session. Revision conflicts require rereading and coordination.
+
+Claims live under `CLIPS_HOME/lane-claims/` or `~/.clips/lane-claims/`, outside
+repository state and GitHub sync. Canonical realpath Git common-directory identity
+and Lane ID determine the record. Worktrees and symlinks share ownership; repository
+labels, configured agent usernames, and display project IDs cannot fork it. Lanes
+are repository-global and have no configurable ownership namespace.
+
+Each state contains `version: 1`, `repository_id`, fixed `namespace: ""`,
+`lane_id`, `revision`, `owners`, and `history`. Owners include their identity and
+`claimed_at`. History retains operation, actor, time, owners before/after, and any
+handover authorization. Locking covers read, revision check, and atomic replacement.
+Malformed or inconsistent ownership fails closed; a stopped writer's lock is never
+silently stolen. Confirm no writer is active before repairing a stale lock.
+
+Board Lanes expose `manager_claim` separately from `status`. Ownership read failures
+set `manager_claim: null` and `manager_claim_error`, with a warning. Consumers must
+not interpret unknown ownership as an unowned Lane or offer automatic replacement.
 
 ## Compatibility and storage
 

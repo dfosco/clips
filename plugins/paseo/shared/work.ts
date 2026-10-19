@@ -72,6 +72,13 @@ export type Execution = {
   agents: AgentInfo[];
 };
 
+/** Pending input is still an owned execution; it must not permit a duplicate launch. */
+export function isActiveAgent(agent: AgentInfo): boolean {
+  if (agent.status === "error" || agent.attentionReason === "error" || agent.attentionReason === "finished") return false;
+  return agent.status === "running" || agent.status === "initializing" || agent.status === "attention" ||
+    (agent.requiresAttention && (agent.attentionReason === "permission" || agent.attentionReason === null));
+}
+
 export function executionFor(
   target: WorkTarget,
   projectIds: readonly string[],
@@ -79,33 +86,55 @@ export function executionFor(
   agents: readonly AgentInfo[],
 ): Execution {
   const relevant = workspaces.filter((w) => matchesWorkspace(w, target, projectIds));
-  const attributed = agents.filter((a) =>
-    a.labels["clips.ref"] === target.ref &&
-    projectIds.includes(a.labels["clips.projectId"] ?? "") &&
-    a.workspaceId !== null,
-  );
-  const matchedIds = new Set([...relevant.map((w) => w.id), ...attributed.map((a) => a.workspaceId!)]);
-  const relatedAgents = agents.filter((a) => a.workspaceId && matchedIds.has(a.workspaceId));
-  // A permission-blocked agent may still report "running" while it awaits a person.
-  // Do not count it as active execution.
-  const active = relatedAgents.filter((a) =>
-    (a.status === "running" || a.status === "initializing") && !a.requiresAttention,
-  );
-  const pending = relatedAgents.find((a) => a.requiresAttention &&
-    (a.attentionReason === "permission" || a.attentionReason === null));
+  const projectWorkspaces = new Set(workspaces.filter((w) => projectIds.includes(w.projectId)).map((w) => w.id));
+  const relevantIds = new Set(relevant.map((w) => w.id));
+  const workspaceAgents = new Map<string, AgentInfo[]>();
+  for (const agent of agents) {
+    if (!agent.workspaceId) continue;
+    const entries = workspaceAgents.get(agent.workspaceId) ?? [];
+    entries.push(agent);
+    workspaceAgents.set(agent.workspaceId, entries);
+  }
+  const relatedAgents = agents.filter((agent) => {
+    if (!agent.workspaceId) return false;
+    const ref = agent.labels["clips.ref"];
+    const project = agent.labels["clips.projectId"];
+    const kind = agent.labels["clips.kind"];
+    if (kind && kind !== target.kind) return false;
+    // Explicit attribution wins, including when a workspace belongs to another record.
+    if (ref || project) return ref === target.ref &&
+      (project ? projectIds.includes(project) : projectWorkspaces.has(agent.workspaceId));
+    // Support a lone legacy agent in a dedicated record worktree, never adopt its siblings.
+    return relevantIds.has(agent.workspaceId) && workspaceAgents.get(agent.workspaceId)?.length === 1;
+  });
+  const workspaceNeedsInput = relevant.some((workspace) => workspace.status === "needs_input" &&
+    !workspaceAgents.get(workspace.id)?.length);
+  return summarizeExecution(relevant, relatedAgents, workspaceNeedsInput);
+}
+
+function summarizeExecution(relevant: readonly WorkspaceInfo[], relatedAgents: AgentInfo[], workspaceNeedsInput = false): Execution {
+  const matchedIds = new Set([...relevant.map((workspace) => workspace.id), ...relatedAgents.map((a) => a.workspaceId!)]);
+  const active = relatedAgents.filter((a) => isActiveAgent(a) && !a.requiresAttention && a.status !== "attention");
+  const pending = relatedAgents.find((a) => isActiveAgent(a) && (a.requiresAttention || a.status === "attention"));
   const failed = relatedAgents.some((a) => a.status === "error" || a.attentionReason === "error") ||
     relevant.some((w) => w.status === "failed");
-  const workspaceNeedsInput = relevant.some((w) => w.status === "needs_input") &&
-    !relatedAgents.some((a) => a.attentionReason === "finished" || a.attentionReason === "error");
   const status: RuntimeStatus = active.length ? "running" : pending || workspaceNeedsInput ? "attention" : failed ? "error" : matchedIds.size ? "idle" : "none";
-  const activeWorkspace = active[0]?.workspaceId || pending?.workspaceId;
   return {
-    status,
-    runningAgents: active.length,
-    workspaceCount: matchedIds.size,
-    workspaceId: activeWorkspace || relevant[0]?.id || attributed[0]?.workspaceId || null,
+    status, runningAgents: active.length, workspaceCount: matchedIds.size,
+    workspaceId: active[0]?.workspaceId || pending?.workspaceId || relevant[0]?.id || relatedAgents[0]?.workspaceId || null,
     agents: relatedAgents,
   };
+}
+
+/** Ownership is durable; only an observed session on the selected host can be navigated. */
+export function executionForManagers(
+  owners: readonly { host: string; runtime: string; session_id: string }[], hostId: string,
+  workspaces: readonly WorkspaceInfo[], agents: readonly AgentInfo[],
+): Execution {
+  const sessions = new Set(owners.filter((owner) => owner.host === hostId && owner.runtime === "paseo").map((owner) => owner.session_id));
+  const related = agents.filter((agent) => sessions.has(agent.id));
+  const workspaceIds = new Set(related.map((agent) => agent.workspaceId));
+  return summarizeExecution(workspaces.filter((workspace) => workspaceIds.has(workspace.id)), related);
 }
 
 export function defaultProvider(entries: readonly {
@@ -125,7 +154,7 @@ export function defaultProvider(entries: readonly {
 
 export function promptFor(target: WorkTarget): string {
   const instructions = target.kind === "lane"
-    ? "This Lane is a strategic product frame. Inspect its Goals, summarize outstanding choices, then coordinate the next useful Goal. Do not equate closing a Lane with engineering acceptance."
+    ? "This Lane is a strategic product frame. Use the Lane Manager skill. Before strategic management, inspect its manager claim. If unowned, acquire a claim with the inspected revision and your actual observed host/runtime/session identity. If this session already owns the Lane, reuse that claim. If identity is unavailable or claiming conflicts, report the blocker and do not begin management or take over ownership. Inspect its Goals, summarize outstanding choices, then coordinate the next useful Goal. Hand complete engineering outcomes to verified top-level workspace dev agents the user can steer directly. Those dev agents own technical planning, implementation, integration, validation and completion records. Do not create child agents, implement, run validation or babysit workers yourself. Contact existing managers before overlapping decisions or work. Never take over another manager claim without explicit user authorization; idle and disconnected managers retain ownership. Contributing to a Goal or Task does not require taking Lane ownership. Do not equate closing a Lane with engineering acceptance."
     : target.kind === "goal"
       ? "Work toward this Goal's engineering outcome. Read the plan and its Tasks, respect blockers, and favor independently reviewable changes with tests."
       : "Implement this Task's bounded request, meet its stated acceptance criteria, test the actual changes, and document the result and evidence without self-approving human-owned acceptance.";

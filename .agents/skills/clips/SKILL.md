@@ -259,6 +259,34 @@ updates. Separate worktrees do not isolate the workflow store. Use revision
 checks when supported, but do not treat append locks or optimistic checks as a
 distributed scheduler, lease, or full multiwriter workflow.
 
+Lane management claims are separate user-level coordination records. Before
+managing a Lane or contributing overlapping decisions, inspect
+`clips lane manager inspect '#l1' --json` and contact its recorded managers using
+an available, authorized transport. Report missing contact/transport rather than
+claiming coordination occurred. Contributions do not require taking ownership.
+One observed session can manage several Lanes; several managers require explicit
+sharing. Lane identity is shared across worktrees and agent usernames.
+
+An unowned Lane has revision 0. Claim using observed host/runtime/session IDs,
+never an invented session or display label. For example, with actual values:
+
+```bash
+clips lane manager claim '#l1' '{"expected_revision":0,"actor":{"host":"observed-host-id","runtime":"paseo","session_id":"actual-agent-id","workspace_id":"actual-workspace-id","contact":"supported coordination route"}}'
+clips lane manager list --json
+```
+
+`share` adds an `owner` identity and requires the actor to be a current manager.
+`release` removes only the actor's own claim. `handover` replaces one owner and
+requires an `owner`, recorded `authorization` with `by` and `reason`, and an
+explicit user instruction authorizing that replacement. Its optional `from`
+identity selects the displaced owner when different from the actor. Every
+mutation requires the inspected `expected_revision`; reread and coordinate on
+conflict rather than forcing a stale write. Use `--file` or `--stdin` for JSON.
+The CLI records the asserted identity and authority; it does not authenticate
+them. Stopped, unavailable, or disconnected sessions retain ownership until an
+explicit release or authorized handover. Claims live under `CLIPS_HOME` or
+`~/.clips`, are not committed or synced, and do not lock unrelated execution.
+
 Keep execution state in task status, owner, and blocker information; keep
 cross-task coordination in the goal plan and cross-goal strategic context in the
 Lane. Use an existing squad log or session

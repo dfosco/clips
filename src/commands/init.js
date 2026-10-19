@@ -1,6 +1,7 @@
 // Init command - initialize clips in a repository
 import fs from 'fs';
 import path from 'path';
+import os from 'node:os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
@@ -10,6 +11,7 @@ import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
 import { importSkill, loadSkillLibrary } from 'skillshop/import';
 import { installUserSkill } from 'skillshop/user-install';
+import { isLiveLaneManager } from '../lib/lane-manager-install.js';
 
 const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -152,6 +154,13 @@ async function installSkills(cwd, scope) {
   const results = [];
   for (const specifier of specifiers) {
     const name = specifier.slice('skill:'.length);
+    const targetDir = scope === 'user'
+      ? path.join(os.homedir(), '.agents', 'skills', name)
+      : path.join(agentDir, 'skills', name);
+    if (isLiveLaneManager(targetDir)) {
+      results.push({ specifier, targetDir, live: true });
+      continue;
+    }
     const result = scope === 'user'
       ? await installUserSkill({ library: CLIPS_LIBRARY_ROOT, specifier, cwd })
       : await importSkill({
@@ -249,7 +258,7 @@ export async function runInitCommand(args) {
   console.log(`✓ Registered project ${projectId} in ${registeredProject.path}`);
 
   for (const result of await installSkills(cwd, skillScope)) {
-    const action = result.installed ? 'Installed' : result.updated ? 'Updated' : 'Already current';
+    const action = result.live ? 'Preserved live source for' : result.installed ? 'Installed' : result.updated ? 'Updated' : 'Already current';
     console.log(`✓ ${action} ${result.specifier} → ${result.targetDir}`);
   }
 

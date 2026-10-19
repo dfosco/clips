@@ -85,9 +85,27 @@ it("reads a local Clips project through the checkout CLI", async () => {
         requiresAttention: true, attentionReason: "permission", labels: {}, title: "Pending agent",
       } }], pageInfo: { hasMore: false } }) },
     } as unknown as Parameters<typeof startWork>[0];
-    await expect(startWork(launchPaseo, { agent: "" }, {
-      projectId: "project-1", ref: target.ref, mode: "agent",
-    })).rejects.toThrow("needs input");
+    for (const input of [
+      { projectId: "project-1", ref: target.ref, mode: "agent" as const },
+      { projectId: "project-1", ref: target.ref, mode: "workspace" as const },
+      { projectId: "project-1", ref: target.ref, mode: "agent" as const, workspaceId: "another-workspace" },
+    ]) {
+      await expect(startWork(launchPaseo, { agent: "" }, input)).resolves.toMatchObject({
+        workspaceId: "workspace-1", agentId: "agent-1", alreadyRunning: true,
+      });
+    }
+
+    // A cross-workspace concurrent action must share the same record-level guard.
+    const first = startWork(launchPaseo, { agent: "" }, {
+      projectId: "project-1", ref: target.ref, mode: "agent", workspaceId: "another-workspace",
+    });
+    const second = startWork(launchPaseo, { agent: "" }, {
+      projectId: "project-1", ref: target.ref, mode: "workspace",
+    });
+    const results = await Promise.allSettled([first, second]);
+    expect(results.filter((entry) => entry.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((entry) => entry.status === "rejected") as PromiseRejectedResult;
+    expect(rejected.reason.message).toContain("already in progress");
   } finally {
     if (previousCli === undefined) delete process.env.CLIPS_CLI_PATH;
     else process.env.CLIPS_CLI_PATH = previousCli;

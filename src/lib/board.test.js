@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readBoardData, readWorkspaceBoard } from './board.js';
 
@@ -250,7 +251,8 @@ describe('readBoardData', () => {
       'db/tracks/r001.jsonl': JSON.stringify({ event: 'track_created', track_id: 'r001', title: 'Workspace', status: 'open' }),
       'components/c001.jsonl': JSON.stringify({ event: 'component_created', component_id: 'c001', title: 'Workspace preferences', responsibility: 'Store workspace choices.', contract: 'Unknown values use defaults.' }),
     });
-    const result = readBoardData({ dbDir: path.join(clipsDir, 'db') });
+    execFileSync('git', ['init', '--quiet'], { cwd: clipsDir });
+    const result = readBoardData({ dbDir: path.join(clipsDir, 'db'), projectPath: clipsDir, claimsDir: path.join(clipsDir, 'claims') });
     expect(result.goals).toHaveLength(1);
     expect(result.goals[0]).toMatchObject({ type: 'planning', plan: 'Agree the storage boundary, then wire restoration.', decisions: 'Persist stable tab keys.', revision: 3, acceptance_criteria: [{ id: 'A1', description: 'Selection survives reopening.' }] });
     expect(result.goals[0].tasks[0]).toMatchObject({

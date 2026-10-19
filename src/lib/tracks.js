@@ -35,6 +35,10 @@ export function readTrack(id, dbDir = getClipsDbDir(), { revision } = {}) {
       track.record_kind = 'lane';
       track.closure = event.closure;
     }
+    if (event.event === 'lane_closure_updated') {
+      track.record_kind = 'lane';
+      track.closure = { ...track.closure, ...event.closure };
+    }
     if (event.event === 'track_github_synced' || event.event === 'lane_github_synced') {
       track.issue_number = event.issue_number;
       track.issue_id = event.issue_id;

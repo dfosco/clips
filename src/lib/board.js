@@ -6,6 +6,7 @@ import { listComponents } from './components.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
 import { listLanes } from './lanes.js';
+import { readLaneClaim } from './lane-claims.js';
 import { labelCatalog, projectLabels } from './labels.js';
 
 export const BOARD_COLUMNS = [
@@ -221,6 +222,8 @@ export function readBoardData({
   dbDir = getClipsDbDir(),
   recordsDir = path.join(path.dirname(dbDir), 'records', 'cr'),
   componentsDir = path.join(path.dirname(dbDir), 'components'),
+  projectPath = path.resolve(dbDir, '..', '..'),
+  claimsDir,
 } = {}) {
   const warnings = [];
   const goals = [];
@@ -256,7 +259,14 @@ export function readBoardData({
   }
   const lanes = listLanes(dbDir).map((lane) => {
     const members = goals.filter((goal) => goal.lane_id === lane.lane_id);
-    return { ...projectLabels(lane, labels), ref: `#${lane.lane_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
+    let manager_claim = null;
+    let manager_claim_error = null;
+    try { manager_claim = readLaneClaim(lane.lane_id, { projectPath, claimsDir }); }
+    catch (error) {
+      manager_claim_error = error.message;
+      warnings.push({ kind: 'lane_claim', lane_id: lane.lane_id, message: error.message });
+    }
+    return { ...projectLabels(lane, labels), ref: `#${lane.lane_id}`, manager_claim, manager_claim_error, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
   });
   const components = listComponents({ componentsDir, onError: (warning) => warnings.push(warning) });
   // Keep tracks as a read-only compatibility alias while Lane is the product model.
@@ -294,6 +304,7 @@ export function readProjectBoard(project) {
     dbDir: path.join(project.path, '.clips', 'db'),
     recordsDir: path.join(project.path, '.clips', 'records', 'cr'),
     componentsDir: path.join(project.path, '.clips', 'components'),
+    projectPath: project.path,
   });
   const goals = localBoard.goals.map((goal) => {
     const ref = qualifyRef(project.id, goal.ref);
