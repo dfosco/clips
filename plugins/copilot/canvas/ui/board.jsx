@@ -25,42 +25,49 @@ export function sendCapability(record, state) {
   return { sessions, status, owners, canSend, reason, occupied };
 }
 function Labels({ record }) {
-  return record.labels?.length ? <div className="flex flex-wrap gap-2">{record.labels.map((label) => <Badge variant="outline" key={label.id}><span className="size-2 rounded-full" style={{ backgroundColor: /^#[0-9a-f]{6}$/i.test(label.color) ? label.color : 'var(--muted-foreground)' }} aria-hidden="true" />{label.name || label.id}</Badge>)}</div> : null;
+  return record.labels?.length ? <div className="flex min-w-0 flex-wrap gap-2">{record.labels.map((label) => <Badge variant="outline" className="h-auto min-h-5 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]" key={label.id}><span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: /^#[0-9a-f]{6}$/i.test(label.color) ? label.color : 'var(--muted-foreground)' }} aria-hidden="true" /><span className="min-w-0">{label.name || label.id}</span></Badge>)}</div> : null;
 }
 function Description({ record, ui, toggle }) {
   const text = String(record.description || '').trim();
   if (!text) return null;
   const full = ui.descriptions.has(record.ref);
-  return <div className="flex flex-col items-start gap-1"><p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{text.length > 240 && !full ? text.slice(0, 240).trimEnd() + '…' : text}</p>{text.length > 240 ? <Button variant="ghost" data-description={record.ref} aria-expanded={full} onClick={() => toggle('descriptions', record.ref)}>{full ? 'Show less' : 'Show more'}</Button> : null}</div>;
+  return <div className="flex flex-col items-start gap-1"><p className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed text-muted-foreground">{text.length > 240 && !full ? text.slice(0, 240).trimEnd() + '…' : text}</p>{text.length > 240 ? <Button variant="ghost" data-description={record.ref} aria-expanded={full} onClick={() => toggle('descriptions', record.ref)}>{full ? 'Show less' : 'Show more'}</Button> : null}</div>;
 }
 function Actions({ record, state, busy, onAction, onMenu, onOpenSession }) {
   const { sessions, status, owners, canSend, reason } = sendCapability(record, state);
   const count = sessions.filter((s) => s.status === 'running').length;
   const label = { running: `Running · ${count} agent${count === 1 ? '' : 's'}`, attention: 'Needs input', error: 'Session error', idle: 'Session idle', unknown: 'Activity unavailable', none: owners.length ? 'Manager unavailable' : 'No bound session' }[status];
-  return <div className="flex w-full flex-wrap items-center gap-2"><span className={cn('runtime-status flex items-center gap-1 text-xs text-muted-foreground', status === 'running' && 'text-foreground')}><DotFillIcon aria-hidden="true" />{label}</span>{sessions.slice(0, 1).map((s) => <Button variant="outline" key={s.id || s.sessionId} data-session={s.id || s.sessionId} disabled={busy} onClick={() => onOpenSession(s.id || s.sessionId)}>{s.joined ? 'Open current session' : 'Open session'}</Button>)}{record.kind !== 'task' && !sessions.length ? <span title={reason}><Button data-send={record.ref} disabled={busy || !canSend} aria-describedby={`send-help-${record.ref}`} onClick={() => onAction('launch', { ref: record.ref })}>{record.kind === 'lane' ? 'Use as manager' : 'Send to this session'}</Button><span className="sr-only" id={`send-help-${record.ref}`}>{reason}</span></span> : null}<Button className="ml-auto" variant="ghost" size="icon" data-menu={record.ref} aria-label={`More actions for ${record.ref}`} disabled={busy} onClick={(event) => onMenu(record.ref, event.currentTarget)}><KebabHorizontalIcon aria-hidden="true" /></Button></div>;
+  return <div className="record-actions grid w-full min-w-0 grid-cols-[minmax(0,1fr)_2.5rem] items-start gap-x-3 gap-y-2">
+    <span className={cn('runtime-status col-start-1 row-start-1 flex min-w-0 items-start gap-1 text-xs text-muted-foreground [overflow-wrap:anywhere]', status === 'running' && 'text-foreground')}><DotFillIcon className="shrink-0" aria-hidden="true" /><span className="min-w-0">{label}</span></span>
+    {sessions.length || record.kind !== 'task' ? <div className="col-start-1 row-start-2 flex min-w-0 flex-col items-start gap-2">
+      {sessions.slice(0, 1).map((s) => <Button variant="outline" size="responsive" key={s.id || s.sessionId} data-session={s.id || s.sessionId} disabled={busy} onClick={() => onOpenSession(s.id || s.sessionId)}>{s.joined ? 'Open current session' : 'Open session'}</Button>)}
+      {record.kind !== 'task' && !sessions.length ? <div className="min-w-0 max-w-full" title={reason}><Button size="responsive" data-send={record.ref} disabled={busy || !canSend} aria-describedby={`send-help-${record.ref}`} onClick={() => onAction('launch', { ref: record.ref })}>{record.kind === 'lane' ? 'Use as manager' : 'Send to this session'}</Button><span className="sr-only" id={`send-help-${record.ref}`}>{reason}</span></div> : null}
+    </div> : null}
+    <Button className="col-start-2 row-start-1" variant="ghost" size="icon" data-menu={record.ref} aria-label={`More actions for ${record.ref}`} disabled={busy} onClick={(event) => onMenu(record.ref, event.currentTarget)}><KebabHorizontalIcon aria-hidden="true" /></Button>
+  </div>;
 }
 function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onAction, onMenu, onOpenSession, surfaceVariant = 'default' }) {
   const isExpanded = ui.expanded.get(record.ref) ?? (record.kind === 'goal' && (Boolean(ui.search.trim()) || ui.filter === 'running'));
   const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession };
   return <Card variant={surfaceVariant} data-record={record.ref} className="work-card min-w-0" data-kind={record.kind} data-selected={state.focus === record.ref}>
     <CardHeader>
-      <CardDescription className="flex items-center gap-2"><code>{record.ref}</code><span>{statusText(record.status)}</span></CardDescription>
+      <CardDescription className="flex min-w-0 flex-wrap items-center gap-2 [overflow-wrap:anywhere]"><code className="min-w-0">{record.ref}</code><span>{statusText(record.status)}</span></CardDescription>
       <CardTitle className="flex min-w-0 items-start gap-1">
         <Button variant="ghost" size="icon" className="shrink-0" data-expand={record.ref} aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${record.kind} ${record.ref}`} aria-expanded={isExpanded} disabled={busy} onClick={() => toggle('expanded', record.ref, !isExpanded)}><ChevronRightIcon className={cn('transition-transform', isExpanded && 'rotate-90')} aria-hidden="true" /></Button>
-        <Button variant="record" data-lane={record.kind === 'lane' ? record.ref : undefined} data-expand={record.kind !== 'lane' ? record.ref : undefined} aria-expanded={record.kind !== 'lane' ? isExpanded : undefined} disabled={busy} onClick={() => record.kind === 'lane' ? onFocus(record.ref) : toggle('expanded', record.ref, !isExpanded)}>{record.title}</Button>
+        <Button variant="record" size="record" data-lane={record.kind === 'lane' ? record.ref : undefined} data-expand={record.kind !== 'lane' ? record.ref : undefined} aria-expanded={record.kind !== 'lane' ? isExpanded : undefined} disabled={busy} onClick={() => record.kind === 'lane' ? onFocus(record.ref) : toggle('expanded', record.ref, !isExpanded)}>{record.title}</Button>
       </CardTitle>
       <Labels record={record} />
     </CardHeader>
     <CardContent className="flex flex-col gap-4">
       <Description record={record} ui={ui} toggle={toggle} />
       {isExpanded ? <>
-        {record.acceptance_criteria?.length ? <section className="flex flex-col gap-2"><h3 className="text-sm font-medium">Acceptance criteria</h3>{record.acceptance_criteria.map((criterion, i) => <p className="whitespace-pre-wrap break-words text-sm leading-relaxed" key={typeof criterion === 'string' ? i : criterion.id}>{typeof criterion === 'string' ? criterion : `${criterion.id || `A${i + 1}`} · ${criterion.description}`}</p>)}</section> : null}
-        {['scope', 'plan', 'decisions'].filter((field) => record[field]).map((field) => <section className="flex flex-col gap-2" key={field}><h3 className="text-sm font-medium">{field[0].toUpperCase() + field.slice(1)}</h3><p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{record[field]}</p></section>)}
+        {record.acceptance_criteria?.length ? <section className="flex flex-col gap-2"><h3 className="text-sm font-medium">Acceptance criteria</h3>{record.acceptance_criteria.map((criterion, i) => <p className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed" key={typeof criterion === 'string' ? i : criterion.id}>{typeof criterion === 'string' ? criterion : `${criterion.id || `A${i + 1}`} · ${criterion.description}`}</p>)}</section> : null}
+        {['scope', 'plan', 'decisions'].filter((field) => record[field]).map((field) => <section className="flex flex-col gap-2" key={field}><h3 className="text-sm font-medium">{field[0].toUpperCase() + field.slice(1)}</h3><p className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-relaxed text-muted-foreground">{record[field]}</p></section>)}
         {record.blocked_by?.length ? <p className="text-sm text-muted-foreground">Blocked by {record.blocked_by.join(', ')}</p> : null}
       </> : null}
     </CardContent>
     <CardFooter><Actions record={record} state={state} busy={busy} onAction={onAction} onMenu={onMenu} onOpenSession={onOpenSession} /></CardFooter>
-    {record.kind === 'goal' && isExpanded ? <div className="goal-tasks flex flex-col gap-4 px-4 pb-4">{tasks.length ? tasks.map((task) => <WorkCard key={task.ref} record={{ ...task, kind: 'task' }} {...props} />) : <Empty><EmptyHeader><EmptyDescription>{record.tasks?.length ? 'No Tasks match the current filter.' : 'No Tasks in this Goal yet.'}</EmptyDescription></EmptyHeader></Empty>}</div> : null}
+    {record.kind === 'goal' && isExpanded ? <div className="goal-tasks flex min-w-0 flex-col gap-4 px-4 pb-4">{tasks.length ? tasks.map((task) => <WorkCard key={task.ref} record={{ ...task, kind: 'task' }} {...props} />) : <Empty><EmptyHeader><EmptyDescription>{record.tasks?.length ? 'No Tasks match the current filter.' : 'No Tasks in this Goal yet.'}</EmptyDescription></EmptyHeader></Empty>}</div> : null}
   </Card>;
 }
 export function Board({ state, busy, onFocus, onAction, onCommand, onMenu, onOpenSession }) {

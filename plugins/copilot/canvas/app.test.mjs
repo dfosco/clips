@@ -140,3 +140,48 @@ test('overview Lane and outside-Lanes groups enclose header and inset contrastin
   assert.ok(f.query('[data-lane-column="#l001"] [data-record="#alice#g001"]'));
   assert.ok(f.query('[data-lane-column="unassigned"] [data-record="#alice#g003"]'));
 });
+
+
+test('built nested cards wrap full titles and reserve a fixed menu track independently of status/actions', async (t) => {
+  const s = { ...state(), focus: task.ref };
+  const long = 'Unbroken' + 'abcdefghij'.repeat(30);
+  s.lanes[0].title = `Lane ${long}`; s.goals[0].title = `Goal ${long}`; s.goals[0].tasks[0].title = `Task ${long}`;
+  s.goals[0].tasks[0].labels[0].name = long;
+  s.goals[0].tasks[0].description = long;
+  const f = await mount(t, s, ({ action }) => action === 'open_session' ? { result: { url: '#joined' } } : null);
+  const check = (ref, title) => {
+    const card = f.query(`[data-record="${ref}"]`); assert.ok(card);
+    const heading = card.querySelector(':scope > [data-slot="card-header"] [data-variant="record"]');
+    assert.equal(heading.textContent, title); assert.equal(heading.dataset.size, 'record');
+    for (const c of ['min-w-0', 'flex-1', 'shrink', 'whitespace-normal', '[overflow-wrap:anywhere]', 'min-h-11']) assert.ok(heading.classList.contains(c), `${ref} title ${c}`);
+    for (const c of ['w-full', 'shrink-0', 'truncate', 'whitespace-nowrap']) assert.equal(heading.classList.contains(c), false, `${ref} title must not inherit ${c}`);
+    const footer = card.querySelector(':scope > [data-slot="card-footer"] > .record-actions');
+    for (const c of ['grid', 'min-w-0', 'grid-cols-[minmax(0,1fr)_2.5rem]']) assert.ok(footer.classList.contains(c), c);
+    assert.equal(footer.classList.contains('flex-wrap'), false);
+    const menu = footer.querySelector(`[data-menu="${ref}"]`);
+    for (const c of ['col-start-2', 'row-start-1', 'size-10']) assert.ok(menu.classList.contains(c), c);
+    assert.equal(menu.classList.contains('ml-auto'), false);
+    const status = footer.querySelector('.runtime-status');
+    for (const c of ['col-start-1', 'row-start-1', 'min-w-0', '[overflow-wrap:anywhere]']) assert.ok(status.classList.contains(c), c);
+    for (const action of footer.querySelectorAll('[data-send], [data-session]')) {
+      for (const c of ['min-h-10', 'min-w-0', 'max-w-full', 'whitespace-normal', '[overflow-wrap:anywhere]']) assert.ok(action.classList.contains(c), c);
+      assert.ok(action.closest('.row-start-2.col-start-1'), 'action is in its own shrinkable track');
+      assert.equal(action.classList.contains('whitespace-nowrap'), false);
+    }
+    return footer;
+  };
+  const goalFooter = check(goal.ref, s.goals[0].title); assert.ok(goalFooter.querySelector('[data-send]'));
+  const taskFooter = check(task.ref, s.goals[0].tasks[0].title); assert.equal(taskFooter.querySelector('[data-send]'), null);
+  const badge = f.query(`[data-record="${task.ref}"] [data-slot="badge"]`);
+  assert.equal(badge.textContent, long); assert.ok(badge.classList.contains('h-auto')); assert.ok(badge.classList.contains('[overflow-wrap:anywhere]'));
+  await f.click('[data-back]'); await f.wait(() => f.query('.lane-columns'));
+  check('#l001', s.lanes[0].title);
+  // Occupied/current-session actions use the same separate action track; Task Run stays absent.
+  s.projectSessions[0].recordRef = task.ref; s.projectSessions[0].recordKind = 'task'; s.projectSessions[0].status = 'running';
+  f.setServer(s); await f.click('[data-command="refresh"]');
+  const occupied = check(task.ref, s.goals[0].tasks[0].title);
+  assert.match(occupied.querySelector('.runtime-status').textContent, /Running/);
+  const open = occupied.querySelector('[data-session="joined"]'); assert.ok(open); assert.equal(open.textContent, 'Open current session');
+  await f.click('[data-session="joined"]'); assert.equal(f.calls.find((c) => c.action === 'open_session').input.sessionId, 'joined'); assert.equal(f.calls.some((c) => c.action === 'launch'), false);
+  await f.click(`[data-menu="${task.ref}"]`); assert.equal(f.query('[data-task-run]'), null); assert.ok(f.query('[data-task-open-session="joined"]'));
+});

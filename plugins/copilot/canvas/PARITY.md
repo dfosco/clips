@@ -47,3 +47,5 @@ DOM tests and previously loaded build logs do not prove this build was loaded.
 Validation uses Node tests, production-bundle jsdom interactions, real token-
 authenticated HTTP, canonical CLI integration and read-only real registry probes.
 No browser/CU automation or native visual acceptance is claimed.
+
+Record titles use a shrinkable, wrapping 44px-minimum Button beside the disclosure. Footers keep a fixed 40px menu track, a wrapping status row and a separate wrapping action row, including nested Tasks. Structural and emitted CSS checks establish this layout contract; native pixel fit remains user visual evidence.
