@@ -45,10 +45,13 @@ edit Clips journals directly or create a second board database.
   host cannot establish the requested top-level ownership or steerability,
   surface that limit and hand off the complete work contract for a top-level
   Copilot App session to continue.
-- The public SDK does not expose parent-agent metadata or a documented
-  parent-child agent API. An independently created SDK session is not proof of
-  top-level Copilot App visibility or steerability. Verify the actual session
-  in the App before calling it the top-level dev agent.
+- Public hook inputs can include optional `agentId`, `agentType`, and
+  `parentAgentId`. A missing parent ID can also mean an older runtime; it does
+  not prove a top-level session. No authoritative existing-App-session
+  parentage getter or verified top-level App dev creation/readback is exposed.
+  An independently created SDK session does not prove top-level Copilot App
+  visibility or steerability. Verify the actual session in the App and retain
+  the parentage limitation when supported evidence is unavailable.
 - Preserve the selected App session's model and permissions. The public SDK
   does not expose a documented getter for every App session setting. Do not
   guess or overwrite unavailable settings; report which settings the SDK
