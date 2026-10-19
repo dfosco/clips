@@ -39,6 +39,7 @@ const canvas = createCanvas({
     properties: { projectPath: stringField('Optional local repository path when the Copilot session has no working directory.') },
   },
   actions: [
+    { name: 'clear_clips_focus', description: 'Return this canvas to the Lane board and retain that explicit Back selection on reload.', inputSchema: { type: 'object', properties: {} }, handler: async (ctx) => (await getCanvasService()).service.action({ ...ctx, actionName: 'clear_focus' }) },
     { name: 'inspect_clips_runtime', description: 'Read loaded provider source identity, interpreter, selected project, and current session metadata without changing settings.', inputSchema: { type: 'object', properties: {} }, handler: async (ctx) => (await getCanvasService()).service.action({ ...ctx, actionName: 'diagnostics' }) },
     { name: 'select_clips_project', description: 'Choose the initialized Clips repository for this panel without changing the session working directory.', inputSchema: { type: 'object', properties: { projectPath: stringField('Absolute path to the intended initialized Clips repository.') }, required: ['projectPath'] }, handler: async (ctx) => (await getCanvasService()).service.action({ ...ctx, actionName: 'set_project' }) },
     { name: 'refresh_clips_board', description: 'Read the canonical Clips board and current canvas focus.', inputSchema: { type: 'object', properties: {} }, handler: async (ctx) => (await getCanvasService()).service.action({ ...ctx, actionName: 'refresh' }) },

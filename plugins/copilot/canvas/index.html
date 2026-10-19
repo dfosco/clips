@@ -8,45 +8,51 @@
     <script type="module" src="/canvas/app.js?instanceId=__INSTANCE_ID__&amp;token=__TOKEN__"></script>
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand"><span class="brand-mark">C</span><div><strong>Clips Work</strong><small id="project-path">Choose a project with a Clips store</small></div></div>
-      <div class="top-actions">
-        <button id="refresh" class="quiet" type="button">Refresh</button>
-        <button id="choose-project" class="quiet" type="button">Project</button>
-        <button id="new-lane" class="primary" type="button">New Lane</button>
-        <button id="new-goal" class="primary" type="button">New Goal</button>
-      </div>
-    </header>
-    <main class="layout">
-      <aside class="sidebar" aria-label="Clips records">
-        <div class="sidebar-head"><h1>Work</h1><button id="new-task" class="quiet small" type="button">New Task</button></div>
-        <section id="record-tree" aria-live="polite"><p class="muted">Loading Clips records…</p></section>
-      </aside>
-      <section class="main-panel">
-        <div id="message" class="message" role="status" aria-live="polite" hidden></div>
-        <div id="record-detail" class="record-detail"><p class="muted">Choose a Lane, Goal, or Task to see its context.</p></div>
-        <section class="session-directory" aria-labelledby="sessions-heading">
-          <div class="section-head"><div><h2 id="sessions-heading">Project sessions</h2><p class="muted">Activity and settings are read from the current joined session. Other session activity may be unavailable.</p><p id="session-warnings" class="notice"></p></div></div>
-          <div id="project-sessions" class="session-list"></div>
-        </section>
-      </section>
+    <main class="work-screen">
+      <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+      <div id="board-view"><p class="muted">Loading Clips work…</p></div>
+      <details class="session-directory">
+        <summary>Project sessions<span id="session-count"></span></summary>
+        <p id="session-warnings" class="notice" hidden></p>
+        <div id="project-sessions" class="session-list"></div>
+      </details>
     </main>
-    <dialog id="create-dialog">
+    <dialog id="record-menu-dialog" class="record-menu-dialog" aria-labelledby="menu-title">
+      <h2 id="menu-title"></h2>
+      <button id="menu-focus-lane" class="menu-item">Focus Lane</button>
+      <button id="menu-labels" class="menu-item">Labels</button>
+      <button id="menu-new-task" class="menu-item">New Task</button>
+      <button id="menu-close-goal" class="menu-item">Close Goal</button>
+      <label>Status<select id="menu-status"></select></label>
+      <div class="dialog-actions"><button data-close-dialog>Cancel</button><button id="menu-status-save">Update status</button></div>
+    </dialog>
+    <dialog id="label-dialog" aria-labelledby="label-title">
+      <h2 id="label-title">Labels</h2><p id="label-record" class="muted"></p>
+      <label>Add label<select id="label-choice"></select></label><button id="add-label">Add</button>
+      <label>Remove label<select id="assigned-label-choice"></select></label><button id="remove-label">Remove</button>
+      <div class="dialog-actions"><button data-close-dialog>Done</button></div>
+    </dialog>
+    <dialog id="close-dialog" aria-labelledby="close-title">
+      <h2 id="close-title">Close Goal</h2><p id="close-record-name"></p>
+      <p class="muted">This marks the Goal closed in Clips. It does not record engineering acceptance.</p>
+      <div class="dialog-actions"><button data-close-dialog>Cancel</button><button id="close-confirm" class="primary">Close Goal</button></div>
+    </dialog>
+    <dialog id="create-dialog" aria-labelledby="create-title">
       <form id="create-form">
         <h2 id="create-title">Create record</h2>
-        <label>Title<input id="create-title-input" name="title" required maxlength="200"></label>
-        <label>Description<textarea id="create-description" name="description" rows="5" maxlength="12000"></textarea></label>
-        <div id="acceptance-field" hidden><label>Acceptance criteria, one per line<textarea id="create-acceptance" name="acceptanceCriteria" rows="4" maxlength="6000"></textarea></label></div>
-        <div id="parent-field" hidden><label id="parent-label">Parent Goal<select id="parent-goal"></select></label></div>
-        <div class="dialog-actions"><button class="quiet" id="create-cancel" type="button">Cancel</button><button class="primary" id="create-submit" type="submit">Create</button></div>
+        <label>Title<input id="create-title-input" required maxlength="200"></label>
+        <label>Description<textarea id="create-description" rows="5" maxlength="12000"></textarea></label>
+        <div id="acceptance-field" hidden><label>Acceptance criteria, one per line<textarea id="create-acceptance" rows="4" maxlength="6000"></textarea></label></div>
+        <div id="parent-field" hidden><label><span id="parent-label-text">Parent Goal</span><select id="parent-goal"></select></label></div>
+        <div class="dialog-actions"><button type="button" data-close-dialog>Cancel</button><button class="primary" id="create-submit" type="submit">Create</button></div>
       </form>
     </dialog>
-    <dialog id="project-dialog">
+    <dialog id="project-dialog" aria-labelledby="project-title">
       <form id="project-form">
-        <h2>Choose a Clips project</h2>
-        <p class="muted">Use an absolute repository path with an initialized Clips store. Copilot’s working directory is used automatically when the host provides it.</p>
-        <label>Project path<input id="project-path-input" name="projectPath" required autocomplete="off" placeholder="/Users/you/work/project"></label>
-        <div class="dialog-actions"><button class="quiet" id="project-cancel" type="button">Cancel</button><button class="primary" type="submit">Open project</button></div>
+        <h2 id="project-title">Choose a Clips project</h2>
+        <p class="muted">Choose an initialized Clips repository. This changes this canvas selection and keeps the current session working directory.</p>
+        <label>Project path<input id="project-path-input" required autocomplete="off" placeholder="/Users/you/work/project"></label>
+        <div class="dialog-actions"><button type="button" data-close-dialog>Cancel</button><button class="primary" type="submit">Open project</button></div>
       </form>
     </dialog>
   </body>

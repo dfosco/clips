@@ -11,9 +11,10 @@ const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const loadedSourceHash = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
 const assets = new Map([
   ['/canvas/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/canvas/board-view.mjs', ['board-view.mjs', 'text/javascript; charset=utf-8']],
   ['/canvas/style.css', ['style.css', 'text/css; charset=utf-8']],
 ]);
-const allowedActions = new Set(['context', 'diagnostics', 'refresh', 'set_project', 'focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
+const allowedActions = new Set(['context', 'diagnostics', 'refresh', 'set_project', 'focus', 'clear_focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
 const sessionId = (session) => session?.id || session?.sessionId || null;
@@ -95,7 +96,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       instanceId: instance.instanceId,
       copilotSessionId: instance.sessionId,
       hostCapabilities: hostCapabilities || {
-        appSessionVisibilityVerified: sessionResult.appSessionVisibilityVerified === true || sessions.some((session) => session.steerable === true),
+        appSessionVisibilityVerified: sessionResult.appSessionVisibilityVerified === true,
         hostIdConfigured: sessionResult.hostIdConfigured === true,
       },
       focus,
@@ -125,10 +126,23 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
   }
 
   async function dispatch(instance, action, input = {}) {
+    if (input.expectedProjectPath !== undefined && input.expectedProjectPath !== instance.projectPath) {
+      throw new Error('The selected project changed before this action ran. Refresh and review the current project.');
+    }
+    // A concurrent project selection cannot retarget an in-flight record action.
+    return dispatchInProject(action === 'set_project' ? instance : { ...instance }, action, input);
+  }
+
+  async function dispatchInProject(instance, action, input = {}) {
     if (!allowedActions.has(action)) throw new Error(`Unsupported canvas action: ${action}`);
     if (action === 'context') return { projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId };
     if (action === 'diagnostics') return { serviceSourceSha256: loadedSourceHash, projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId, runtime: await runtime.diagnostics() };
     if (action === 'refresh') return buildState(instance);
+    if (action === 'clear_focus') {
+      await requireProject(instance);
+      await writeJson(focusPath(instance), { ref: null, updatedAt: new Date().toISOString() });
+      return { focus: null, state: await buildState(instance) };
+    }
     if (action === 'set_project') {
       const selectedPath = String(input.projectPath || '').trim();
       if (!path.isAbsolute(selectedPath)) throw new Error('Enter an absolute local repository path.');

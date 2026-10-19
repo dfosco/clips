@@ -206,3 +206,62 @@ test('namespaced status and Task creation preserve the exact selected canonical 
   assert.deepEqual(commands[1], ['task', 'status', '#alice#g001#t01', 'in_progress']);
   assert.equal(commands[2][2], '#alice#g001');
 });
+
+test('authenticated layout module loads through the real asset route and Back persists explicit null focus', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-layout-assets-'));
+  const f = fixture();
+  let service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  const ctx = { instanceId: 'layout', sessionId: 'host', input: { projectPath: '/repo' } };
+  const opened = new URL((await service.open(ctx)).url);
+  const html = await (await fetch(opened)).text();
+  assert.match(html, /id="board-view"/);
+  assert.doesNotMatch(html, /class="sidebar"/);
+  const app = new URL('/canvas/app.js', opened); app.search = opened.search;
+  const source = await (await fetch(app)).text();
+  assert.match(source, /board-view\.mjs\?\$\{params\}/);
+  const module = new URL('/canvas/board-view.mjs', opened); module.search = opened.search;
+  const response = await fetch(module); assert.equal(response.status, 200);
+  assert.match(await response.text(), /export function createBoardView/);
+  module.search = ''; assert.equal((await fetch(module)).status, 403);
+  await service.dispatch('layout', 'focus', { ref: '#l001' });
+  const back = await service.dispatch('layout', 'clear_focus'); assert.equal(back.state.focus, null);
+  assert.equal((await service.state('layout')).outline, null);
+  await service.shutdown(); service = createCanvasService({ runtime: f.runtime, dataDir });
+  await service.open(ctx);
+  assert.equal((await service.state('layout')).focus, null);
+});
+
+test('alternate provider fallback never promotes joined steerability into App visibility proof', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-capability-fallback-'));
+  const f = fixture(); delete f.runtime.hostCapabilities;
+  f.sessions.push({ id: 'joined', steerable: true, joined: true, appVisible: 'unverified' });
+  const service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'fallback', sessionId: 'host', input: { projectPath: '/repo' } });
+  assert.equal((await service.state('fallback')).hostCapabilities.appSessionVisibilityVerified, false);
+});
+
+test('project-context guard rejects stale actions and in-flight mutation keeps its original project', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-project-action-race-'));
+  const f = fixture();
+  let releaseBoard; let boardEntered;
+  const entered = new Promise((resolve) => { boardEntered = resolve; });
+  const gate = new Promise((resolve) => { releaseBoard = resolve; });
+  const originalList = f.runtime.listBoard;
+  let pause = true;
+  f.runtime.listBoard = async (project) => {
+    if (pause && project === '/A') { pause = false; boardEntered(); await gate; }
+    return originalList(project);
+  };
+  const service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'race', sessionId: 'host', input: { projectPath: '/A' } });
+  const pending = service.dispatch('race', 'set_status', { ref: '#g001', status: 'in_progress', expectedProjectPath: '/A' });
+  await entered;
+  await service.dispatch('race', 'set_project', { projectPath: '/B' });
+  releaseBoard(); await pending;
+  assert.equal(f.calls.find(([kind]) => kind === 'recordCommand')[2], '/A');
+  await assert.rejects(service.dispatch('race', 'set_status', { ref: '#g001', status: 'closed', expectedProjectPath: '/A' }), /selected project changed/);
+  assert.equal(f.calls.filter(([kind]) => kind === 'recordCommand').length, 1);
+});
