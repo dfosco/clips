@@ -84,6 +84,11 @@ An explicit project input or saved user selection takes precedence over the
 host working directory. A missing store produces an actionable error for that
 project; it never substitutes the Clips source checkout or initializes a store.
 
+Agent callers use `list_clips_projects` to read the same canonical local-user
+catalog as the UI chooser, then pass an exact returned `projectId` to
+`select_clips_project`. Selection revalidates that ID and fails without a
+fallback if it is stale. Arbitrary `projectPath` selection is not accepted.
+
 ## Execution and reload
 
 `launchRecord` is retained as an adapter method name for compatibility. It sends
