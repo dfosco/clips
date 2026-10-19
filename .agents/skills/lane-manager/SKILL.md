@@ -9,7 +9,7 @@ description: >-
   as Lane Manager, including documentation and skill edits.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.19.3"
+  version: "2026.10.19.4"
 ---
 
 # Lane Manager
@@ -187,26 +187,14 @@ unexpectedly returns a child, report the mismatch and do not launch replacements
 or claim a top-level handoff. Reuse a verified top-level dev agent when creation
 is unavailable.
 
-Before declaring execution handed off, verify the runtime agent's association
-with the actual work record as well as its parentage and workspace. When
-reusing or reassigning a Paseo dev agent, read its current native labels and
-update `clips.ref`, `clips.projectId`, and `clips.kind` to the actual qualified
-record ref, observed Paseo project ID, and record kind. Preserve unrelated
-labels when updating; do not replace the whole label map from a stale snapshot.
-Reread the runtime metadata to confirm the binding. New launches need the same
-verification even when the launch path sets these labels automatically.
-
-Clips `owner` prose or an agent title does not connect it to the board. An agent
-reused from `#g012` for `#g014` must no longer advertise `#g012` as its current
-execution binding. A single `clips.ref` cannot represent several simultaneously
-active Goals: do not relabel an unrelated active owner and claim both are
-connected. Finish or explicitly transfer the old outcome, use separate suitable
-top-level agents, or use a supported multi-record association if one exists.
-If binding updates or verification fail, report the incomplete association
-without claiming the board connection succeeded. Correct metadata alone is not
-proof that the board renders the Go to agent action; if a display problem
-persists, pass that concrete runtime/UI defect to the UI dev owner rather than
-assuming it is resolved or implementing a fix as Lane Manager.
+Use the Clips skill's [shared Paseo procedure](../clips/references/paseo.md)
+for record updates, actual project/session discovery, native association and
+readback, direct steering/reuse, and configured launch mechanics. Do not maintain
+a separate binding recipe here. Before declaring a handoff complete, require
+that procedure's observed record/workspace association as well as the top-level
+parentage required above. Owner prose alone is not a runtime link; one session's
+single binding must not be claimed for simultaneous Goals. Ordinary dev agents
+follow Clips directly and do not acquire Lane management duties by doing so.
 
 For example:
 
@@ -265,76 +253,24 @@ reread and coordinate instead of retrying with a forced takeover. Release only
 your own claim when relinquishing management. Claim state is ownership, not
 proof that a runtime session is alive or running.
 
-## Start a configured Paseo session from a Clips record
+## Launch through the shared Clips procedure
 
-When an actionable request needs a new dev agent, or the user explicitly asks
-for a Paseo session for a Lane, Goal, or Task, use the repository's Clips Paseo
-CLI on Node.js 22.18 or later when available. It accepts
-a provider/model, provider-supported thinking and speed settings, and the
-permission mode. New sessions default to Full access where supported. It reads
-the current Clips record and includes the same context as the plugin UI.
+Use [Clips' configured launch procedure](../clips/references/paseo.md#configure-a-new-session-only-when-needed)
+for supported discovery, profile/settings materialization, permission modes,
+preview, workspace selection, top-level creation and actual readback. Necessary
+scoped dev sessions are already authorized by the actionable request; do not
+add a start/continuation confirmation or stop at a preview. Keep explicit
+planning/defer instructions and real blockers distinct from routine execution.
 
-From the Clips checkout, discover the host's live choices first:
-
-```sh
-node plugins/paseo/cli.js options --project . --provider codex
-node plugins/paseo/cli.js options --project . --provider codex/gpt-6.1-sol
-```
-
-The provider-only query lists ready models, provider permission modes and their
-default mode. The provider/model query includes thinking options, permission
-modes, features and their allowed values. Add `--thinking <id>` if feature
-availability depends on the chosen thinking level. Use the returned values.
-`--permission full-access` and `--permission restricted` select a matching
-provider mode; the default is full access. Use `--mode <id>` for an exact
-provider mode ID when the user requests a specific mode.
-
-Permission modes are provider-specific. If the requested level is missing
-from live discovery, do not substitute the provider default; report the
-available modes and ask which one to use.
-
-Preview the exact record, workspace action, prompt and Paseo configuration:
-
-```sh
-node plugins/paseo/cli.js start --project . --ref '#g001#t01' \
-  --provider codex/gpt-6.1-sol --thinking high --speed fast \
-  --permission full-access --dry-run --json
-```
-
-For a restricted session, replace `--permission full-access` with
-`--permission restricted`. Check the preview's `config.modeId` against the live
-mode list so the selected provider mode is explicit.
-
-Lane launches also require `--host-id <observed-Paseo-host-id>`, including in
-dry-run mode. Use the actual app host ID; do not substitute a hostname, URL,
-display name, or invented ID. Goal and Task launches do not need this option.
-
-```sh
-node plugins/paseo/cli.js start --project . --ref '#l001' \
-  --provider codex/gpt-6.1-sol --thinking high --speed fast \
-  --host-id '<observed-Paseo-host-id>' --permission full-access --dry-run --json
-```
-
-The Lane preview includes its claim, host identity, prompt, and configuration.
-An existing manager blocks a new launch before workspace or session creation;
-coordinate with that manager instead. A live launch creates an idle session,
-claims with that actual session identity, then sends the management prompt.
-If claiming or sending fails, report the returned session and ownership state.
-Do not infer that the agent is running, release a retained claim automatically,
-or start a replacement manager.
-
-Starting a session creates an agent in Paseo and may create a worktree. The
-actionable request already authorizes the necessary scoped dev session: after
-checking the preview, run the same command without `--dry-run` in the same flow.
-Do not wait for a separate session-start confirmation. An explicit plan-only,
-defer, or queue instruction overrides this execution default. Pass
-`--workspace <id>` for the selected current/existing workspace, or `--base <branch>` for a requested
-new worktree. Without a matching workspace, the CLI preview proposes a new
-worktree; check that against the user's request/settings before launching.
-After launch, inspect `paseo inspect <returned-agent-id> --json` and verify
-`ParentAgentId: null` plus the selected workspace. If the CLI is unavailable,
-use the Clips plugin launch dialog with supported provider settings and verify
-the same parentage. Do not substitute an agent-scoped creation command.
+For a Lane management launch, inspect existing ownership first. The shared
+launch path requires the actual observed app host ID, never a hostname, URL,
+display label or invented value. Existing ownership blocks a duplicate manager
+before session/workspace creation. A direct Lane launch creates an idle session,
+claims with its actual identity, then sends the management prompt. If claiming
+or sending fails, report the returned session/claim state; do not infer that it
+is running, automatically release a retained claim, or start a replacement.
+Goal/Task dev launches do not require Lane ownership. Follow the ownership
+section above when coordinating or reusing a manager's existing claim.
 
 ## Run the decision loop
 

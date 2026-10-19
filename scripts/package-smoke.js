@@ -58,6 +58,7 @@ try {
   assert(!paths.some((file) => /^plugins\/paseo\/.*\.test\.tsx?$/.test(file)), 'tarball contains Paseo tests');
   assert(paths.includes('dist/web/index.html'), 'tarball is missing board assets');
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
+  assert(paths.includes('.agents/skills/clips/references/paseo.md'), 'tarball is missing shared Paseo guidance');
   assert(paths.includes('.agents/skills/lane-manager/SKILL.md'), 'tarball is missing the Lane Manager skill');
   assert(paths.includes('.agents/skills/loopz/SKILL.md'), 'tarball is missing the Loopz skill');
   assert(paths.includes('.agents/skills/loopz/agents/openai.yaml'), 'tarball is missing Loopz agent metadata');
@@ -111,6 +112,8 @@ try {
     'packaged init did not install the Clips skill',
   );
   assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', 'SKILL.md')), 'packaged init did not install Lane Manager');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'references', 'paseo.md')), 'packaged init did not install shared Paseo guidance');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', '..', 'clips', 'references', 'paseo.md')), 'Lane Manager cannot resolve shared installed guidance');
   assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'loopz', 'SKILL.md')), 'packaged init did not install Loopz');
   const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
   fs.writeFileSync(localNote, 'local notes survive reinitialization\n');

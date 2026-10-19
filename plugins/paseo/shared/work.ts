@@ -163,5 +163,7 @@ export function promptFor(target: WorkTarget): string {
 Start by reading AGENTS.md and the Clips skill if present. Read the complete Clips record for ${target.ref} using the local Clips CLI (clips view '${target.ref}' --json), then inspect linked records, blockers, and relevant source files.
 ${instructions}
 
+Follow the Clips skill's shared Paseo integration procedure for work-record updates and actual session/project/workspace binding readback when Paseo is available. Keep owner, status, blockers, results and acceptance evidence current through supported commands. An ordinary Goal/Task dev agent does not need Lane Manager role or a Lane management claim to contribute. Without Paseo, continue authorized local Clips work and report runtime association as unavailable.
+
 The worktree shares the repository's Clips store through the common Git directory. Preserve workflow record history; distinguish completed implementation from accepted work. Summarize changed files, checks, and unresolved issues. Do not create GitHub Issues or assume Clips status means a Paseo agent is running.`;
 }

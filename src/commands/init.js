@@ -11,7 +11,7 @@ import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
 import { importSkill, loadSkillLibrary } from 'skillshop/import';
 import { installUserSkill } from 'skillshop/user-install';
-import { isLiveLaneManager } from '../lib/lane-manager-install.js';
+import { isLiveSkill } from '../lib/lane-manager-install.js';
 
 const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -157,7 +157,7 @@ async function installSkills(cwd, scope) {
     const targetDir = scope === 'user'
       ? path.join(os.homedir(), '.agents', 'skills', name)
       : path.join(agentDir, 'skills', name);
-    if (isLiveLaneManager(targetDir)) {
+    if (isLiveSkill(targetDir)) {
       results.push({ specifier, targetDir, live: true });
       continue;
     }

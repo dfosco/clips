@@ -326,14 +326,14 @@ installs go to `~/.agents/skills` and replace existing copies, including
 local additions. Imports are independent filesystem snapshots; there is no
 live subscription to the source library or retroactive revocation.
 
-For Lane Manager development on this machine, install the maintained checkout
-as a live skill instead of a snapshot:
+For Clips and Lane Manager development on this machine, install the maintained
+checkout as live skills instead of snapshots:
 
 ```bash
-node scripts/install-lane-manager.js
+node scripts/install-live-skills.js
 ```
 
-This links only Lane Manager from `~/.agents/skills` and
+This links only Clips and Lane Manager from `~/.agents/skills` and
 `${CODEX_HOME:-~/.codex}/skills` to this checkout. Existing copies are moved to
 `~/.clips/skill-backups/` (`CLIPS_HOME` overrides the `.clips` root); repeating
 the command leaves current links unchanged. Source edits become visible through
@@ -342,9 +342,10 @@ supports linked skill folders and detects skill changes; restart it if discovery
 does not refresh. Instructions already loaded into a conversation are not
 rewritten by a filesystem change. See [OpenAI's skill discovery documentation](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills).
 
-The checkout CLI's `init` preserves a live Lane Manager link or its canonical
-checkout directory. Production mode switching refuses to refresh a project with
-such a source because a saved older CLI may overwrite it. This protection does
+The checkout CLI's `init` preserves either skill's live link or canonical
+checkout directory. The legacy `scripts/install-lane-manager.js` command still
+installs only Lane Manager. Production mode switching refuses to refresh a
+project with such a source because a saved older CLI may overwrite it. This protection does
 not cover invoking an old package or a third-party skill installer directly.
 
 The CLI requires the published `skillshop@2.1.0` package. The dependency
@@ -357,7 +358,10 @@ Lanes → Goals → Tasks from the selected repository's local Clips store and
 creates Paseo worktree workspaces with an optional running agent. It also shows
 live agent activity, a **Running** filter, and links back to existing workspaces.
 Clips remains the source of truth for work definitions and acceptance. Paseo
-owns execution and agent lifecycle.
+owns execution and agent lifecycle. Ordinary dev agents use the Clips skill
+[shared Paseo procedure](.agents/skills/clips/references/paseo.md) to maintain
+records and verify native execution bindings. They do not need the Lane Manager
+role or a Lane management claim to update assigned Goals/Tasks.
 
 Install the plugin from this monorepo with:
 

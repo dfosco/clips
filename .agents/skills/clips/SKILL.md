@@ -6,10 +6,10 @@ description: >-
   record history. Use
   when framing an outcome, negotiating scope or interfaces, assigning work,
   reviewing completion, resuming tracked work, or managing existing CRs, ADRs,
-  and optional GitHub synchronization.
+  optional Paseo work-record/execution association, and GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.11.1"
+  version: "2026.10.19.1"
 ---
 
 # Clips
@@ -152,6 +152,26 @@ Distinguish component `dependencies` from task `blocked_by`. The former describe
 system relationships; the latter describe required work ordering. Do not turn
 every runtime dependency into a serial implementation schedule. Treat declared
 blockers as coordination data, not proof that a scheduler enforces them.
+
+## Keep assigned work and optional Paseo execution in sync
+
+An ordinary dev agent can take a direct user request, maintain its agreed
+Goal/Task contracts, and implement the assigned outcome using this skill. It
+does not become Lane Manager or need a Lane management claim to contribute.
+Keep the actual owner, status, blockers, results, and evidence current through
+supported Clips commands. Preserve prior requests and acceptance history.
+
+When working in Paseo or handing work to a Paseo session, read the canonical
+[Paseo integration procedure](references/paseo.md). It covers the plugin's
+planning-versus-runtime sources, discovery of actual session/workspace/project
+identity, native record binding and readback, direct steering/reuse, and optional
+configured launches. Lane Manager uses these same mechanics while retaining
+its separate coordination-only and top-level-delegation policies.
+
+Without Paseo, continue authorized engineering and Clips record updates with
+the local CLI. Report that runtime association is unavailable; do not fabricate
+a live session, a running board state, or a management claim. A lifecycle status
+or owner string is not evidence that an agent is executing.
 
 ## Accept outcomes with evidence
 

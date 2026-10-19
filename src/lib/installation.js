@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getSystemClipsDir } from './registry.js';
-import { isLiveLaneManager } from './lane-manager-install.js';
+import { findLiveSkill, isLiveSkill } from './lane-manager-install.js';
 import { getRepoRoot } from './core.js';
 
 const PACKAGE_NAME = '@dfosco/clips';
@@ -73,7 +73,7 @@ export function reconcileSkills(project, previous = {}, selected = {}, agentDir 
   if (!root.startsWith(`${project}${path.sep}`)) throw new Error(`Agent directory is outside project: ${agentDir}`);
   for (const [relative, digest] of Object.entries(previous)) {
     if (Object.hasOwn(selected, relative)) continue;
-    if (relative.split(path.sep)[0] === 'lane-manager' && isLiveLaneManager(path.join(root, 'lane-manager'))) continue;
+    if (isLiveSkill(path.join(root, relative.split(path.sep)[0]))) continue;
     const file = path.join(root, relative);
     if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.lstatSync(file).isFile()) continue;
     const actual = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -144,8 +144,10 @@ export function switchInstallation(mode, argv = []) {
     catch { return '.agents'; }
   })();
   // A saved older CLI may not understand live links. Refuse before invoking it.
-  if (mode === 'prod' && isLiveLaneManager(path.resolve(project, agentDir, 'skills', 'lane-manager'))) {
-    throw new Error('Cannot refresh production skills over a live Lane Manager source. Keep the live installation or choose a project without that source link.');
+  const liveProject = findLiveSkill(path.resolve(project, agentDir, 'skills'));
+  if (mode === 'prod' && liveProject) {
+    const title = liveProject === 'lane-manager' ? 'Lane Manager' : 'Clips';
+    throw new Error(`Cannot refresh production skills over a live ${title} source. Keep the live installation or choose a project without that source link.`);
   }
   const globalPath = globalPackagePath();
   let state = saveInstalledPackage(globalPath, readState());
@@ -185,10 +187,12 @@ export function dispatchProd(argv) {
       try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
       catch { return '.agents'; }
     })();
-    const liveUser = isLiveLaneManager(path.join(os.homedir(), '.agents', 'skills', 'lane-manager'));
-    const liveProject = isLiveLaneManager(path.resolve(project, agentDir, 'skills', 'lane-manager'));
-    if ((userScope && liveUser) || (projectScope && liveProject) || (!userScope && !projectScope && (liveUser || liveProject))) {
-      throw new Error('Cannot run saved production init over a live Lane Manager source. Use the checkout CLI in development mode to preserve it.');
+    const liveUser = findLiveSkill(path.join(os.homedir(), '.agents', 'skills'));
+    const liveProject = findLiveSkill(path.resolve(project, agentDir, 'skills'));
+    const live = userScope ? liveUser : projectScope ? liveProject : liveUser || liveProject;
+    if (live) {
+      const title = live === 'lane-manager' ? 'Lane Manager' : 'Clips';
+      throw new Error(`Cannot run saved production init over a live ${title} source. Use the checkout CLI in development mode to preserve it.`);
     }
   }
   const prod = state.prod_package && packageAt(state.prod_package);

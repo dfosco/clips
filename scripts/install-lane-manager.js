@@ -3,23 +3,27 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { LIVE_SKILL_NAMES } from '../src/lib/lane-manager-install.js';
 
-export function installLaneManager({
-  source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.agents/skills/lane-manager'),
+export function installLiveSkill({
+  name,
+  source,
   home = os.homedir(),
   codexHome = process.env.CODEX_HOME || path.join(home, '.codex'),
   backupRoot = path.join(process.env.CLIPS_HOME || path.join(home, '.clips'), 'skill-backups'),
 } = {}) {
+  if (!LIVE_SKILL_NAMES.includes(name)) throw new Error(`Unsupported live skill: ${name}`);
   source = fs.realpathSync(source);
-  if (!fs.statSync(path.join(source, 'SKILL.md')).isFile()) throw new Error('Lane Manager source is missing SKILL.md');
+  if (!fs.statSync(path.join(source, 'SKILL.md')).isFile()) throw new Error(`${name} source is missing SKILL.md`);
   const targets = [...new Set([
-    path.join(home, '.agents', 'skills', 'lane-manager'),
-    path.join(codexHome, 'skills', 'lane-manager'),
+    path.join(home, '.agents', 'skills', name),
+    path.join(codexHome, 'skills', name),
   ])];
   return targets.map((target) => {
     let existing;
     try { existing = fs.lstatSync(target); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-    if (existing?.isSymbolicLink() && fs.existsSync(target) && fs.realpathSync(target) === source) {
+    // Also protect a canonical directory reached through a linked parent.
+    if (existing && fs.existsSync(target) && fs.realpathSync(target) === source) {
       return { target, source, changed: false };
     }
     if (target === source) return { target, source, changed: false };
@@ -31,7 +35,7 @@ export function installLaneManager({
     try {
       if (existing) {
         fs.mkdirSync(backupRoot, { recursive: true });
-        const backupDir = fs.mkdtempSync(path.join(backupRoot, 'lane-manager-'));
+        const backupDir = fs.mkdtempSync(path.join(backupRoot, `${name}-`));
         backup = path.join(backupDir, 'skill');
         fs.renameSync(target, backup);
       }
@@ -41,6 +45,14 @@ export function installLaneManager({
       if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
     }
     return { target, source, backup, changed: true };
+  });
+}
+
+export function installLaneManager(options = {}) {
+  return installLiveSkill({
+    ...options,
+    name: 'lane-manager',
+    source: options.source || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.agents/skills/lane-manager'),
   });
 }
 
