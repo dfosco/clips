@@ -105,7 +105,7 @@ The installer verifies its wrapper and runtime.node before and after linking.
 After source changes, use `extensions_reload` from the same Copilot session,
 or `session.rpc.extensions.reload()` through its actual joined host connection.
 A separate SDK resume is a separate runtime and cannot stand in for that host.
-Then reopen the same canvas instance to refresh its renderer. The canvas's
+Then reopen the same canvas instance to load its compiled React/shadcn/Tailwind renderer. The closed app.js/style.css asset pair has independently authenticated URLs and source/build hashes verified by the installer. The project chooser reads canonical local-user Clips registry entries, accepts exact discovered IDs and revalidates the selected common Git/worktree store without cwd substitution. The canvas's
 Refresh button rereads data only; it does not reload provider modules.
 `inspect_clips_runtime` reports hashes captured when the runtime/service modules
 loaded, actual process/interpreter paths and joined-session readback. Inspect

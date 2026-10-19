@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@source "./**/*.{js,jsx}";
+@custom-variant dark (&:is(.dark *));
+/* shadcn semantic tokens, customized to GitHub/Primer's surfaces and accents.
+   Copilot host tokens win; prefers-color-scheme supplies a standalone fallback. */
+:root {
+  color-scheme: light dark;
+  --radius: .5rem;
+  --background: var(--background-color-default, #ffffff);
+  --foreground: var(--text-color-default, #1f2328);
+  --card: var(--background-color-muted, #ffffff);
+  --card-foreground: var(--foreground);
+  --popover: var(--background-color-muted, #ffffff);
+  --popover-foreground: var(--foreground);
+  --primary: #1f883d;
+  --primary-foreground: #ffffff;
+  --secondary: #f6f8fa;
+  --secondary-foreground: #1f2328;
+  --muted: #f6f8fa;
+  --muted-foreground: #59636e;
+  --accent: #ddf4ff;
+  --accent-foreground: #0969da;
+  --destructive: #cf222e;
+  --border: #d1d9e0;
+  --input: #d1d9e0;
+  --ring: #0969da;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: var(--background-color-default, #0d1117);
+    --foreground: var(--text-color-default, #f0f6fc);
+    --card: var(--background-color-muted, #151b23);
+    --popover: var(--background-color-muted, #151b23);
+    --primary: #238636;
+    --secondary: #212830;
+    --secondary-foreground: #f0f6fc;
+    --muted: #212830;
+    --muted-foreground: #9198a1;
+    --accent: #1f3449;
+    --accent-foreground: #79c0ff;
+    --destructive: #f85149;
+    --border: #3d444d;
+    --input: #3d444d;
+    --ring: #58a6ff;
+  }
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply m-0 bg-background text-foreground antialiased; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  button:not(:disabled), [role="button"]:not(:disabled) { cursor: pointer; }
+  code { @apply text-xs; }
+}

@@ -1,83 +1,118 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-import { JSDOM } from 'jsdom';
+import { mount, state, task, goal } from './test-harness.mjs';
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
-async function settle() { for (let i = 0; i < 8; i++) await tick(); }
-
-test('actual app wires Lane columns, menus, canonical close/create, and Back against stale refresh', async (t) => {
-  const html = await fs.readFile(new URL('./index.html', import.meta.url), 'utf8');
-  const dom = new JSDOM(html, { url: 'http://127.0.0.1/canvas/index.html?instanceId=panel&token=fixture', pretendToBeVisual: true });
-  const globals = Object.fromEntries(['window', 'document', 'location', 'fetch', 'setTimeout', 'clearTimeout'].map((key) => [key, globalThis[key]]));
-  let interval;
-  dom.window.setInterval = (callback) => { interval = callback; return 1; };
-  dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
-  dom.window.HTMLDialogElement.prototype.close = function () { this.open = false; };
-  let state = {
-    projectPath: '/repo', focus: null,
-    lanes: [{ ref: '#l001', lane_id: 'l001', title: 'Lane', status: 'open', goal_refs: ['#alice#g001'], manager_claim: { owners: [] } }, { ref: '#l002', lane_id: 'l002', title: 'Closed Lane', status: 'closed', goal_refs: [] }],
-    goals: [{ ref: '#alice#g001', goal_id: 'g001', title: 'Goal', status: 'open', tasks: [{ ref: '#alice#g001#t01', title: 'Task', status: 'open' }] }],
-    projectSessions: [], labels: [], warnings: [], hostCapabilities: { canSendToCurrentSession: true, currentSessionId: 'host', hostIdConfigured: false },
-  };
-  const calls = [];
-  let blockRefresh = false;
-  let releaseRefresh;
-  const fetchMock = async (_url, options) => {
-    const request = JSON.parse(options.body); calls.push(request);
-    let result;
-    if (request.action === 'context') result = { projectPath: '/repo' };
-    else if (request.action === 'refresh') {
-      result = structuredClone(state);
-      if (blockRefresh) { blockRefresh = false; await new Promise((resolve) => { releaseRefresh = resolve; }); }
-    } else {
-      if (request.action === 'focus') state.focus = request.input.ref;
-      if (request.action === 'clear_focus') state.focus = null;
-      if (request.action === 'set_status') { const target = [...state.goals, ...state.goals.flatMap((g) => g.tasks)].find((r) => r.ref === request.input.ref); target.status = request.input.status; }
-      if (request.action === 'set_project') state.projectPath = request.input.projectPath;
-      result = { state: structuredClone(state) };
-    }
-    return { ok: true, json: async () => ({ result }) };
-  };
-  Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location, fetch: fetchMock, setTimeout: () => 1, clearTimeout: () => {} });
-  t.after(() => { Object.assign(globalThis, globals); dom.window.close(); });
-  const source = (await fs.readFile(new URL('./app.js', import.meta.url), 'utf8')).replace('import(`/canvas/board-view.mjs?${params}`)', `import(${JSON.stringify(new URL('./board-view.mjs', import.meta.url).href)})`);
-  // Only module transport is replaced for Node; the real HTTP auth route is covered separately.
-  await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
-  const doc = dom.window.document;
-  const click = (selector) => { const node = doc.querySelector(selector); assert.ok(node, selector); node.click(); };
-  assert.ok(doc.querySelector('.lane-columns'));
-  click('[data-lane="#l001"]'); await settle(); assert.ok(doc.querySelector('.goal-columns'));
-  blockRefresh = true; interval(); await settle(); assert.ok(releaseRefresh);
-  click('[data-back]'); await settle(); assert.ok(doc.querySelector('.lane-columns'));
-  releaseRefresh(); await settle(); assert.ok(doc.querySelector('.lane-columns'), 'old focused response cannot undo Back');
-  click('[data-filter="all"]'); click('[data-menu="#l002"]');
-  assert.equal(doc.querySelector('#menu-status').value, 'closed');
-  assert.equal(doc.querySelector('#menu-status option[value="closed"]').disabled, true);
-  doc.querySelector('#record-menu-dialog').close();
-  click('[data-menu="#alice#g001"]'); click('#menu-new-task');
-  assert.equal(doc.querySelector('#parent-goal').value, '#alice#g001');
-  doc.querySelector('#create-title-input').value = 'New Task'; doc.querySelector('#create-acceptance').value = 'Observable result.';
-  doc.querySelector('#create-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); await settle();
-  assert.equal(calls.find((c) => c.action === 'create_task').input.goal_ref, '#alice#g001');
-  click('[data-expand="#alice#g001"]');
-  click('[data-menu="#alice#g001#t01"]');
-  assert.ok(doc.querySelector('#menu-status option[value="closed"]'));
-  doc.querySelector('#menu-status').value = 'closed'; click('#menu-status-save'); await settle();
-  assert.deepEqual(calls.find((c) => c.action === 'set_status').input, { ref: '#alice#g001#t01', status: 'closed', expectedProjectPath: '/repo' });
-  click('[data-menu="#alice#g001"]'); click('#menu-close-goal');
-  assert.equal(doc.querySelector('#close-dialog').open, true);
-  click('#close-confirm'); await settle();
-  assert.deepEqual(calls.filter((c) => c.action === 'set_status').at(-1).input, { ref: '#alice#g001', status: 'closed', expectedProjectPath: '/repo' });
-  assert.equal(doc.querySelector('#close-dialog').open, false);
-  assert.equal(doc.querySelector('.sidebar'), null);
-  // Project selection shares the same invalidation/serialization as Back.
-  blockRefresh = true; interval(); await settle();
-  click('[data-command="project"]');
-  doc.querySelector('#project-path-input').value = '/other';
-  doc.querySelector('#project-form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
-  await settle();
-  assert.match(doc.querySelector('.project-tab').textContent, /other/);
-  releaseRefresh(); await settle();
-  assert.match(doc.querySelector('.project-tab').textContent, /other/, 'old project refresh cannot overwrite selection');
+test('actual built shadcn React UI preserves Lane focus, inline context, independent description and Back', async (t) => {
+  const s = state(); s.goals[0].description = 'x'.repeat(300);
+  const f = await mount(t, s);
+  assert.ok(f.query('.lane-columns')); assert.ok(f.query('[data-slot="card"]')); assert.ok(f.query('svg.octicon'));
+  assert.equal(f.query('[data-record="#alice#g002"]'), null);
+  await f.click('[data-description="#alice#g001"]');
+  assert.equal(f.query('[data-record="#alice#g001#t01"]'), null);
+  await f.click('[data-lane="#l001"]'); await f.wait(() => f.query('.goal-columns'));
+  await f.click('[data-expand="#alice#g001"]');
+  assert.ok(f.query('[data-record="#alice#g001#t01"]'));
+  assert.match(f.window.document.body.textContent, /Concrete plan/); assert.match(f.window.document.body.textContent, /Concrete decision/);
+  await f.click('[data-back]'); assert.ok(f.query('.lane-columns')); assert.equal(f.getServer().focus, null);
+  await f.click('[data-closed]'); assert.ok(f.query('[data-record="#alice#g002"]'));
+  assert.equal(f.query('button button'), null);
+});
+test('built UI hierarchical search, observed Running and explicit terminal focus remain correct across refresh', async (t) => {
+  const f = await mount(t);
+  await f.input('#work-search', 'needle'); assert.ok(f.query('[data-record="#alice#g001#t01"]'));
+  assert.match(f.window.document.body.textContent, /Lane one/);
+  const search = f.query('#work-search'); search.focus(); search.setSelectionRange(2, 2); f.query('.board-columns').scrollLeft = 81;
+  await f.click('[data-command="refresh"]'); assert.equal(f.query('#work-search'), search); assert.equal(search.selectionStart, 2); assert.equal(f.query('.board-columns').scrollLeft, 81);
+  await f.click('[data-filter="running"]'); assert.equal(f.query('[data-record="#alice#g001"]'), null);
+  f.setServer({ ...state(), focus: task.ref, goals: [{ ...goal, tasks: [{ ...task, status: 'duplicate' }] }] });
+  await f.click('[data-command="refresh"]'); assert.ok(f.query('[data-record="#alice#g001#t01"]')); assert.equal(f.query('#work-search').value, '');
+  assert.equal(f.query('[data-filter="all"]').getAttribute('aria-checked'), 'true');
+});
+test('built dialogs use discovered ids, Task closure and exact project-fenced canonical record actions', async (t) => {
+  const f = await mount(t, { ...state(), focus: task.ref });
+  const menu = f.query('[data-menu="#alice#g001#t01"]'); menu.focus();
+  await f.click('[data-menu="#alice#g001#t01"]'); assert.ok(f.query('[role="dialog"][aria-labelledby]'));
+  const button = [...f.window.document.querySelectorAll('button')].find((b) => b.textContent === 'Update status'); button.click();
+  await f.wait(() => f.query('#record-status'));
+  assert.ok([...f.query('#record-status').options].some((o) => o.value === 'closed'));
+  await f.input('#record-status', 'closed'); f.query('#canvas-dialog-form').requestSubmit();
+  await f.wait(() => !f.query('[role="dialog"]'));
+  assert.deepEqual(f.calls.find((c) => c.action === 'set_status').input, { ref: task.ref, status: 'closed', expectedProjectPath: '/A' });
+  await f.wait(() => f.window.document.activeElement === menu);
+  assert.ok(f.window.document.activeElement === menu, 'closing dialog returns focus to its trigger');
+  await f.click('[data-command="project"]'); await f.wait(() => f.query('#clips-project-choice option[value="B"]'));
+  await f.input('#clips-project-choice', 'B'); f.query('#canvas-dialog-form').requestSubmit(); await f.wait(() => !f.query('[role="dialog"]'));
+  assert.deepEqual(f.calls.find((c) => c.action === 'set_project').input, { projectId: 'B' }); assert.equal(f.getServer().projectPath, '/B'); assert.match(f.window.document.body.textContent, /Lane Beta/);
+});
+test('old-project refresh is discarded after actual built chooser selection; next mutation targets B', async (t) => {
+  let block = false; let release; let entered;
+  const gate = new Promise((r) => { release = r; }); const start = new Promise((r) => { entered = r; });
+  const f = await mount(t, state(), async ({ action, captured }) => { if (action === 'refresh' && block) { block = false; entered(); await gate; return { result: captured }; } });
+  block = true; void f.click('[data-command="refresh"]'); await start;
+  await f.click('[data-command="project"]'); await f.wait(() => f.query('#clips-project-choice option[value="B"]'));
+  await f.input('#clips-project-choice', 'B'); f.query('#canvas-dialog-form').requestSubmit(); await f.wait(() => f.getServer().projectPath === '/B'); release(); await f.wait(() => !f.query('[role="dialog"]'));
+  assert.match(f.window.document.body.textContent, /Lane Beta/); assert.doesNotMatch(f.window.document.body.textContent, /Lane one/);
+  await f.click('[data-expand="#alice#g001"]'); await f.click('[data-menu="#alice#g001#t01"]');
+  [...f.window.document.querySelectorAll('button')].find((b) => b.textContent === 'Update status').click(); await f.wait(() => f.query('#record-status'));
+  f.query('#canvas-dialog-form').requestSubmit(); await f.wait(() => f.calls.some((c) => c.action === 'set_status'));
+  assert.equal(f.calls.find((c) => c.action === 'set_status').input.expectedProjectPath, '/B');
+});
+test('failed selected-store refresh clears old board; empty/diagnostic chooser never substitutes a project', async (t) => {
+  let fail = false;
+  const f = await mount(t, state(), ({ action }) => fail && action === 'refresh' ? { error: 'Selected Clips store unavailable' } : action === 'list_projects' ? { result: { projects: [], diagnostics: [{ code: 'invalid_registry', message: 'Registry is invalid.' }], userScope: 'local' } } : null);
+  fail = true; await f.click('[data-command="refresh"]'); assert.equal(f.query('[data-record]'), null); assert.match(f.window.document.body.textContent, /store unavailable/);
+  await f.click('button'); await f.wait(() => f.query('[role="dialog"]'));
+  assert.match(f.window.document.body.textContent, /No available Clips projects/); assert.match(f.window.document.body.textContent, /Registry is invalid/);
+  assert.equal(f.query('button[type="submit"]').disabled, true); assert.equal(f.calls.some((c) => c.action === 'set_project'), false);
+});
+test('Task Run exists only in kebab, sends exact bound Task once, suppresses pending repeats and surfaces failure', async (t) => {
+  let release; let started; const gate = new Promise((r) => { release = r; }); const entered = new Promise((r) => { started = r; });
+  const f = await mount(t, { ...state(), focus: task.ref }, async ({ action }) => { if (action === 'launch') { started(); await gate; return { error: 'Joined send failed; binding retained' }; } });
+  assert.equal(f.query('[data-record="#alice#g001#t01"] [data-send]'), null);
+  const trigger = f.query('[data-menu="#alice#g001#t01"]'); trigger.focus(); await f.click('[data-menu="#alice#g001#t01"]');
+  const run = f.query('[data-task-run]'); assert.ok(run); assert.equal(run.disabled, false);
+  run.click(); run.click(); await entered; await f.wait(() => f.query('[data-task-run]').disabled);
+  assert.equal(f.calls.filter((c) => c.action === 'launch').length, 1); assert.deepEqual(f.calls.find((c) => c.action === 'launch').input, { ref: task.ref, expectedProjectPath: '/A' });
+  release(); await f.wait(() => f.window.document.body.textContent.includes('Joined send failed'));
+  assert.ok(f.query('[role="dialog"]')); f.query('[role="dialog"]').dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await f.wait(() => !f.query('[role="dialog"]')); await f.wait(() => f.window.document.activeElement === trigger);
+  assert.ok(f.query('[data-send="#alice#g001"]'), 'Goal placement unchanged');
+});
+test('occupied/running Task menu navigates existing session and cannot launch; closed/capability/role/project gates disable Run', async (t) => {
+  for (const scenario of ['occupied','closed','capability','role','project','running-current']) {
+    const s = { ...state(), focus: task.ref };
+    if (scenario === 'occupied') s.projectSessions.push({ id: 'existing', recordRef: task.ref, status: 'running' });
+    if (scenario === 'closed') s.goals[0].tasks[0].status = 'closed';
+    if (scenario === 'capability') s.hostCapabilities.canSendToCurrentSession = false;
+    if (scenario === 'role') Object.assign(s.projectSessions[0], { recordRef: '#l999', recordKind: 'lane' });
+    if (scenario === 'project') s.projectSessions = [];
+    if (scenario === 'running-current') s.projectSessions[0].status = 'running';
+    const f = await mount(t, s); await f.click('[data-menu="#alice#g001#t01"]');
+    if (scenario === 'occupied') { assert.equal(f.query('[data-task-run]'), null); assert.ok(f.query('[data-task-open-session="existing"]')); }
+    else assert.equal(f.query('[data-task-run]').disabled, true, scenario);
+    assert.equal(f.calls.some((c) => c.action === 'launch'), false);
+  }
+});
+test('observed manager-claim activity keeps the Lane visible under Running even without a local record binding', async (t) => {
+  const s = state(); s.lanes[0].manager_claim.owners = [{ runtime: 'copilot-sdk', session_id: 'manager' }];
+  s.projectSessions.push({ id: 'manager', status: 'running' });
+  const f = await mount(t, s); await f.click('[data-filter="running"]');
+  assert.ok(f.query('[data-lane-column="#l001"]')); assert.match(f.window.document.body.textContent, /Running now · 0 Tasks, 0 Goals, 1 Lanes/);
+});
+test('actual shadcn forms preserve exact label add/remove and namespaced parent Task creation', async (t) => {
+  const s = { ...state(), focus: task.ref }; s.goals[0].tasks[0].labels = [{ id: 'urgent', name: 'Urgent' }];
+  const f = await mount(t, s);
+  await f.click('[data-menu="#alice#g001#t01"]');
+  [...f.window.document.querySelectorAll('button')].find((b) => b.textContent === 'Labels').click(); await f.wait(() => f.query('#label-choice'));
+  await f.input('#label-choice', 'urgent'); f.query('[data-operation="add"]').click(); await f.wait(() => f.calls.some((c) => c.action === 'add_label'));
+  assert.deepEqual(f.calls.find((c) => c.action === 'add_label').input, { ref: task.ref, labelId: 'urgent', expectedProjectPath: '/A' });
+  await f.wait(() => !f.query('[role="dialog"]'));
+  await f.click('[data-menu="#alice#g001#t01"]'); [...f.window.document.querySelectorAll('button')].find((b) => b.textContent === 'Labels').click(); await f.wait(() => f.query('#assigned-choice'));
+  await f.input('#assigned-choice', 'urgent'); f.query('[data-operation="remove"]').click(); await f.wait(() => f.calls.some((c) => c.action === 'remove_label')); await f.wait(() => !f.query('[role="dialog"]'));
+  assert.equal(f.calls.find((c) => c.action === 'remove_label').input.ref, task.ref);
+  await f.click('[data-menu="#alice#g001"]'); [...f.window.document.querySelectorAll('button')].find((b) => b.textContent === 'New Task').click(); await f.wait(() => f.query('#record-title'));
+  assert.equal(f.query('#record-parent').value, goal.ref);
+  await f.input('#record-title', 'Scoped Task'); await f.input('#record-description', 'Description'); await f.input('#record-criteria', 'Observable result');
+  f.query('#canvas-dialog-form').requestSubmit(); await f.wait(() => f.calls.some((c) => c.action === 'create_task'));
+  assert.deepEqual(f.calls.find((c) => c.action === 'create_task').input, { title: 'Scoped Task', description: 'Description', goal_ref: goal.ref, acceptance_criteria: ['Observable result'], expectedProjectPath: '/A' });
 });

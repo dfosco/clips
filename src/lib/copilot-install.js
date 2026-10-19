@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { verifyCanvasBuild } from '../../plugins/copilot/src/canvas-build.js';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -191,6 +192,7 @@ export function installCopilot({
   const applied = [];
 
   try {
+    const canvasBuild = verifyCanvasBuild(path.join(root, 'plugins', 'copilot'));
     const dependencies = provisionCopilotDependencies(root, { runNpm });
     const results = copilotInstallPaths({ repositoryRoot: root, home, copilotHome }).map(spec => {
       const result = installLink({ ...spec, backupRoot, name: spec.name });
@@ -208,7 +210,9 @@ export function installCopilot({
       path.join(copilotHome, 'extensions', 'clips-workspaces'),
       copilotSdkPlatform(),
     );
+    verifyCanvasBuild(path.join(copilotHome, 'extensions', 'clips-workspaces'));
     const state = {
+      canvasBuild,
       version: STATE_VERSION,
       repository: root,
       installed_at: new Date().toISOString(),

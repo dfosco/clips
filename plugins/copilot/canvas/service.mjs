@@ -5,16 +5,18 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { verifyCanvasBuild } from '../src/canvas-build.js';
+import { discoverClipsProjects, resolveClipsProject } from '../src/project-discovery.js';
+import { getRepoRoot } from '../../../src/lib/core.js';
 import { findRecord, focusOutline, recordPrompt, relatedSessions, RECORD_STATUSES } from './model.mjs';
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const loadedSourceHash = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
 const assets = new Map([
-  ['/canvas/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/canvas/board-view.mjs', ['board-view.mjs', 'text/javascript; charset=utf-8']],
-  ['/canvas/style.css', ['style.css', 'text/css; charset=utf-8']],
+  ['/canvas/app.js', ['dist/app.js', 'text/javascript; charset=utf-8']],
+  ['/canvas/style.css', ['dist/style.css', 'text/css; charset=utf-8']],
 ]);
-const allowedActions = new Set(['context', 'diagnostics', 'refresh', 'set_project', 'focus', 'clear_focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
+const allowedActions = new Set(['context', 'list_projects', 'diagnostics', 'refresh', 'set_project', 'focus', 'clear_focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
 const sessionId = (session) => session?.id || session?.sessionId || null;
@@ -53,19 +55,29 @@ function recordCommandForStatus(record, status) {
   throw new Error('Only Lanes, Goals, and Tasks have status controls.');
 }
 
-export function createCanvasService({ runtime, dataDir = localDataRoot(), serverFactory = createServer, onDiagnostic } = {}) {
+export function createCanvasService({ runtime, dataDir = localDataRoot(), serverFactory = createServer, onDiagnostic, projectDiscovery = { discoverClipsProjects, resolveClipsProject } } = {}) {
   if (!runtime) throw new TypeError('A Clips runtime adapter is required.');
+  const canvasBuild = verifyCanvasBuild(path.dirname(sourceDir));
+  // Provider and renderer activate together. An old process must not serve a
+  // newly linked renderer against its old API while claiming the old hashes.
+  const loadedAssets = new Map([...assets].map(([url, [file, type]]) => [url, [readFileSync(path.join(sourceDir, file)), type]]));
+  const loadedIndex = readFileSync(path.join(sourceDir, 'index.html'), 'utf8');
   const instances = new Map();
+  const taskLaunches = new Set();
   let server;
   let origin;
 
-  const panelKey = (instance) => JSON.stringify([instance.sessionId, instance.instanceId]);
-  const focusPath = (instance) => path.join(dataDir, 'focus', `${hash(JSON.stringify([instance.sessionId, instance.instanceId, instance.projectPath]))}.json`);
+  const panelKey = (instance) => JSON.stringify([instance.userScope, instance.sessionId, instance.instanceId]);
+  const focusPath = (instance) => path.join(dataDir, 'focus', `${hash(JSON.stringify([instance.userScope, instance.sessionId, instance.instanceId, instance.projectPath]))}.json`);
   const projectPathFile = (instance) => path.join(dataDir, 'projects', `${hash(panelKey(instance))}.json`);
   const bindingsPath = (projectPath) => path.join(dataDir, 'sessions', `${hash(path.resolve(projectPath))}.json`);
 
   async function requireProject(instance) {
-    if (!instance.projectPath) throw new Error('Copilot did not provide a working directory. Enter an absolute project path with an initialized Clips store to continue.');
+    if (!instance.selectedProject) throw new Error(instance.selectionError || 'Choose an available Clips project from your local registry to continue.');
+    const catalog = await projectDiscovery.discoverClipsProjects();
+    if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed. Reopen the canvas and choose a project.');
+    const selected = catalog.projects.find((project) => project.id === instance.selectedProject.id && project.projectRoot === instance.projectPath && project.storeRoot === instance.selectedProject.storeRoot);
+    if (!selected) throw new Error('The selected Clips project is no longer available. Choose an available project; no other board was substituted.');
     return instance.projectPath;
   }
 
@@ -90,15 +102,18 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     const outline = focusOutline(board, focus);
     const sessions = sessionResult.sessions || [];
     const related = outline ? relatedSessions(outline.record, sessions, bindings) : [];
-    onDiagnostic?.({ event: 'clips.canvas.state', serviceSourceSha256: loadedSourceHash, sessionId: instance.sessionId, instanceId: instance.instanceId, projectPath: instance.projectPath, focus, goals: (board.goals || []).length, lanes: (board.lanes || []).length });
+    onDiagnostic?.({ event: 'clips.canvas.state', serviceSourceSha256: loadedSourceHash, sessionId: instance.sessionId, instanceId: instance.instanceId, projectPath: instance.projectPath, uiAssets: canvasBuild.assets, focus, goals: (board.goals || []).length, lanes: (board.lanes || []).length });
     return {
       projectPath: instance.projectPath,
+      selectedProject: instance.selectedProject,
       instanceId: instance.instanceId,
       copilotSessionId: instance.sessionId,
       hostCapabilities: hostCapabilities || {
         appSessionVisibilityVerified: sessionResult.appSessionVisibilityVerified === true,
         hostIdConfigured: sessionResult.hostIdConfigured === true,
       },
+      workBindings: bindings,
+      uiAssets: canvasBuild.assets,
       focus,
       outline: outline ? {
         kind: outline.kind,
@@ -130,12 +145,24 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       throw new Error('The selected project changed before this action ran. Refresh and review the current project.');
     }
     // A concurrent project selection cannot retarget an in-flight record action.
-    return dispatchInProject(action === 'set_project' ? instance : { ...instance }, action, input);
+    const snapshot = action === 'set_project' ? instance : { ...instance };
+    if (action === 'launch') {
+      const { record } = await selected(snapshot, input.ref);
+      if (record.kind === 'task') {
+        const key = JSON.stringify([snapshot.userScope, snapshot.projectPath, record.ref]);
+        if (taskLaunches.has(key)) throw new Error('Task launch is already pending. Wait for the existing request.');
+        taskLaunches.add(key);
+        try { return await dispatchInProject(snapshot, action, input); }
+        finally { taskLaunches.delete(key); }
+      }
+    }
+    return dispatchInProject(snapshot, action, input);
   }
 
   async function dispatchInProject(instance, action, input = {}) {
     if (!allowedActions.has(action)) throw new Error(`Unsupported canvas action: ${action}`);
-    if (action === 'context') return { projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId };
+    if (action === 'context') return { projectPath: instance.projectPath, selectedProject: instance.selectedProject, instanceId: instance.instanceId, copilotSessionId: instance.sessionId };
+    if (action === 'list_projects') return projectDiscovery.discoverClipsProjects();
     if (action === 'diagnostics') return { serviceSourceSha256: loadedSourceHash, projectPath: instance.projectPath, instanceId: instance.instanceId, copilotSessionId: instance.sessionId, runtime: await runtime.diagnostics() };
     if (action === 'refresh') return buildState(instance);
     if (action === 'clear_focus') {
@@ -144,13 +171,16 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       return { focus: null, state: await buildState(instance) };
     }
     if (action === 'set_project') {
-      const selectedPath = String(input.projectPath || '').trim();
-      if (!path.isAbsolute(selectedPath)) throw new Error('Enter an absolute local repository path.');
-      const resolved = path.resolve(selectedPath);
-      await runtime.listBoard(resolved);
-      instance.projectPath = resolved;
-      await writeJson(projectPathFile(instance), { projectPath: resolved, openInputPath: instance.openInputPath, updatedAt: new Date().toISOString() });
-      return buildState(instance);
+      if (!input.projectId || input.projectPath !== undefined) throw new Error('Choose an exact discovered Clips project ID; arbitrary paths are not accepted.');
+      const catalog = await projectDiscovery.discoverClipsProjects();
+      if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed. Reopen this canvas.');
+      const project = await projectDiscovery.resolveClipsProject(input.projectId);
+      const next = { ...instance, selectedProject: project, projectPath: project.projectRoot, selectionError: null };
+      // Validate the actual board and complete state before committing selection.
+      const state = await buildState(next);
+      await writeJson(projectPathFile(instance), { projectId: project.id, openInputPath: instance.openInputPath, updatedAt: new Date().toISOString() });
+      Object.assign(instance, next);
+      return state;
     }
     if (action === 'focus') {
       const ref = await saveFocus(instance, safeRef(input.ref));
@@ -158,6 +188,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     }
     if (action === 'inspect') {
       const ref = safeRef(input.ref);
+      await selected(instance, ref);
       return runtime.viewRecord(ref, instance.projectPath);
     }
     if (action === 'set_status') {
@@ -175,6 +206,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       return { result, state: await buildState(instance) };
     }
     if (action === 'create_lane' || action === 'create_goal' || action === 'create_task') {
+      await requireProject(instance);
       const title = String(input.title || '').trim();
       if (!title || title.length > 200) throw new Error('A title of 1–200 characters is required.');
       const data = { title, description: String(input.description || '').slice(0, 12000) };
@@ -205,6 +237,14 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const capability = runtime.hostCapabilities ? await runtime.hostCapabilities() : null;
       if (capability?.canSendToCurrentSession !== true) throw new Error('Sending work requires a joined current session. This canvas does not create a new App session.');
       const { board, record } = await selected(instance, input.ref);
+      if (record.kind === 'task') {
+        if (!['open','in_progress'].includes(record.status)) throw new Error('This Task is not open for execution.');
+        const sessions = (await runtime.listSessions(instance.projectPath)).sessions || [];
+        const bindings = await readJson(bindingsPath(instance.projectPath), {});
+        if (relatedSessions(record, sessions, bindings).length || bindings[record.ref]?.length) throw new Error('This Task already has a bound session. Open the existing session; no duplicate was launched.');
+        const joined = sessions.find((session) => sessionId(session) === capability.currentSessionId && session.joined && session.steerable);
+        if (joined?.status !== 'idle') throw new Error('Task Run requires this project’s joined session with observed idle activity.');
+      }
       if (record.kind === 'lane' && (record.manager_claim?.owners || []).length) {
         throw new Error(`Lane ${record.ref} already has a claimed manager. Open or contact the listed owner; this canvas will not replace it.`);
       }
@@ -231,6 +271,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       return { session: launched, state: await buildState(instance) };
     }
     if (action === 'steer' || action === 'open_session') {
+      await requireProject(instance);
       const capability = runtime.hostCapabilities ? await runtime.hostCapabilities() : null;
       const id = String(input.sessionId || '').trim();
       const sessions = (await runtime.listSessions(instance.projectPath)).sessions || [];
@@ -284,16 +325,16 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       }
       if (url.pathname === '/canvas/index.html') {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-        const html = (await readFile(path.join(sourceDir, 'index.html'), 'utf8'))
+        const html = loadedIndex
           .replaceAll('__TOKEN__', requestedInstance.token)
           .replaceAll('__INSTANCE_ID__', requestedInstance.instanceId);
         res.end(html);
         return;
       }
-      const asset = assets.get(url.pathname);
+      const asset = loadedAssets.get(url.pathname);
       if (asset) {
         res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-        res.end(await readFile(path.join(sourceDir, asset[0])));
+        res.end(asset[0]);
         return;
       }
       res.writeHead(404).end('Not found');
@@ -315,14 +356,41 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const existing = instances.get(ctx.instanceId);
       if (existing && existing.sessionId !== ctx.sessionId) throw new Error('This canvas provider belongs to a different session.');
       if (existing) return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${existing.token}` };
-      const persisted = await readJson(projectPathFile(ctx), { projectPath: null });
+      const catalog = await projectDiscovery.discoverClipsProjects();
+      const scope = { ...ctx, userScope: catalog.userScope };
+      let persisted;
+      try { persisted = await readJson(projectPathFile(scope), { projectId: null }); }
+      catch { persisted = { invalid: true }; }
+      const validSelection = persisted !== null && typeof persisted === 'object' && !Array.isArray(persisted) &&
+        Object.hasOwn(persisted, 'projectId') && (persisted.projectId === null || (typeof persisted.projectId === 'string' && persisted.projectId.length > 0 && persisted.projectId.length <= 256)) &&
+        (persisted.openInputPath === undefined || persisted.openInputPath === null || (typeof persisted.openInputPath === 'string' && persisted.openInputPath.length <= 4096 && path.isAbsolute(persisted.openInputPath))) &&
+        (persisted.invalid === undefined || typeof persisted.invalid === 'boolean');
+      if (!validSelection) persisted = { projectId: null, invalid: true };
       const openInputPath = input.projectPath ? path.resolve(input.projectPath) : null;
+      let selectedProject;
+      let selectionError;
       const explicitNewInput = openInputPath && openInputPath !== persisted.openInputPath;
-      const current = !explicitNewInput && !persisted.projectPath && !openInputPath && runtime.currentSession ? await runtime.currentSession().catch(() => null) : null;
-      const sourcePath = explicitNewInput ? openInputPath : persisted.projectPath || openInputPath || ctx.session?.workingDirectory || current?.context?.workingDirectory;
-      const projectPath = sourcePath ? path.resolve(sourcePath) : null;
-      instances.set(ctx.instanceId, { instanceId: ctx.instanceId, sessionId: ctx.sessionId, projectPath, openInputPath, token: randomBytes(32).toString('hex') });
-      await writeJson(projectPathFile(ctx), { projectPath, openInputPath });
+      if (persisted.invalid) {
+        selectionError = 'Saved Clips project selection is invalid. Choose a project; no other board was substituted.';
+      } else if (persisted.projectId && !explicitNewInput) {
+        selectedProject = catalog.projects.find((project) => project.id === persisted.projectId);
+        if (!selectedProject) selectionError = 'Your selected Clips project is no longer available. Choose a project; the session directory was not substituted.';
+      } else {
+        const current = !openInputPath && !ctx.session?.workingDirectory && runtime.currentSession ? await runtime.currentSession().catch(() => null) : null;
+        const sourcePath = openInputPath || ctx.session?.workingDirectory || current?.context?.workingDirectory;
+        if (sourcePath) {
+          try {
+            const absolutePath = path.resolve(sourcePath);
+            const canonicalRoot = catalog.projects.some((project) => project.projectRoot === absolutePath) ? absolutePath : getRepoRoot(absolutePath);
+            selectedProject = catalog.projects.find((project) => project.projectRoot === canonicalRoot);
+          } catch { /* Unregistered/unavailable session directory never substitutes a board. */ }
+        }
+        if (sourcePath && !selectedProject) selectionError = 'The session directory is not an available registered Clips project. Choose a Clips project.';
+      }
+      const projectPath = selectedProject?.projectRoot || null;
+      instances.set(ctx.instanceId, { instanceId: ctx.instanceId, sessionId: ctx.sessionId, userScope: catalog.userScope, selectedProject, selectionError, projectPath, openInputPath, token: randomBytes(32).toString('hex') });
+      // Keep a missing persisted id intact: a later reopen must not silently use cwd.
+      await writeJson(projectPathFile(scope), { projectId: selectedProject?.id || persisted.projectId || null, ...(persisted.invalid ? { invalid: true } : {}), openInputPath });
       await startServer();
       const instance = instances.get(ctx.instanceId);
       return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${instance.token}` };

@@ -1,0 +1,1 @@
+{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./canvas/ui/*"] }, "jsx": "react-jsx", "allowJs": true } }

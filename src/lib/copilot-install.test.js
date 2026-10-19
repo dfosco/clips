@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { canvasBuildManifest } from '../../plugins/copilot/src/canvas-build.js';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -21,6 +22,14 @@ function writePackage(pluginRoot) {
       [`node_modules/${platformPackage}`]: { version: '1.0.22', optional: true },
     },
   }));
+  for (const [file, content] of Object.entries({
+    'canvas/ui/main.jsx': 'export {}', 'canvas/board-view.mjs': 'export {}',
+    'canvas/index.html': '<div id="root"></div>', 'components.json': '{}',
+    'jsconfig.json': '{}', 'vite.config.js': 'export {}', 'scripts/build-canvas.mjs': 'export {}', 'src/canvas-build.js': 'export {}',
+    'canvas/dist/app.js': 'export {}', 'canvas/dist/style.css': 'body{}',
+  })) { fs.mkdirSync(path.dirname(path.join(pluginRoot, file)), { recursive: true }); fs.writeFileSync(path.join(pluginRoot, file), content); }
+  fs.writeFileSync(path.join(pluginRoot, 'canvas/dist/build-manifest.json'), JSON.stringify(canvasBuildManifest(pluginRoot)));
+
 }
 function installFakePlatformPackage(pluginRoot) {
   const platformName = copilotSdkPlatform();
@@ -181,6 +190,15 @@ describe('local Copilot extension installation', () => {
     expect(result.dependencies.lockPath).toBe(path.join(fs.realpathSync(f.pluginRoot), 'package-lock.json'));
     expect(result.dependencies.platformPackage.packageName).toBe(`@github/copilot-sdk-${copilotSdkPlatform()}`);
     expect(fs.realpathSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(fs.realpathSync(f.pluginRoot));
+  });
+
+  it('refuses stale canvas source before any npm or link mutation', () => {
+    const f = fixture();
+    fs.appendFileSync(path.join(f.pluginRoot, 'canvas/ui/main.jsx'), '// stale');
+    let npmCalled = false;
+    expect(() => install(f, { runNpm: () => { npmCalled = true; } })).toThrow(/canvas build is missing or stale/);
+    expect(npmCalled).toBe(false);
+    expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
   });
 
   it('leaves local targets untouched if dependency installation fails', () => {

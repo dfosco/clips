@@ -2,8 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { createCanvasService } from './service.mjs';
+import { mkdtemp, rm, readdir, writeFile } from 'node:fs/promises';
+import { createCanvasService as realCreateCanvasService } from './service.mjs';
+const fixtureProjects = ['/repo','/initial','/chosen','/explicit/project','/A','/B'].map((root) => ({ id: `project:${root}`, name: root, projectRoot: root, storeRoot: `${root}/.clips`, username: null }));
+const fixtureDiscovery = { async discoverClipsProjects() { return { projects: fixtureProjects, userScope: 'user-one', diagnostics: [] }; }, async resolveClipsProject(id) { const project = fixtureProjects.find((p) => p.id === id); if (!project) throw new Error('Unknown project'); return project; } };
+const createCanvasService = (options) => realCreateCanvasService({ projectDiscovery: fixtureDiscovery, ...options });
 
 function fixture() {
   const calls = [];
@@ -95,15 +98,15 @@ test('launches bind only the actual returned session ID and refuses to replace a
   assert.equal(f.calls.filter((call) => call[0] === 'launchRecord').length, 1);
 });
 
-test('missing host working directory requires explicit absolute project selection', async (t) => {
+test('missing or unregistered host directory requires an exact discovered project choice', async (t) => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-canvas-project-'));
   const f = fixture();
   const service = createCanvasService({ runtime: f.runtime, dataDir });
   t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
   await service.open({ instanceId: 'no-cwd', sessionId: 'host', session: {} });
-  await assert.rejects(service.state('no-cwd'), /did not provide a working directory/);
-  await assert.rejects(service.dispatch('no-cwd', 'set_project', { projectPath: 'relative/path' }), /absolute local repository path/);
-  const selected = await service.dispatch('no-cwd', 'set_project', { projectPath: '/explicit/project' });
+  await assert.rejects(service.state('no-cwd'), /Choose an available Clips project/);
+  await assert.rejects(service.dispatch('no-cwd', 'set_project', { projectPath: 'relative/path' }), /exact discovered Clips project ID/);
+  const selected = await service.dispatch('no-cwd', 'set_project', { projectId: 'project:/explicit/project' });
   assert.equal(selected.projectPath, '/explicit/project');
 });
 
@@ -162,7 +165,7 @@ test('same panel IDs in different sessions and projects retain independent focus
   const first = await a.open(ctx);
   await a.dispatch('same', 'focus', { ref: '#g001' });
   assert.equal((await a.open(ctx)).url, first.url, 'reopening preserves the live token');
-  await a.dispatch('same', 'set_project', { projectPath: '/chosen' });
+  await a.dispatch('same', 'set_project', { projectId: 'project:/chosen' });
   assert.equal((await a.state('same')).focus, null, 'focus does not cross projects');
   await a.dispatch('same', 'focus', { ref: '#l001' });
   const b = make();
@@ -174,7 +177,7 @@ test('same panel IDs in different sessions and projects retain independent focus
   await reopened.open(ctx);
   assert.equal((await reopened.state('same')).projectPath, '/chosen');
   assert.equal((await reopened.state('same')).focus, '#l001');
-  await reopened.dispatch('same', 'set_project', { projectPath: '/initial' });
+  await reopened.dispatch('same', 'set_project', { projectId: 'project:/initial' });
   assert.equal((await reopened.state('same')).focus, '#g001');
 });
 
@@ -215,15 +218,19 @@ test('authenticated layout module loads through the real asset route and Back pe
   const ctx = { instanceId: 'layout', sessionId: 'host', input: { projectPath: '/repo' } };
   const opened = new URL((await service.open(ctx)).url);
   const html = await (await fetch(opened)).text();
-  assert.match(html, /id="board-view"/);
+  assert.match(html, /id="root"/);
   assert.doesNotMatch(html, /class="sidebar"/);
   const app = new URL('/canvas/app.js', opened); app.search = opened.search;
   const source = await (await fetch(app)).text();
-  assert.match(source, /board-view\.mjs\?\$\{params\}/);
-  const module = new URL('/canvas/board-view.mjs', opened); module.search = opened.search;
-  const response = await fetch(module); assert.equal(response.status, 200);
-  assert.match(await response.text(), /export function createBoardView/);
-  module.search = ''; assert.equal((await fetch(module)).status, 403);
+  assert.match(source, /react/);
+  assert.doesNotMatch(source, /from ["']|import\(/);
+  for (const file of ['app.js', 'style.css']) {
+    const asset = new URL(`/canvas/${file}`, opened); asset.search = opened.search;
+    const response = await fetch(asset); assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), file.endsWith('.js') ? /javascript/ : /css/);
+    assert.ok((await response.text()).length > 100);
+    asset.search = ''; assert.equal((await fetch(asset)).status, 403);
+  }
   await service.dispatch('layout', 'focus', { ref: '#l001' });
   const back = await service.dispatch('layout', 'clear_focus'); assert.equal(back.state.focus, null);
   assert.equal((await service.state('layout')).outline, null);
@@ -259,9 +266,82 @@ test('project-context guard rejects stale actions and in-flight mutation keeps i
   await service.open({ instanceId: 'race', sessionId: 'host', input: { projectPath: '/A' } });
   const pending = service.dispatch('race', 'set_status', { ref: '#g001', status: 'in_progress', expectedProjectPath: '/A' });
   await entered;
-  await service.dispatch('race', 'set_project', { projectPath: '/B' });
+  await service.dispatch('race', 'set_project', { projectId: 'project:/B' });
   releaseBoard(); await pending;
   assert.equal(f.calls.find(([kind]) => kind === 'recordCommand')[2], '/A');
   await assert.rejects(service.dispatch('race', 'set_status', { ref: '#g001', status: 'closed', expectedProjectPath: '/A' }), /selected project changed/);
   assert.equal(f.calls.filter(([kind]) => kind === 'recordCommand').length, 1);
+});
+
+test('user scope isolates persisted choice/focus and removed selected source never falls back to cwd', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-users-')); const f = fixture();
+  let userScope = 'first'; let available = [...fixtureProjects]; const services = [];
+  const projectDiscovery = { async discoverClipsProjects() { return { projects: available, userScope, diagnostics: [] }; }, async resolveClipsProject(id) { const p = available.find((p) => p.id === id); if (!p) throw new Error('Unavailable'); return p; } };
+  const make = () => { const s = createCanvasService({ runtime: f.runtime, dataDir, projectDiscovery }); services.push(s); return s; };
+  t.after(async () => { await Promise.all(services.map((s) => s.shutdown())); await rm(dataDir, { recursive: true, force: true }); });
+  const ctx = { instanceId: 'panel', sessionId: 'host', input: { projectPath: '/A' } };
+  const first = make(); await first.open(ctx); await first.dispatch('panel', 'set_project', { projectId: 'project:/B' }); await first.dispatch('panel', 'focus', { ref: '#g001' }); await first.shutdown();
+  userScope = 'second'; const second = make(); await second.open(ctx); assert.equal((await second.state('panel')).projectPath, '/A'); assert.equal((await second.state('panel')).focus, null); await second.shutdown();
+  userScope = 'first'; available = available.filter((p) => p.projectRoot !== '/B');
+  const reopened = make(); await reopened.open(ctx); await assert.rejects(reopened.state('panel'), /selected Clips project is no longer available/);
+  assert.equal((await reopened.dispatch('panel', 'context')).projectPath, null);
+  const selected = await reopened.dispatch('panel', 'set_project', { projectId: 'project:/A' }); assert.equal(selected.projectPath, '/A');
+  await assert.rejects(reopened.dispatch('panel', 'set_project', { projectPath: '/A' }), /exact discovered/);
+});
+test('failed board selection is transactional; corrupt or removed registry does not return prior board', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-select-transaction-')); const f = fixture(); let available = [...fixtureProjects];
+  const projectDiscovery = { async discoverClipsProjects() { return { projects: available, userScope: 'u', diagnostics: [] }; }, async resolveClipsProject(id) { return fixtureProjects.find((p) => p.id === id); } };
+  const listBoard = f.runtime.listBoard; f.runtime.listBoard = (root) => root === '/B' ? Promise.reject(new Error('Corrupt board B')) : listBoard(root);
+  const service = createCanvasService({ runtime: f.runtime, dataDir, projectDiscovery }); t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'panel', sessionId: 'host', input: { projectPath: '/A' } });
+  await assert.rejects(service.dispatch('panel', 'set_project', { projectId: 'project:/B' }), /Corrupt board B/);
+  assert.equal((await service.state('panel')).projectPath, '/A');
+  available = []; await assert.rejects(service.state('panel'), /no longer available/);
+});
+test('Task launch guards exact eligibility, occupied and pending duplicate launches with actual Task prompt', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-task-run-')); const f = fixture();
+  f.runtime.hostCapabilities = async () => ({ currentSessionId: 'joined', canSendToCurrentSession: true });
+  f.sessions.push({ id: 'joined', joined: true, steerable: true, status: 'idle' });
+  let release; let started; const gate = new Promise((r) => { release = r; }); const entered = new Promise((r) => { started = r; });
+  const launch = f.runtime.launchRecord; f.runtime.launchRecord = async (input) => { started(); await gate; return launch(input); };
+  const service = createCanvasService({ runtime: f.runtime, dataDir }); t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'panel', sessionId: 'host', input: { projectPath: '/repo' } });
+  const task = f.board.goals[0].tasks[0]; task.status = 'closed';
+  await assert.rejects(service.dispatch('panel', 'launch', { ref: task.ref }), /not open/); task.status = 'open';
+  f.sessions[0].status = 'running'; await assert.rejects(service.dispatch('panel', 'launch', { ref: task.ref }), /observed idle/); f.sessions[0].status = 'idle';
+  const pending = service.dispatch('panel', 'launch', { ref: task.ref, expectedProjectPath: '/repo' }); await entered;
+  await assert.rejects(service.dispatch('panel', 'launch', { ref: task.ref }), /already pending/); release(); await pending;
+  const sent = f.calls.find(([kind]) => kind === 'launchRecord')[1]; assert.equal(sent.ref, task.ref); assert.match(sent.prompt, /Work on Task #g001#t01/);
+  await assert.rejects(service.dispatch('panel', 'launch', { ref: task.ref }), /already has a bound session/);
+  assert.equal(f.calls.filter(([kind]) => kind === 'launchRecord').length, 1);
+});
+test('inspect revalidates selected registry/user scope and never reads a formerly selected store', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-inspect-scope-')); const f = fixture();
+  let catalog = { projects: [...fixtureProjects], userScope: 'one', diagnostics: [] };
+  const service = createCanvasService({ runtime: f.runtime, dataDir, projectDiscovery: { ...fixtureDiscovery, async discoverClipsProjects() { return catalog; } } });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'panel', sessionId: 'host', input: { projectPath: '/repo' } });
+  await service.dispatch('panel', 'inspect', { ref: '#g001' }); const initial = f.calls.filter(([kind]) => kind === 'viewRecord').length;
+  catalog = { ...catalog, projects: [] }; await assert.rejects(service.dispatch('panel', 'inspect', { ref: '#g001' }), /no longer available/);
+  for (const action of ['create_lane','create_goal']) await assert.rejects(service.dispatch('panel', action, { title: 'Never created' }), /no longer available/);
+  assert.equal(f.calls.some(([kind]) => kind === 'recordCommand'), false);
+  catalog = { ...catalog, projects: [...fixtureProjects], userScope: 'two' }; await assert.rejects(service.dispatch('panel', 'inspect', { ref: '#g001' }), /user scope changed/);
+  assert.equal(f.calls.filter(([kind]) => kind === 'viewRecord').length, initial);
+});
+
+test('JSON-valid malformed persisted selections open the chooser without TypeError or cwd substitution', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-corrupt-selection-')); const f = fixture(); const services = [];
+  const make = () => { const s = createCanvasService({ runtime: f.runtime, dataDir }); services.push(s); return s; };
+  t.after(async () => { await Promise.all(services.map((s) => s.shutdown())); await rm(dataDir, { recursive: true, force: true }); });
+  const ctx = { instanceId: 'panel', sessionId: 'host', input: { projectPath: '/repo' }, session: { workingDirectory: '/repo' } };
+  const initial = make(); await initial.open(ctx); await initial.shutdown();
+  const [file] = await readdir(path.join(dataDir, 'projects'));
+  for (const bad of [null, [], 'bad', {}, { projectId: 3 }, { projectId: null, openInputPath: [] }, { projectId: null, openInputPath: 'relative' }]) {
+    await writeFile(path.join(dataDir, 'projects', file), JSON.stringify(bad));
+    const service = make(); await service.open(ctx);
+    assert.equal((await service.dispatch('panel', 'context')).projectPath, null);
+    await assert.rejects(service.state('panel'), /Saved Clips project selection is invalid/);
+    assert.ok((await service.dispatch('panel', 'list_projects')).projects.length);
+    await service.shutdown();
+  }
 });
