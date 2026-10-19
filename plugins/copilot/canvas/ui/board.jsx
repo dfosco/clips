@@ -39,10 +39,10 @@ function Actions({ record, state, busy, onAction, onMenu, onOpenSession }) {
   const label = { running: `Running · ${count} agent${count === 1 ? '' : 's'}`, attention: 'Needs input', error: 'Session error', idle: 'Session idle', unknown: 'Activity unavailable', none: owners.length ? 'Manager unavailable' : 'No bound session' }[status];
   return <div className="flex w-full flex-wrap items-center gap-2"><span className={cn('runtime-status flex items-center gap-1 text-xs text-muted-foreground', status === 'running' && 'text-foreground')}><DotFillIcon aria-hidden="true" />{label}</span>{sessions.slice(0, 1).map((s) => <Button variant="outline" key={s.id || s.sessionId} data-session={s.id || s.sessionId} disabled={busy} onClick={() => onOpenSession(s.id || s.sessionId)}>{s.joined ? 'Open current session' : 'Open session'}</Button>)}{record.kind !== 'task' && !sessions.length ? <span title={reason}><Button data-send={record.ref} disabled={busy || !canSend} aria-describedby={`send-help-${record.ref}`} onClick={() => onAction('launch', { ref: record.ref })}>{record.kind === 'lane' ? 'Use as manager' : 'Send to this session'}</Button><span className="sr-only" id={`send-help-${record.ref}`}>{reason}</span></span> : null}<Button className="ml-auto" variant="ghost" size="icon" data-menu={record.ref} aria-label={`More actions for ${record.ref}`} disabled={busy} onClick={(event) => onMenu(record.ref, event.currentTarget)}><KebabHorizontalIcon aria-hidden="true" /></Button></div>;
 }
-function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onAction, onMenu, onOpenSession }) {
+function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onAction, onMenu, onOpenSession, surfaceVariant = 'default' }) {
   const isExpanded = ui.expanded.get(record.ref) ?? (record.kind === 'goal' && (Boolean(ui.search.trim()) || ui.filter === 'running'));
   const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession };
-  return <Card data-record={record.ref} className="work-card min-w-0" data-kind={record.kind} data-selected={state.focus === record.ref}>
+  return <Card variant={surfaceVariant} data-record={record.ref} className="work-card min-w-0" data-kind={record.kind} data-selected={state.focus === record.ref}>
     <CardHeader>
       <CardDescription className="flex items-center gap-2"><code>{record.ref}</code><span>{statusText(record.status)}</span></CardDescription>
       <CardTitle className="flex min-w-0 items-start gap-1">
@@ -115,7 +115,10 @@ export function Board({ state, busy, onFocus, onAction, onCommand, onMenu, onOpe
       {lane ? focusedGroup.entries.length ? focusedGroup.entries.map(({ goal, tasks }) => <section className="board-column flex w-[380px] max-w-[calc(100vw-3rem)] shrink-0 flex-col gap-4" key={goal.ref}><WorkCard record={{ ...goal, kind: 'goal' }} tasks={tasks} {...props} /></section>) : empty(focusedGroup, goals) : groups.map(({ lane: parent, goals: entries, key }) => {
         const grouped = group(parent, entries, key);
         if (!grouped.showLane) return null;
-        return <section className="board-column flex w-[380px] max-w-[calc(100vw-3rem)] shrink-0 flex-col gap-4" data-lane-column={key} key={key}>{parent ? <WorkCard record={{ ...parent, kind: 'lane' }} {...props} /> : <h2 className="px-2 text-base font-semibold">Goals outside Lanes</h2>}{closed(key, grouped)}<div className="lane-goals flex flex-col gap-4">{grouped.entries.length ? grouped.entries.map(({ goal, tasks }) => <WorkCard key={goal.ref} record={{ ...goal, kind: 'goal' }} tasks={tasks} {...props} />) : empty(grouped, entries)}</div></section>;
+        return <Card variant="lane" className="board-column w-[380px] max-w-[calc(100vw-3rem)] shrink-0" data-lane-column={key} key={key} role="region" aria-label={parent ? `Lane ${parent.title}` : 'Goals outside Lanes'}>
+          <CardHeader>{parent ? <WorkCard record={{ ...parent, kind: 'lane' }} {...props} /> : <CardTitle>Goals outside Lanes</CardTitle>}</CardHeader>
+          <CardContent className="flex flex-col gap-4">{closed(key, grouped)}<div className="lane-goals flex flex-col gap-4">{grouped.entries.length ? grouped.entries.map(({ goal, tasks }) => <WorkCard key={goal.ref} surfaceVariant="inset" record={{ ...goal, kind: 'goal' }} tasks={tasks} {...props} />) : empty(grouped, entries)}</div></CardContent>
+        </Card>;
       })}
     </div>
   </div>;

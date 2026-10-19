@@ -5,11 +5,11 @@
     "canvas/index.html": "5d6bf0dbfc448740bfba7b42f82d95c48d3a3d2a9a1eb2118c002f177f48a235",
     "canvas/ui/actions.js": "6be964b899a73eef999f176620c1c3eac00f6598cd6157afb56a65cd62780b5f",
     "canvas/ui/app.jsx": "800691898feb9b3c1fcb53896e60666bfa96337551092733a8a3ea06f1b66f76",
-    "canvas/ui/board.jsx": "eeffd256b4c06aa8f00a58e9e35c0ff28c893a178506a356dba0218b074a93bb",
+    "canvas/ui/board.jsx": "788f09cc9bdb9185a8b6d3980f8c67d960062dddbaff82324a5f4db7a3fdaae3",
     "canvas/ui/components/ui/alert.jsx": "614116c07c9dbefa7b484c3378dce8b12572e63daa96ab8e646edcc4cf79772e",
     "canvas/ui/components/ui/badge.jsx": "7067444fd65fe0c2a57d841303f5c0e03f57c829b72100eb8a464ce49903e8b9",
     "canvas/ui/components/ui/button.jsx": "8ac7c45375ce4dc541488deace82126a865f7e38addb97beb68724a3f28d1547",
-    "canvas/ui/components/ui/card.jsx": "a20388bfe4e716b64327be5450769fa5632eacb04cdc167647ed64843e332af8",
+    "canvas/ui/components/ui/card.jsx": "a0a82d2cd24d1e41e5d34841fbfaefc99b23515f5dca8eedfd17fccf347b8b29",
     "canvas/ui/components/ui/dialog.jsx": "af6e5611194f037d8f276fc8df4f1b00b122e9dce83fcece09c52ff81e71d636",
     "canvas/ui/components/ui/empty.jsx": "462f565e7f30b9a8b0f82d29f3ee97ec563d5f280d3e35b3f93dfd4ef988d9c7",
     "canvas/ui/components/ui/field.jsx": "6dcffd8c8c8ecb5bbdfb1822859206e298c14647a2d08e131fba2d7bc6effab3",
@@ -32,7 +32,7 @@
     "vite.config.js": "527e50f75265938a5ce2c09786542cbe29886e18e3efaeb45b9257b76152c2a9"
   },
   "assets": {
-    "app.js": "8916fe634c99ad564c59e265423d60e07b3e1df22e5908e8502fbad3d5b3dd86",
-    "style.css": "4e7086042f941a628dd9c8122945f6ad688c02acab152fbb8aaa502e1273476e"
+    "app.js": "4c9b1f6ec0f46eaad97ee95e2ade4f76073415dc2d7f75a062ed9fdaf59c1f66",
+    "style.css": "fcc8991e4e10602c313ccdbf48b1db0b94d3f5db0a9dd8fb2a81bff64c37d48e"
   }
 }

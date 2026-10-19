@@ -8,7 +8,7 @@ runtime remain the host boundary; no Paseo native runtime is imported.
 
 | Maintained behavior | Copilot implementation/regression |
 | --- | --- |
-| Horizontal collection of vertical Lane columns containing Goals | Board, actual production-bundle DOM cases |
+| Horizontal collection of vertical Lane columns containing Goals | Overview shadcn Card lane surface encloses CardHeader + padded CardContent with nested contrasting Goals, including outside-Lanes; actual production-bundle DOM cases |
 | Lane-only focus and explicit Back; Goals/Tasks expand inline | Board, persisted clear_focus, legacy ref visibility cases |
 | Exact canonical Lane membership | goalsForLane uses goal_refs; namespace collision case |
 | Hierarchical search/Open/observed Running/All | goalGroup, actual bundle search/refresh cases; unknown activity stays unknown |

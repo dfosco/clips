@@ -116,3 +116,27 @@ test('actual shadcn forms preserve exact label add/remove and namespaced parent 
   f.query('#canvas-dialog-form').requestSubmit(); await f.wait(() => f.calls.some((c) => c.action === 'create_task'));
   assert.deepEqual(f.calls.find((c) => c.action === 'create_task').input, { title: 'Scoped Task', description: 'Description', goal_ref: goal.ref, acceptance_criteria: ['Observable result'], expectedProjectPath: '/A' });
 });
+
+test('overview Lane and outside-Lanes groups enclose header and inset contrasting Goals in shadcn surfaces', async (t) => {
+  const s = state(); s.goals.push({ ...structuredClone(goal), ref: '#alice#g003', title: 'Outside Goal', tasks: [] });
+  const f = await mount(t, s);
+  for (const [key, headerRef, goalRef] of [['#l001', '#l001', goal.ref], ['unassigned', null, '#alice#g003']]) {
+    const column = f.query(`[data-lane-column="${key}"]`); assert.ok(column);
+    assert.equal(column.dataset.slot, 'card'); assert.equal(column.dataset.variant, 'lane');
+    assert.equal(column.querySelector(':scope > [data-slot="card-footer"]'), null);
+    assert.ok(column.classList.contains('has-[>[data-slot=card-footer]]:pb-0'), 'only a direct footer may remove outer bottom padding');
+    for (const style of ['border', 'border-border', 'bg-muted', 'rounded-xl']) assert.ok(column.classList.contains(style), `${key} ${style}`);
+    const header = column.querySelector(':scope > [data-slot="card-header"]');
+    const content = column.querySelector(':scope > [data-slot="card-content"]'); assert.ok(header && content);
+    assert.ok(header.classList.contains('px-(--card-spacing)')); assert.ok(content.classList.contains('px-(--card-spacing)'));
+    if (headerRef) assert.ok(header.querySelector(`[data-record="${headerRef}"]`)); else assert.match(header.textContent, /Goals outside Lanes/);
+    const nestedGoal = content.querySelector(`.lane-goals > [data-record="${goalRef}"]`); assert.ok(nestedGoal);
+    assert.equal(nestedGoal.dataset.variant, 'inset'); assert.ok(nestedGoal.classList.contains('bg-background'));
+    assert.equal(nestedGoal.classList.contains('bg-muted'), false);
+  }
+  await f.click('[data-lane="#l001"]'); await f.wait(() => f.query('.goal-columns'));
+  assert.equal(f.query('[data-lane-column]'), null); assert.equal(f.query('[data-variant="lane"]'), null, 'focused Goal columns remain distinct');
+  await f.click('[data-back]'); await f.wait(() => f.query('.lane-columns'));
+  assert.ok(f.query('[data-lane-column="#l001"] [data-record="#alice#g001"]'));
+  assert.ok(f.query('[data-lane-column="unassigned"] [data-record="#alice#g003"]'));
+});
