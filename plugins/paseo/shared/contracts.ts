@@ -13,6 +13,12 @@ export const preferences = defineSettings({
 export type Preferences = z.infer<typeof preferences.schema>;
 
 const criterion = z.object({ id: z.string(), description: z.string() });
+export const label = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/),
+  name: z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i),
+});
+export type Label = z.infer<typeof label>;
 export const workItem = z.object({
   ref: z.string(),
   title: z.string(),
@@ -22,6 +28,7 @@ export const workItem = z.object({
   decisions: z.string(),
   scope: z.string(),
   acceptanceCriteria: z.array(criterion),
+  labels: z.array(label).default([]),
 });
 export const task = workItem.extend({ kind: z.literal("task") });
 export const goal = workItem.extend({
@@ -50,14 +57,29 @@ export const projectsRpc = defineRpc({
   input: z.object({}),
   output: z.object({ projects: z.array(project) }),
 });
+export const boardData = z.object({
+  lanes: z.array(lane),
+  goals: z.array(goal),
+  warnings: z.array(z.string()),
+  labels: z.array(label).default([]),
+});
 export const boardRpc = defineRpc({
   name: "clips.board",
   input: z.object({ projectId: z.string() }),
-  output: z.object({
-    lanes: z.array(lane),
-    goals: z.array(goal),
-    warnings: z.array(z.string()),
-  }),
+  output: boardData,
+});
+export const labelChange = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("create"), name: label.shape.name, color: label.shape.color }),
+  z.object({ action: z.literal("edit"), id: label.shape.id, name: label.shape.name, color: label.shape.color }),
+  z.object({ action: z.literal("delete"), id: label.shape.id }),
+  z.object({ action: z.literal("add"), ref: z.string().min(1), id: label.shape.id }),
+  z.object({ action: z.literal("remove"), ref: z.string().min(1), id: label.shape.id }),
+]);
+export type LabelChange = z.infer<typeof labelChange>;
+export const labelsRpc = defineRpc({
+  name: "clips.labels.change",
+  input: z.object({ projectId: z.string(), change: labelChange }),
+  output: boardData,
 });
 export const START_MODES = ["workspace", "agent"] as const;
 export type StartMode = (typeof START_MODES)[number];

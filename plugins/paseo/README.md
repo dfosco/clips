@@ -9,6 +9,14 @@ but **Clips is the work system**, not GitHub Issues.
 
 ## What it does
 
+- **Project labels:** Colored chips on Lane, Goal, and Task rows. Open the row's
+  Labels action to assign or remove existing labels, search the catalog, or create
+  a label with a name and palette color. Each label's Edit action opens rename,
+  recolor, and deletion controls. Catalog edits affect this project; deleting an
+  assigned label is refused with the record refs that still use it. Labels are
+  independent of Clips status, acceptance, and Paseo runtime activity. The picker
+  uses Paseo's dialog on wide layouts and bottom sheet on compact layouts.
+
 - **Project selector:** Finds Git projects on the connected Paseo daemon whose
   main checkout has an initialized `.clips/` store. Linked worktrees are grouped
   with the main project.

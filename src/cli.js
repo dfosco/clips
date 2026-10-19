@@ -15,6 +15,7 @@ import { runTrackCommand } from './commands/track.js';
 import { runLaneCommand } from './commands/lane.js';
 import { runComponentCommand } from './commands/component.js';
 import { runHistoryCommand } from './commands/history.js';
+import { runLabelCommand } from './commands/label.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
 import { version } from './version.js';
 
@@ -57,6 +58,7 @@ Commands:
   track <action> [args]   Legacy Track command alias
   task <action> [args]    Manage tasks
   component <action>     Manage persistent system components
+  label <action>         Manage project labels and record assignments
   record <action> [args]  Manage optional legacy CR and ADR records
   sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration
@@ -101,6 +103,7 @@ const commands = {
   track: runTrackCommand,
   component: runComponentCommand,
   history: runHistoryCommand,
+  label: runLabelCommand,
   task: runTaskCommand,
   record: runRecordCommand,
   view: runViewCommand,

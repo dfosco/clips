@@ -6,11 +6,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import {
-  boardRpc, projectsRpc, startRpc,
-  type Goal, type Lane, type Project, type StartMode, type Work,
+  boardRpc, labelsRpc, projectsRpc, startRpc,
+  type Goal, type Lane, type LabelChange, type Project, type StartMode, type Work,
 } from "../shared/contracts";
 import { executionFor, type Execution } from "../shared/work";
 import { useRuntime } from "./runtime";
+import { LabelChips, LabelManager } from "./labels";
 
 type Filter = "all" | "running" | "active";
 type Theme = PluginScreenProps["theme"];
@@ -23,12 +24,14 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 
 function Action({
   label,
+  accessibilityLabel = label,
   onPress,
   theme,
   subtle = false,
   disabled = false,
 }: {
   label: string;
+  accessibilityLabel?: string;
   onPress: () => void;
   theme: Theme;
   subtle?: boolean;
@@ -37,7 +40,7 @@ function Action({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
@@ -77,7 +80,7 @@ function RuntimeLabel({ execution, theme, loaded }: { execution: Execution; them
 
 function WorkRow({
   work, level, execution, loaded, expanded, onToggle, onStart, onOpen,
-  busy, theme, compact,
+  busy, theme, compact, onLabels,
 }: {
   work: Work;
   level: number;
@@ -90,6 +93,7 @@ function WorkRow({
   busy: boolean;
   theme: Theme;
   compact: boolean;
+  onLabels: () => void;
 }) {
   const canStart = isActive(work.status);
   const hasWorkspace = Boolean(execution.workspaceId);
@@ -131,6 +135,7 @@ function WorkRow({
             <Text style={{ color: theme.colors.foreground, fontSize: level === 2 ? 14 : 16, fontWeight: "600" }}>
               {work.title}
             </Text>
+            <LabelChips labels={work.labels ?? []} theme={theme} />
             {!expanded && work.description ? (
               <Text numberOfLines={2} style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 }}>
                 {short(work.description)}
@@ -140,6 +145,7 @@ function WorkRow({
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 }}>
           <RuntimeLabel execution={execution} theme={theme} loaded={loaded} />
+          <Action label="Labels" accessibilityLabel={`Labels for ${work.ref}`} theme={theme} subtle onPress={onLabels} />
           {hasWorkspace ? (
             <Action
               label="Open workspace"
@@ -276,6 +282,7 @@ export function WorkScreen({
   const fetchProjects = useRpc(projectsRpc);
   const fetchBoard = useRpc(boardRpc);
   const launch = useRpc(startRpc);
+  const updateLabels = useRpc(labelsRpc);
   const cache = useQueryClient();
   const toast = useToast();
 
@@ -293,6 +300,20 @@ export function WorkScreen({
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pending, setPending] = useState<string | null>(null);
+  const [labelTarget, setLabelTarget] = useState<{ hostId: string; projectId: string; ref: string } | null>(null);
+  const labelMutation = useMutation({
+    mutationFn: (input: { hostId: string; projectId: string; change: LabelChange }) =>
+      updateLabels({ projectId: input.projectId, change: input.change }),
+    onSuccess: (data, input) => {
+      cache.setQueryData(["clips.board", input.hostId, input.projectId], data);
+    },
+    onSettled: (_data, _error, input) => {
+      void cache.invalidateQueries({ queryKey: ["clips.board", input.hostId, input.projectId] });
+    },
+  });
+  const labelWork = labelTarget && labelTarget.hostId === host.id && labelTarget.projectId === projectId && board.data
+    ? [...board.data.lanes, ...board.data.goals, ...board.data.goals.flatMap((goal) => goal.tasks)]
+      .find((work) => work.ref === labelTarget.ref) : undefined;
   const loaded = Boolean(runtime.data);
   const emptyExecution: Execution = {
     status: "none", runningAgents: 0, workspaceCount: 0, workspaceId: null, agents: [],
@@ -338,7 +359,7 @@ export function WorkScreen({
   });
 
   const query = search.toLowerCase().trim();
-  const hit = (work: Work) => !query || [work.title, work.ref, work.description].some((v) => v.toLowerCase().includes(query));
+  const hit = (work: Work) => !query || [work.title, work.ref, work.description, ...(work.labels ?? []).map((l) => l.name)].some((v) => v.toLowerCase().includes(query));
   const visible = (work: Work, ancestorHit: boolean) => {
     const statusMatch = filter === "running" ? execution(work).status === "running" :
       filter === "active" ? isActive(work.status) : true;
@@ -370,6 +391,7 @@ export function WorkScreen({
       busy={create.isPending}
       theme={theme}
       compact={layout.compact}
+      onLabels={() => setLabelTarget({ hostId: host.id, projectId: projectId!, ref: work.ref })}
     />
   );
   const renderGoal = (goal: Goal, tasks: typeof goal.tasks) => (
@@ -392,6 +414,10 @@ export function WorkScreen({
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{
       padding: layout.compact ? 14 : 24, gap: 16, paddingBottom: 64,
     }}>
+      {labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork}
+        catalog={board.data?.labels ?? []} theme={theme} busy={labelMutation.isPending}
+        onChange={(change) => labelMutation.mutateAsync({ hostId: host.id, projectId, change })}
+        onClose={() => setLabelTarget(null)} /> : null}
       <View style={{ flexDirection: "row", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={{ color: theme.colors.foreground, fontSize: 21, fontWeight: "700" }}>Clips work</Text>

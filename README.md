@@ -220,6 +220,38 @@ surfaces; current UI and agent guidance use `#l001`, `lane_id`, and
 their goal issues.
 
 
+## Project labels
+
+Labels are optional on Lanes, Goals, and Tasks. Each repository's shared Clips
+config holds its own catalog. Linked worktrees use the same catalog. Assignments
+are append-only journal events and do not change status or engineering acceptance.
+
+```bash
+clips label list --json
+clips label create '{"name":"ready-to-review","color":"#8b5cf6"}'
+clips label add '#g1' ready-to-review
+clips label add '#l1' ready-to-review
+clips label add '#alice#g1#t1' ready-to-review
+clips label edit ready-to-review '{"name":"Ready for validation"}'
+clips label recolor ready-to-review '#3b82f6'
+clips label remove '#g1' ready-to-review
+clips label delete ready-to-review
+```
+
+Names must be nonempty text up to 80 characters and unique ignoring case. Colors
+use six-digit hex values. Creation derives an ID from the name, or generates one
+when the name cannot form a slug. An explicit lowercase `id` is optional.
+Renaming keeps that ID. `view
+--json` exposes `label_ids` plus resolved `labels` with the current name and color;
+`board --json` also includes the project catalog in `labels`. Historical record
+views keep historical assignment IDs but resolve against the current catalog.
+
+Deletion refuses assigned labels, including assignments on closed records and in
+other namespaces. Remove each assignment first. Deletion preserves journals and
+retires the ID permanently. Recreating a name gets a new ID if the old one was
+retired; explicitly requesting a retired ID fails. Catalog edits preserve unrelated
+configuration. Malformed config or unreadable journals prevent destructive edits.
+
 ## Storage and compatibility
 
 Goal/task events live under `.clips/db/`. Component events live under

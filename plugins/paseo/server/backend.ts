@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execCommand, type PluginHandlerContext } from "@getpaseo/plugin/server";
-import type { Goal, Lane, Project, Task, Work, Preferences, StartMode } from "../shared/contracts";
+import type { Goal, Lane, Project, Task, Work, Preferences, StartMode, LabelChange } from "../shared/contracts";
+import { label } from "../shared/contracts";
 import {
   branchName, branchPrefix, defaultProvider, executionFor, matchesWorkspace,
   promptFor, workspaceTitle, type AgentInfo, type WorkspaceInfo,
@@ -140,10 +141,11 @@ function fields(raw: any) {
     decisions: asText(raw.decisions),
     scope: asText(raw.scope),
     acceptanceCriteria: criteria(raw),
+    labels: asItems(raw.labels).map((value) => label.parse(value)),
   };
 }
 
-export function normalizeBoard(board: any): { lanes: Lane[]; goals: Goal[]; warnings: string[] } {
+export function normalizeBoard(board: any) {
   const lanes = asItems(board.lanes).map((l): Lane => ({
     ...fields(l), kind: "lane", goalRefs: asItems(l.goal_refs).map(asText),
   }));
@@ -155,11 +157,27 @@ export function normalizeBoard(board: any): { lanes: Lane[]; goals: Goal[]; warn
     tasks: asItems(g.tasks).map((t): Task => ({ ...fields(t), kind: "task" })),
   }));
   const warnings = asItems(board.warnings).map((w) => asText(w?.message || w));
-  return { lanes, goals, warnings };
+  return { lanes, goals, warnings, labels: asItems(board.labels).map((value) => label.parse(value)) };
 }
 
 export async function readProjectBoard(paseo: Paseo, projectId: string) {
   const project = await findProject(paseo, projectId);
+  return normalizeBoard(await clipsBoard(project.root));
+}
+
+export async function changeProjectLabels(paseo: Paseo, input: { projectId: string; change: LabelChange }) {
+  const project = await findProject(paseo, input.projectId);
+  const cli = await findClips();
+  const change = input.change;
+  const args = change.action === "create" ? ["create", JSON.stringify({ name: change.name, color: change.color })]
+    : change.action === "edit" ? ["edit", change.id, JSON.stringify({ name: change.name, color: change.color })]
+    : change.action === "delete" ? ["delete", change.id]
+    : [change.action, change.ref, change.id];
+  try {
+    await command(cli.bin, [...cli.prefix, "label", ...args], project.root);
+  } catch (error) {
+    throw new Error(`Cannot change Clips labels: ${errorText(error)}`);
+  }
   return normalizeBoard(await clipsBoard(project.root));
 }
 

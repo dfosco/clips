@@ -6,6 +6,7 @@ import { listComponents } from './components.js';
 import { effectiveVerificationMode } from './behavior.js';
 import { normalizeGoalType } from './goal-type.js';
 import { listLanes } from './lanes.js';
+import { labelCatalog, projectLabels } from './labels.js';
 
 export const BOARD_COLUMNS = [
   { id: 'open', label: 'Open' },
@@ -223,6 +224,13 @@ export function readBoardData({
 } = {}) {
   const warnings = [];
   const goals = [];
+  const configPath = path.join(path.dirname(dbDir), 'clips.config.json');
+  let labels = [];
+  try {
+    labels = labelCatalog(fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {});
+  } catch (error) {
+    warnings.push({ path: configPath, message: error.message });
+  }
   const changeRecords = readChangeRecords(recordsDir);
   const githubCache = readGithubCache(dbDir);
   const allPrs = [...githubCache.records];
@@ -233,7 +241,8 @@ export function readBoardData({
     try {
       const rawGoal = parseGoalFile(entry.filePath, entry.goalId);
       allPrs.push(...Object.values(rawGoal.github_prs || {}));
-      goals.push(normalizeGoal(rawGoal, entry.username, changeRecords.records, allPrs));
+      const goal = normalizeGoal(rawGoal, entry.username, changeRecords.records, allPrs);
+      goals.push({ ...projectLabels(goal, labels), tasks: goal.tasks.map((task) => projectLabels(task, labels)) });
     } catch (error) {
       warnings.push({ path: entry.filePath, message: error.message });
     }
@@ -247,12 +256,12 @@ export function readBoardData({
   }
   const lanes = listLanes(dbDir).map((lane) => {
     const members = goals.filter((goal) => goal.lane_id === lane.lane_id);
-    return { ...lane, ref: `#${lane.lane_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
+    return { ...projectLabels(lane, labels), ref: `#${lane.lane_id}`, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
   });
   const components = listComponents({ componentsDir, onError: (warning) => warnings.push(warning) });
   // Keep tracks as a read-only compatibility alias while Lane is the product model.
   const tracks = lanes.map((lane) => ({ ...lane, track_id: lane.legacy_track_id, ref: `#${lane.legacy_track_id}` }));
-  return { version: 1, generated_at: new Date().toISOString(), lanes, tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
+  return { version: 1, generated_at: new Date().toISOString(), labels, lanes, tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
 }
 
 function qualifyRef(projectId, ref) {

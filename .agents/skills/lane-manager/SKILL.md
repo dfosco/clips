@@ -8,7 +8,7 @@ description: >-
   runtime-specific Squad Leader.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.17.0"
+  version: "2026.10.19.0"
 ---
 
 # Lane Manager
@@ -95,6 +95,49 @@ or personally meaningful does not make it necessary to ship.
 8. **Stop at done.** When the agreed deliverable works, recommend shipping and
    closing the scope. Capture useful decisions and outcomes in the Goal and Lane
    retrospective. Do not reopen the project because adjacent ideas are exciting.
+
+## Hand completed Goals to human validation
+
+When an execution agent reports that a Goal's implementation is complete, reconcile
+its changed artifact, required Tasks, checks, and unresolved issues. If the required
+implementation and verification are complete and you are presenting that result
+to a human for validation, add the project label **`ready-to-review`** to that Goal.
+Do this as part of the handoff, before claiming the review-ready label was applied.
+Do not add it merely because work started, a Task closed, or an agent stopped.
+Unfinished or blocked Goals and Goals with current acceptance are not eligible.
+
+With local Clips access, check `clips label --help`, then inspect the Goal and the
+project catalog. The canonical name is exactly `ready-to-review`; its initial
+default ID is `ready-to-review`. Existing catalog identity takes precedence:
+reuse the ID returned for that name, including one generated after an earlier ID
+was retired. Do not rename or recolor an existing project label to enforce defaults.
+
+```bash
+clips view '#g1' --json
+clips label list --json
+```
+
+If that name is absent, create it once. Use the **returned ID**, rather than
+assuming it equals the name. If another writer created it first, reread the
+catalog and reuse that definition; do not create a duplicate. For example, in a
+fresh project catalog these supported commands create and assign it:
+
+```bash
+clips label create '{"name":"ready-to-review","color":"#8b5cf6"}'
+clips label add '#g1' ready-to-review
+```
+
+Replace `#g1` with the actual Goal ref, retaining its namespace. Confirm the label
+in `clips view '<actual-goal-ref>' --json`. If an existing label has ID
+`review-handoff`, for example, use `clips label add '#g1' review-handoff`.
+If work becomes unfinished or blocked again, remove the readiness assignment with
+`clips label remove '#g1' <returned-id>` and explain the remaining work.
+
+This label is a request for human validation, **not acceptance** and not a Goal
+lifecycle status. Preserve the actual status, receipts, and accepting actor. Do
+not close or accept a Goal just to produce the label. If local commands are
+unavailable or fail, report that the label was not applied; never infer it from a
+Clips status or claim a Paseo agent is running without runtime evidence.
 
 ## Ruthless scope defaults
 
