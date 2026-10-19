@@ -23,7 +23,7 @@ jobs:
       - name: Install Clips CLI dependencies for integration test
         run: npm ci --ignore-scripts
       - name: Install plugin development dependencies
-        run: npm install --prefix plugins/paseo --package-lock=false --ignore-scripts
+        run: npm ci --prefix plugins/paseo --ignore-scripts
       - name: Typecheck plugin SDK boundaries
         run: npm run typecheck --prefix plugins/paseo
       - name: Test runtime mapping and board normalization

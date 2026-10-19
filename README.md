@@ -351,33 +351,90 @@ not cover invoking an old package or a third-party skill installer directly.
 The CLI requires the published `skillshop@2.1.0` package. The dependency
 lockfile records its npm registry integrity checksum.
 
-## Paseo workspaces integration
+## Repository integrations
 
-The optional [Clips Workspaces](plugins/paseo/README.md) Paseo plugin browses
-Lanes → Goals → Tasks from the selected repository's local Clips store and
-creates Paseo worktree workspaces with an optional running agent. It also shows
-live agent activity, a **Running** filter, and links back to existing workspaces.
-Clips remains the source of truth for work definitions and acceptance. Paseo
-owns execution and agent lifecycle. Ordinary dev agents use the Clips skill
-[shared Paseo procedure](.agents/skills/clips/references/paseo.md) to maintain
-records and verify native execution bindings. They do not need the Lane Manager
-role or a Lane management claim to update assigned Goals/Tasks.
+Both host integrations are distributed from
+[`dfosco/clips`](https://github.com/dfosco/clips). Keep the full repository when
+installing from a checkout: the plugins use its matching `src/cli.js` and
+canonical skills. Copying a plugin directory alone loses that closure.
 
-Install the plugin from this monorepo with:
+| Host | Repository path | Install guide |
+|---|---|---|
+| Paseo | `plugins/paseo` | [Paseo plugin requirements, installation, update and rollback](plugins/paseo/README.md#install) |
+| GitHub Copilot App | `plugins/copilot` | [Copilot extension/canvas requirements, installation, update and rollback](plugins/copilot/README.md) |
+
+Use Git, npm and **Node.js 22.18 or later** for repository integration setup.
+Host versions and platform requirements are specified in each guide. Start a
+maintained checkout with:
 
 ```bash
-paseo plugin install git:dfosco/clips:plugins/paseo
+git clone https://github.com/dfosco/clips.git
+cd clips
+npm ci --omit=dev --ignore-scripts
+node src/cli.js --help
 ```
 
-The Paseo daemon host must also have the **matching Clips CLI** installed; the
-plugin calls `clips board --json` in the selected repository. For a development
-checkout, `CLIPS_CLI_PATH=/absolute/path/to/clips/src/cli.js` selects the
-unreleased CLI without replacing a global installation.
+Run `node /absolute/path/to/clips/src/cli.js init --skills-scope project` inside
+the repository whose work you want to track. This initializes that project's
+local store. It preserves an existing collaboration setting; new stores keep
+GitHub collaboration disabled. No global CLI replacement or npm publication is
+needed for the repository install paths.
 
-The read-only `clips board --json` command emits current Lanes, Goals, and
-their ordered Tasks from the common Git directory, including when invoked
-inside a linked worktree. See the plugin README for setup and execution
-semantics.
+### Paseo
+
+The [Clips Workspaces plugin](plugins/paseo/README.md) browses Lanes → Goals →
+Tasks from the selected repository's local Clips store. It creates Paseo
+worktree workspaces with an optional running agent and links to existing
+sessions. The guide describes direct Git monorepo installation and local
+checkout installation, including how the daemon resolves the matching CLI:
+
+```bash
+paseo plugin add git:dfosco/clips:plugins/paseo --ref main
+```
+
+Clips owns work definitions and acceptance. Paseo owns execution and agent
+lifecycle. Ordinary dev agents use the Clips skill's
+[shared Paseo procedure](.agents/skills/clips/references/paseo.md) to maintain
+records and verify native execution bindings. An `in_progress` Clips status
+does not prove an agent is running.
+
+### GitHub Copilot App
+
+The [Copilot integration](plugins/copilot/README.md) installs the **Clips Work**
+canvas extension and canonical skills from a full checkout. Use its repository
+installer after the setup above:
+
+```bash
+node scripts/install-copilot.js
+```
+
+The installer provisions locked dependencies, verifies the shipped canvas
+assets and writes an installation receipt. Replaced targets are backed up; newly
+created links have no prior target to back up. The checkout remains the live
+source. Keep it at its installed path and follow the guide to activate or reload
+the extension in the actual Copilot session.
+
+Copilot canvas support is experimental. Installation and isolated runtime
+checks do not establish native App visibility, top-level session creation or
+parentage. Current-session delivery and saved-session navigation have distinct
+capability limits; see the [integration contract](plugins/copilot/CONTRACT.md)
+and [runtime behavior](plugins/copilot/runtime/README.md).
+
+### Update and rollback
+
+Record the installed source with `git rev-parse HEAD` before updating. In a
+clean maintained checkout, `git pull --ff-only` followed by the guide's
+provisioning and reload steps updates the integration. The two hosts have
+different installation receipts and reload mechanisms; follow their linked
+update/rollback instructions rather than treating a Git pull as activation.
+
+For Copilot, `node scripts/install-copilot.js --rollback` removes installer-created
+links and restores replaced targets where real backups exist, subject to receipt
+and ownership checks. It does not undo a Git update. To run older source, retain
+a separate checkout
+at the recorded commit and follow that host's installation steps. Keep an
+installed checkout until its links have been replaced or rolled back. Local
+workflow records and host credentials are separate from plugin source.
 
 ## Installation and setup
 

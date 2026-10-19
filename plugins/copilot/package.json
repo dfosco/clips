@@ -7,6 +7,14 @@
     "node": ">=22.18.0"
   },
   "description": "GitHub Copilot App canvas adapter for canonical Clips records and sessions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dfosco/clips.git",
+    "directory": "plugins/copilot"
+  },
+  "homepage": "https://github.com/dfosco/clips/tree/main/plugins/copilot#readme",
+  "keywords": ["clips", "copilot", "canvas"],
   "scripts": {
     "test": "node --test runtime/*.test.mjs canvas/*.test.mjs test/*.test.js",
     "build": "node scripts/build-canvas.mjs",

@@ -3,9 +3,18 @@ import { canvasBuildManifest } from '../../plugins/copilot/src/canvas-build.js';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { copilotSdkPlatform, installCopilot, rollbackCopilotInstall } from './copilot-install.js';
+import { copilotSdkPlatform, installCopilot, rollbackCopilotInstall, verifyCopilotPrerequisites } from './copilot-install.js';
 
 const roots = [];
+function writeRootRuntime(root) {
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@dfosco/clips', version: '1.8.0', type: 'module', dependencies: { 'fixture-runtime': '1.0.0' } }));
+  fs.writeFileSync(path.join(root, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/fixture-runtime': { version: '1.0.0' } } }));
+  fs.mkdirSync(path.join(root, 'node_modules/fixture-runtime'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'node_modules/fixture-runtime/package.json'), JSON.stringify({ name: 'fixture-runtime', version: '1.0.0', type: 'module', exports: './index.js' }));
+  fs.writeFileSync(path.join(root, 'node_modules/fixture-runtime/index.js'), 'export {};');
+  fs.writeFileSync(path.join(root, 'src/cli.js'), "import 'fixture-runtime'; console.log('clips v1.8.0');\n");
+}
 function writePackage(pluginRoot) {
   const platformName = copilotSdkPlatform();
   const platformPackage = `@github/copilot-sdk-${platformName}`;
@@ -51,6 +60,7 @@ function fixture() {
   const copilotHome = path.join(home, '.copilot');
   const clipsHome = path.join(home, '.clips');
   const pluginRoot = path.join(repositoryRoot, 'plugins', 'copilot');
+  writeRootRuntime(repositoryRoot);
   writePackage(pluginRoot);
   fs.writeFileSync(path.join(pluginRoot, 'extension.mjs'), 'export {}\n');
   fs.mkdirSync(path.join(repositoryRoot, 'plugins', 'copilot', 'skills', 'clips-copilot'), { recursive: true });
@@ -115,6 +125,10 @@ describe('local Copilot extension installation', () => {
     const result = install(f);
     expect(result.results.find(item => item.target === extension).backup).toBeTruthy();
     expect(result.results.find(item => item.target === skill).backup).toBeTruthy();
+    const repeated = install(f);
+    expect(repeated.results.every(item => !item.changed)).toBe(true);
+    expect(repeated.results.find(item => item.target === extension).backup)
+      .toBe(result.results.find(item => item.target === extension).backup);
     const rollback = rollbackCopilotInstall({ home: f.home, clipsHome: f.clipsHome });
     expect(rollback.rolledBack).toBe(true);
     expect(fs.readFileSync(path.join(extension, 'local-note.txt'), 'utf8')).toBe('keep me\n');
@@ -141,12 +155,30 @@ describe('local Copilot extension installation', () => {
     expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
   });
 
+  it('preserves rollback backups when repeated through an equivalent home-directory alias', () => {
+    const f = fixture();
+    const extension = path.join(f.copilotHome, 'extensions', 'clips-workspaces');
+    fs.mkdirSync(extension);
+    fs.writeFileSync(path.join(extension, 'previous.txt'), 'original contents');
+    const first = install(f);
+    const alias = path.join(f.root, 'home-alias');
+    fs.symlinkSync(f.home, alias, 'dir');
+    const repeated = install(f, { copilotHome: path.join(alias, '.copilot') });
+    expect(repeated.results.every(item => !item.changed)).toBe(true);
+    expect(repeated.results[0].created).toBe(true);
+    expect(repeated.results[0].backup).toBe(first.results[0].backup);
+    rollbackCopilotInstall({ home: f.home, clipsHome: f.clipsHome });
+    expect(fs.readFileSync(path.join(extension, 'previous.txt'), 'utf8')).toBe('original contents');
+    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'lane-manager'))).toBe(false);
+  });
+
   it('restores a previous checkout link after updating to a different checkout', () => {
     const f = fixture();
     const options = { repositoryRoot: f.repositoryRoot, home: f.home, copilotHome: f.copilotHome, clipsHome: f.clipsHome, runNpm: (_command, args) => installFakePlatformPackage(args.at(-1)) };
     installCopilot(options);
     const secondCheckout = path.join(f.root, 'second-checkout');
     const secondPlugin = path.join(secondCheckout, 'plugins', 'copilot');
+    writeRootRuntime(secondCheckout);
     writePackage(secondPlugin);
     fs.writeFileSync(path.join(secondPlugin, 'extension.mjs'), 'export const changed = true\n');
     fs.mkdirSync(path.join(secondCheckout, 'plugins', 'copilot', 'skills', 'clips-copilot'), { recursive: true });
@@ -192,6 +224,41 @@ describe('local Copilot extension installation', () => {
     expect(fs.realpathSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(fs.realpathSync(f.pluginRoot));
   });
 
+  it('checks the canonical CLI with locked checkout-local runtime dependencies before npm or links', () => {
+    const f = fixture();
+    const result = install(f);
+    expect(result.prerequisites.cliPath).toBe(path.join(fs.realpathSync(f.repositoryRoot), 'src/cli.js'));
+    expect(result.prerequisites.clipsVersion).toBe('1.8.0');
+    rollbackCopilotInstall({ home: f.home, clipsHome: f.clipsHome });
+    fs.rmSync(path.join(f.repositoryRoot, 'node_modules'), { recursive: true });
+    let npmCalled = false;
+    expect(() => install(f, { runNpm: () => { npmCalled = true; } })).toThrow(/locked root runtime dependencies/);
+    expect(npmCalled).toBe(false);
+    expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
+    expect(fs.readFileSync(path.join(f.copilotHome, 'settings.json'), 'utf8')).toBe('{"keep":true}\n');
+  });
+
+  it('rejects incomplete CLI imports and mismatched locked runtime versions before provisioning', () => {
+    const f = fixture();
+    let npmCalled = false;
+    const runNpm = () => { npmCalled = true; };
+    fs.appendFileSync(path.join(f.repositoryRoot, 'src/cli.js'), "import './missing-module.js';\n");
+    expect(() => install(f, { runNpm })).toThrow(/complete Clips checkout/);
+    writeRootRuntime(f.repositoryRoot);
+    fs.writeFileSync(path.join(f.repositoryRoot, 'node_modules/fixture-runtime/package.json'), '{"version":"0.9.0"}');
+    expect(() => install(f, { runNpm })).toThrow(/does not match package-lock.json/);
+    expect(npmCalled).toBe(false);
+    expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
+  });
+
+  it('rejects Node versions below the extension minimum before any runtime or installation work', () => {
+    const f = fixture();
+    for (const nodeVersion of ['18.20.0', '20.19.0', '22.17.0']) {
+      expect(() => verifyCopilotPrerequisites(f.repositoryRoot, { nodeVersion, runNode: () => { throw new Error('must not run'); } }))
+        .toThrow(/Node.js 22.18 or newer/);
+    }
+  });
+
   it('refuses stale canvas source before any npm or link mutation', () => {
     const f = fixture();
     fs.appendFileSync(path.join(f.pluginRoot, 'canvas/ui/main.jsx'), '// stale');
@@ -217,6 +284,16 @@ describe('local Copilot extension installation', () => {
     expect(() => install(f, { runNpm: () => {} })).toThrow(/platform package .* is not resolvable/);
     expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
     expect(fs.existsSync(path.join(f.copilotHome, 'skills'))).toBe(false);
+    expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
+  });
+
+  it('rejects a missing platform runtime.node before exposing an extension', () => {
+    const f = fixture();
+    expect(() => install(f, { runNpm: () => {
+      installFakePlatformPackage(f.pluginRoot);
+      fs.unlinkSync(path.join(f.pluginRoot, 'node_modules/@github', `copilot-sdk-${copilotSdkPlatform()}`, 'prebuilds', copilotSdkPlatform(), 'runtime.node'));
+    } })).toThrow(/missing its runtime files/);
+    expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
     expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
   });
 

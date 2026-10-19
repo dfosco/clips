@@ -9,6 +9,46 @@ import { createRequire } from 'node:module';
 export const COPILOT_SKILL_NAMES = ['clips', 'lane-manager'];
 const STATE_VERSION = 1;
 
+export function verifyCopilotPrerequisites(repositoryRoot, {
+  nodeVersion = process.versions.node,
+  runNode = execFileSync,
+  clipsHome = process.env.CLIPS_HOME || path.join(os.homedir(), '.clips'),
+} = {}) {
+  const [major, minor] = nodeVersion.split('.').map(Number);
+  if (!(major > 22 || (major === 22 && minor >= 18))) {
+    throw new Error(`Copilot installation requires Node.js 22.18 or newer; found ${nodeVersion}.`);
+  }
+  const root = fs.realpathSync(repositoryRoot);
+  const cliPath = path.join(root, 'src', 'cli.js');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+    if (manifest.name !== '@dfosco/clips' || !manifest.version || !fs.statSync(cliPath).isFile()) {
+      throw new Error('The canonical Clips CLI is missing.');
+    }
+    // Require checkout-local, locked production dependencies. Node's normal
+    // ancestor lookup must not make an incomplete checkout appear installable.
+    for (const name of Object.keys(manifest.dependencies || {})) {
+      const installed = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8'));
+      const locked = lock.packages?.[`node_modules/${name}`];
+      if (!locked?.version || installed.version !== locked.version) {
+        throw new Error(`The checkout's ${name} does not match package-lock.json.`);
+      }
+    }
+    // Loading the actual entry checks its transitive imports as well. Avoid a
+    // user's saved production-mode dispatch while checking this exact checkout.
+    const version = runNode(process.execPath, [cliPath, '--version'], {
+      cwd: root, encoding: 'utf8', timeout: 15000,
+      env: { ...process.env, CLIPS_HOME: clipsHome, CLIPS_SWITCH_INIT: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+    if (version !== `clips v${manifest.version}`) throw new Error(`Unexpected canonical CLI version: ${version}`);
+    return { nodeVersion, nodePath: process.execPath, cliPath, clipsVersion: manifest.version };
+  } catch (error) {
+    throw new Error(`Copilot installation requires the complete Clips checkout and its locked root runtime dependencies. Run npm ci --omit=dev --ignore-scripts at the repository root before retrying. ${error.message}`, { cause: error });
+  }
+}
+
 export function copilotSdkPlatform() {
   const { platform, arch } = process;
   if (arch !== 'arm64' && arch !== 'x64') throw new Error(`Unsupported Copilot SDK architecture: ${arch}`);
@@ -95,6 +135,13 @@ function targetEntry(target) {
 function pointsTo(target, source) {
   try { return fs.realpathSync(target) === source; }
   catch { return false; }
+}
+
+function targetIdentity(target) {
+  // Match equivalent home paths (for example /var and /private/var on macOS)
+  // without following the installed leaf link into the source checkout.
+  try { return path.join(fs.realpathSync(path.dirname(target)), path.basename(target)); }
+  catch (error) { if (error.code === 'ENOENT') return path.resolve(target); throw error; }
 }
 
 function atomicJson(file, value) {
@@ -187,17 +234,19 @@ export function installCopilot({
   const root = fs.realpathSync(repositoryRoot);
   const stateFile = path.join(clipsHome, 'copilot-workspaces-install.json');
   const previous = readState(stateFile);
-  const previousByTarget = new Map((previous?.targets || []).map(item => [item.target, item]));
+  const previousByTarget = new Map((previous?.targets || []).map(item => [targetIdentity(item.target), item]));
   const backupRoot = path.join(clipsHome, 'copilot-backups');
   const applied = [];
 
   try {
+    const prerequisites = verifyCopilotPrerequisites(root, { clipsHome });
+    const targets = copilotInstallPaths({ repositoryRoot: root, home, copilotHome });
     const canvasBuild = verifyCanvasBuild(path.join(root, 'plugins', 'copilot'));
     const dependencies = provisionCopilotDependencies(root, { runNpm });
-    const results = copilotInstallPaths({ repositoryRoot: root, home, copilotHome }).map(spec => {
+    const results = targets.map(spec => {
       const result = installLink({ ...spec, backupRoot, name: spec.name });
       if (!result.changed) {
-        const prior = previousByTarget.get(result.target);
+        const prior = previousByTarget.get(targetIdentity(result.target));
         if (prior?.source === result.source) {
           result.created = prior.created;
           result.backup = prior.backup || null;
@@ -219,7 +268,7 @@ export function installCopilot({
       targets: results.map(({ target, source, created, backup }) => ({ target, source, created, backup })),
     };
     atomicJson(stateFile, state);
-    return { stateFile, dependencies: { ...dependencies, installedPlatformPackage }, results };
+    return { stateFile, prerequisites, dependencies: { ...dependencies, installedPlatformPackage }, results };
   } catch (error) {
     try { rollbackApplied(applied); }
     catch (rollbackError) { error.message += `; rollback also failed: ${rollbackError.message}`; }

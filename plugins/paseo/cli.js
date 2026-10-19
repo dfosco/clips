@@ -78,7 +78,7 @@ function clipsCommand() {
       : { bin: override, prefix: [] };
   }
   if (existsSync(localClipsCli)) return { bin: process.execPath, prefix: [localClipsCli] };
-  return { bin: "clips", prefix: [] };
+  fail("The matching Clips CLI is missing. Keep the full repository checkout or set CLIPS_CLI_PATH explicitly.");
 }
 
 function readBoard(root) {
@@ -451,7 +451,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

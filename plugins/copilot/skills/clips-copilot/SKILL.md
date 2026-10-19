@@ -5,8 +5,13 @@ description: Use the Clips Lane Manager canvas in GitHub Copilot App while prese
 
 # Clips in GitHub Copilot App
 
-Install or update the maintained checkout's local extension and shared skill
-links with `node scripts/install-copilot.js`. It runs the extension's locked
+Install from a complete maintained repository checkout with Node.js 22.18+.
+First run `npm ci --omit=dev --ignore-scripts` at its root, then install or
+update its local extension and shared skill links with
+`node scripts/install-copilot.js`. See `plugins/copilot/README.md` in that
+checkout for pin/update/rollback requirements. Generic plugin install does not
+provision the canonical CLI/skills/extension closure. The installer checks the
+canonical CLI and its root runtime dependencies, then runs the extension's locked
 production dependency install (`npm ci --omit=dev --include=optional`) before exposing the source
 links. GitHub documents user-scoped extensions under `~/.copilot/extensions`;
 the installer places the extension at

@@ -1,5 +1,6 @@
 
 import fs from "node:fs";
+import { findClips, type ClipsCommand as Cli } from "./clips-cli";
 import { assertUnclaimed, launchLaneManager } from "./lane-managers";
 import { acquireLaunchLock } from "./launch-lock";
 import type { ManagerClaim } from "./lane-managers";
@@ -77,43 +78,8 @@ async function findProject(paseo: Paseo, id: string): Promise<LocalProject> {
 }
 
 /** The CLI is the only interpreter of Clips journals. Never replay JSONL in the plugin. */
-type Cli = { bin: string; prefix: string[] };
-let resolvedCli: Promise<Cli> | undefined;
-async function findClips(): Promise<Cli> {
-  if (resolvedCli) return resolvedCli;
-  resolvedCli = (async () => {
-    const override = process.env.CLIPS_CLI_PATH?.trim();
-    const binaries = override
-      ? [override]
-      : [
-          "clips",
-          "/opt/homebrew/bin/clips",
-          "/usr/local/bin/clips",
-          "/home/linuxbrew/.linuxbrew/bin/clips",
-          path.join(os.homedir(), ".local", "bin", "clips"),
-          path.join(os.homedir(), ".npm-global", "bin", "clips"),
-        ];
-    for (const binary of binaries) {
-      const candidate = binary.endsWith(".js")
-        ? { bin: process.execPath, prefix: [path.resolve(binary)] }
-        : { bin: binary, prefix: [] };
-      try {
-        await command(candidate.bin, [...candidate.prefix, "--version"]);
-        return candidate;
-      } catch (error) {
-        if (override) throw new Error(`CLIPS_CLI_PATH cannot run: ${errorText(error)}`);
-      }
-    }
-    throw new Error("Clips CLI not found on the Paseo daemon host. Install a Clips version supporting 'clips board --json', or set CLIPS_CLI_PATH to the checkout's src/cli.js.");
-  })().catch((error) => {
-    resolvedCli = undefined;
-    throw error;
-  });
-  return resolvedCli;
-}
-
-async function laneManagerCommand(root: string, action: "inspect" | "claim", ref: string, request?: unknown): Promise<ManagerClaim> {
-  const cli = await findClips();
+async function laneManagerCommand(paseo: Paseo, root: string, action: "inspect" | "claim", ref: string, request?: unknown): Promise<ManagerClaim> {
+  const cli = await findClips(paseo);
   const args = [...cli.prefix, "lane", "manager", action, ref];
   if (request) args.push(JSON.stringify(request));
   args.push("--json");
@@ -121,8 +87,8 @@ async function laneManagerCommand(root: string, action: "inspect" | "claim", ref
   return JSON.parse(stdout);
 }
 
-async function clipsBoard(root: string): Promise<any> {
-  const cli = await findClips();
+async function clipsBoard(paseo: Paseo, root: string): Promise<any> {
+  const cli = await findClips(paseo);
   let output: string;
   try {
     ({ stdout: output } = await command(cli.bin, [...cli.prefix, "board", "--json"], root));
@@ -179,12 +145,12 @@ export function normalizeBoard(board: any) {
 
 export async function readProjectBoard(paseo: Paseo, projectId: string) {
   const project = await findProject(paseo, projectId);
-  return normalizeBoard(await clipsBoard(project.root));
+  return normalizeBoard(await clipsBoard(paseo, project.root));
 }
 
 export async function changeProjectLabels(paseo: Paseo, input: { projectId: string; change: LabelChange }) {
   const project = await findProject(paseo, input.projectId);
-  const cli = await findClips();
+  const cli = await findClips(paseo);
   const change = input.change;
   const args = change.action === "create" ? ["create", JSON.stringify({ name: change.name, color: change.color })]
     : change.action === "edit" ? ["edit", change.id, JSON.stringify({ name: change.name, color: change.color })]
@@ -197,12 +163,12 @@ export async function changeProjectLabels(paseo: Paseo, input: { projectId: stri
   } catch (error) {
     throw new Error(`Cannot change Clips labels: ${errorText(error)}`);
   }
-  return normalizeBoard(await clipsBoard(project.root));
+  return normalizeBoard(await clipsBoard(paseo, project.root));
 }
 
 export async function readProjectLabelUses(paseo: Paseo, input: { projectId: string; id: string }) {
   const project = await findProject(paseo, input.projectId);
-  const cli = await findClips();
+  const cli = await findClips(paseo);
   try {
     const result = await command(cli.bin, [...cli.prefix, "label", "uses", input.id, "--json"], project.root);
     return labelUsesData.parse(JSON.parse(result.stdout));
@@ -409,7 +375,7 @@ export async function startWork(
   const releaseLaunch = acquireLaunchLock(project.root, input.ref);
   inFlight.add(key);
   try {
-    const board = normalizeBoard(await clipsBoard(project.root));
+    const board = normalizeBoard(await clipsBoard(paseo, project.root));
     const targets: Work[] = [...board.lanes, ...board.goals, ...board.goals.flatMap((g) => g.tasks)];
     const target = targets.find((t) => t.ref === input.ref);
     if (!target) throw new Error(`Clips reference ${input.ref} does not exist in this project.`);
@@ -418,7 +384,7 @@ export async function startWork(
     }
 
     // Inspect before workspace or agent creation. An unavailable claim store fails closed.
-    const managerClaim = target.kind === "lane" ? await laneManagerCommand(project.root, "inspect", target.ref) : null;
+    const managerClaim = target.kind === "lane" ? await laneManagerCommand(paseo, project.root, "inspect", target.ref) : null;
     if (managerClaim) {
       assertUnclaimed(managerClaim);
       if (input.mode === "agent" && !input.hostId?.trim()) {
@@ -431,7 +397,7 @@ export async function startWork(
       return launchLaneManager({
         ref: target.ref, hostId: input.hostId!, claim: managerClaim, prompt: promptFor(target),
         createIdle: () => workspace.agents.create(options),
-        claimOwner: (request) => laneManagerCommand(project.root, "claim", target.ref, request),
+        claimOwner: (request) => laneManagerCommand(paseo, project.root, "claim", target.ref, request),
       });
     };
     const [workspaces, agents] = await Promise.all([listWorkspaces(paseo), listAgents(paseo)]);
@@ -540,14 +506,14 @@ export async function closeWork(
   },
 ) {
   const project = await findProject(paseo, input.projectId);
-  const board = normalizeBoard(await clipsBoard(project.root));
+  const board = normalizeBoard(await clipsBoard(paseo, project.root));
   const lane = board.lanes.find((item) => item.ref === input.ref);
   const goal = board.goals.find((item) => item.ref === input.ref);
   const target = lane ?? goal;
   if (!target) throw new Error(`Clips lane or goal ${input.ref} does not exist in this project.`);
   if (target.status === "closed") throw new Error(`${input.ref} is already closed.`);
 
-  const cli = await findClips();
+  const cli = await findClips(paseo);
   let autoCompleteStatus: "not_requested" | "not_needed" | "started" | "failed" = "not_requested";
   let autoCompleteError: string | null = null;
   if (lane) {
