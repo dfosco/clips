@@ -185,7 +185,9 @@ do not add a routine start confirmation. Explicit plan/defer/queue instructions
 and real blockers still override execution. The checkout CLI uses an unscoped
 workspace SDK route. Agent-scoped `create_agent` and `paseo run` create children
 even in another workspace, so are not substitutes for a top-level-owner launch.
-Dev agents may choose their own sub-agents within their role/authority.
+Dev owners follow Clips' Task-level parallel execution guidance when assigning
+their own sub-agents within their role and authority; those workers do not
+replace the verified top-level owner or imply a new Lane management claim.
 
 ## When Paseo is absent
 

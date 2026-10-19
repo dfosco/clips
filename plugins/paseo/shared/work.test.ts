@@ -1,5 +1,12 @@
 
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
+import { start } from "../cli.js";
+import { startWork } from "../server/backend";
 import { branchName, branchPrefix, defaultProvider, executionFor, executionForManagers, matchesWorkspace, promptFor, type AgentInfo, type WorkspaceInfo } from "./work";
 
 const task = { kind: "task" as const, ref: "#alice#g001#t01", title: "Write tests" };
@@ -94,4 +101,90 @@ describe("Paseo work mapping", () => {
     expect(managerPrompt).toContain("verified top-level workspace dev agents the user can steer directly");
     expect(managerPrompt).toContain("Do not create child agents");
   });
+});
+
+describe("generated work execution contexts", () => {
+  it.each(["goal", "task"] as const)("gives %s dev owners tracked Task parallelism and integrated evidence duties", (kind) => {
+    const prompt = promptFor({ ...task, kind });
+    expect(prompt).toMatch(/Use sub-agents.*assigning each worker Task IDs and contracts/);
+    expect(prompt).toMatch(/dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and conflicting writes/);
+    expect(prompt).toMatch(/one dev coordinator for integration, verification and workflow-record writes/);
+    expect(prompt).toMatch(/results and checks mapped to Task IDs and the actual source\/artifact checked/);
+    expect(prompt).not.toContain("Do not create child agents");
+    if (kind === "task") expect(prompt).toContain("A Task assignment does not authorize sibling scope");
+  });
+
+  it("makes managers convey the execution contract while retaining their coordination boundary", () => {
+    const prompt = promptFor({ kind: "lane", ref: "#l001", title: "Vision" });
+    expect(prompt).toMatch(/In every handoff, instruct the top-level dev owner.*Plan and execute parallel Tasks/);
+    expect(prompt).toContain("Do not create or direct the owner's sub-agents yourself");
+    expect(prompt).toContain("Do not create child agents, implement, run validation or babysit workers yourself");
+    expect(prompt).not.toContain("assigning each worker Task IDs and contracts");
+  });
+
+  it("passes the same Goal/Task context through CLI previews, CLI/server agents and workspace attachments", async () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "clips-dev-context-")));
+    const cli = fileURLToPath(new URL("../../../src/cli.js", import.meta.url));
+    const previous = { home: process.env.CLIPS_HOME, cli: process.env.CLIPS_CLI_PATH };
+    process.env.CLIPS_HOME = path.join(root, "home");
+    process.env.CLIPS_CLI_PATH = cli;
+    try {
+      execFileSync("git", ["init", "--quiet"], { cwd: root });
+      const run = (...args: string[]) => execFileSync(process.execPath, [cli, ...args], { cwd: root });
+      run("init", "--skills-scope", "project");
+      run("goal", "create", JSON.stringify({ title: "Local goal" }));
+      run("task", "create", "g1", JSON.stringify({ title: "Local task" }));
+      const createAgent = vi.fn(async (_options: any) => ({ id: "dev-agent", workspaceId: "w1" }));
+      const createWorkspace = vi.fn(async (_options: any) => ({ id: "new-workspace" }));
+      const paseo: any = {
+        projects: { list: async () => ({ projects: [{ projectId: "p1", projectKind: "git", projectRootPath: root }] }) },
+        workspaces: {
+          list: async () => ({ entries: [{ id: "w1", projectId: "p1", name: "Existing", status: "ready", gitRuntime: { currentBranch: "main" } }], pageInfo: { hasMore: false } }),
+          ref: () => ({ id: "w1", agents: { create: createAgent } }),
+          create: createWorkspace,
+        },
+        agents: { list: async () => ({ entries: [], pageInfo: { hasMore: false } }) },
+        providers: {
+          snapshot: async () => ({ entries: [{ provider: "codex", status: "ready", models: [{ id: "model", isDefault: true }], modes: [{ id: "full-access", label: "Full access" }] }] }),
+          listModes: async () => ({ modes: [{ id: "full-access", label: "Full access" }] }),
+          listFeatures: async () => ({ features: [] }),
+        },
+      };
+      const targets = [
+        { kind: "goal" as const, ref: "#g001", title: "Local goal" },
+        { kind: "task" as const, ref: "#g001#t01", title: "Local task" },
+      ];
+      for (const target of targets) {
+        const expectedPrompt = promptFor(target);
+        const options = { project: root, ref: target.ref, provider: "codex/model", workspace: "w1", features: [] };
+        const preview = await start(paseo, { ...options, "dry-run": true });
+        expect(preview.prompt).toBe(expectedPrompt);
+        expect(createAgent).not.toHaveBeenCalled();
+        await start(paseo, options);
+        await startWork(paseo, { agent: "codex/model", featureValues: {} } as any, {
+          projectId: "p1", ref: target.ref, mode: "agent", workspaceId: "w1",
+        });
+        expect(createAgent).toHaveBeenCalledTimes(2);
+        for (const [created] of createAgent.mock.calls) {
+          expect(created).toMatchObject({
+            prompt: expectedPrompt,
+            config: { provider: "codex/model", modeId: "full-access" },
+            labels: { "clips.ref": target.ref, "clips.projectId": "p1", "clips.kind": target.kind },
+          });
+        }
+        await startWork(paseo, { agent: "", featureValues: {} } as any, { projectId: "p1", ref: target.ref, mode: "workspace" });
+        expect(createWorkspace).toHaveBeenLastCalledWith(expect.objectContaining({
+          firstAgentContext: { attachments: [expect.objectContaining({ text: expectedPrompt, contextKind: "clips" })] },
+          source: expect.objectContaining({ kind: "worktree", cwd: root, action: "branch-off" }),
+        }));
+        createAgent.mockClear();
+      }
+    } finally {
+      if (previous.home === undefined) delete process.env.CLIPS_HOME;
+      else process.env.CLIPS_HOME = previous.home;
+      if (previous.cli === undefined) delete process.env.CLIPS_CLI_PATH;
+      else process.env.CLIPS_CLI_PATH = previous.cli;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 15_000);
 });

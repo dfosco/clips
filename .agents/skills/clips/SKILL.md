@@ -9,7 +9,7 @@ description: >-
   optional Paseo work-record/execution association, and GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.19.1"
+  version: "2026.10.19.2"
 ---
 
 # Clips
@@ -129,7 +129,9 @@ record history, so `#l1#r2` means Lane 1 revision 2.
    existing Lane, read that Lane for strategic context; create a Lane when this
    work is part of a sustained multi-goal product frame rather than a one-off
    outcome. Add the goal plan and decisions at the level needed for coordination. Create task requests from the available
-   context, without asking the user to author the breakdown.
+   context, without asking the user to author the breakdown. Plan useful
+   Task-level concurrency during this decomposition, before assigning workers;
+   follow the execution guidance below.
 2. Make the task understandable before assignment: state the intended change in
    `description`, identify affected `components`, describe `scope`, and define
    observable `acceptance_criteria`. Add `owner`, `acceptance_owner`, dependencies,
@@ -152,6 +154,40 @@ Distinguish component `dependencies` from task `blocked_by`. The former describe
 system relationships; the latter describe required work ordering. Do not turn
 every runtime dependency into a serial implementation schedule. Treat declared
 blockers as coordination data, not proof that a scheduler enforces them.
+
+## Plan and execute parallel Tasks
+
+When generating or reassessing Tasks, design independently reviewable concurrency
+units up front. Map scope and acceptance to identified Tasks; record prerequisites
+in `blocked_by`, source/write ownership and conflict boundaries in Task scope or
+named sections, and integration/verification obligations in their contracts and
+the Goal plan. Agree interfaces needed for concurrent work before consumers rely
+on them. Reuse or amend existing Tasks rather than inventing untracked slices
+of a broad Goal after handoff. Do not split merely by file, pad the Task count,
+or manufacture parallel work for a genuinely atomic change.
+
+The dev execution owner must parallelize useful work through sub-agents as far
+as feasible. Assign each worker identified Clips Task IDs with their scope,
+criteria, prerequisites, write boundaries, and expected result/evidence. Schedule
+dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and
+conflicting writes. Read-only discovery or preparation may overlap a prerequisite,
+but do not call dependent implementation ready or accepted before its contract is
+met. Preserve technical autonomy within each Task. New independent work discovered
+during execution needs a Task contract before separate assignment.
+
+Keep one dev owner coordinating integration, verification, and workflow-record
+writes. Workers return results and checks mapped to their Task IDs and the actual
+source/artifact checked; they do not independently close shared records. Integrate
+provider/consumer changes and verify the actual combined candidate. Recheck
+affected evidence after changes instead of treating parallel reports on different
+candidates as integrated proof.
+
+Assess dependency order, shared mutable sources, interface readiness, review and
+integration cost, and available sub-agent capabilities. When no useful safe split
+or supported worker capability exists, execute the ready work serially and record
+the concrete constraint briefly. There is no worker quota. This is the dev owner's
+engineering loop; Lane Manager hands off the complete outcome to a verified
+top-level dev agent and never creates or directs its children.
 
 ## Keep assigned work and optional Paseo execution in sync
 

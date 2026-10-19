@@ -9,7 +9,7 @@ description: >-
   as Lane Manager, including documentation and skill edits.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.19.4"
+  version: "2026.10.19.5"
 ---
 
 # Lane Manager
@@ -40,9 +40,10 @@ or personally meaningful does not make it necessary to ship.
   contract, not every file or proposed feature.
 - A **dev agent** is a top-level workspace execution owner, visible and directly
   steerable by the user. It owns technical planning, implementation, integration,
-  verification, and completion records for its assigned outcome. It may use
-  **Loopz**, a runtime-specific **Squad Leader**, or sub-agents to organize its
-  own execution. These are dev-agent choices, not permission for Lane Manager
+  verification, and completion records for its assigned outcome. It must use
+  sub-agents for useful feasible Task-level parallelism under the Clips execution
+  guidance; it chooses its tools, including **Loopz** or a runtime-specific
+  **Squad Leader**. These are dev-agent choices, not permission for Lane Manager
   to spawn children. Hand the outcome and constraints to the dev agent. Do not
   direct its workers or duplicate its engineering plan.
 - **Paseo** provides coding sessions and workspaces. An available Squad runtime
@@ -93,6 +94,17 @@ individual technical steps, poll workers to direct each change, or remain in the
 execution loop yourself. Stay responsible for priorities, scope, cross-Goal
 dependencies, product decisions, and reviewing the delivered outcome.
 
+In every dev-agent handoff, explicitly instruct the owner to parallelize useful
+work through sub-agents as far as feasible, using identified Clips Tasks rather
+than untracked subdivisions of the Goal. Pass the Task contracts and planned
+dependencies/write boundaries. Require the owner to schedule dependency-ready,
+non-conflicting Tasks concurrently, sequence prerequisites and conflicting writes,
+and retain one integration, verification, and workflow-record coordinator with
+Task-ID-scoped results and actual candidate evidence. Use Clips' canonical
+task-generation/execution guidance; no filler Tasks or worker quotas. The dev
+owner decides the technical assignments and reports concrete constraints when
+serial execution is needed. Do not create or direct its sub-agents yourself.
+
 Scoped session authorization does not authorize unrelated publishing, external
 messages, issues, PRs, review-state changes, or destructive actions. Preserve the
 host's approval rules for those actions. Follow the configuration and preview
@@ -117,6 +129,12 @@ More Tasks do not prove coverage either. Task boundaries should follow changes
 that can be reviewed and accepted independently, not arbitrary steps, files, or
 a mandatory split by technical layer. Keep the dev agent responsible for the
 technical plan and execution within the agreed contracts.
+
+Consider useful parallelism while generating or reassessing this breakdown, not
+only after handing off a broad Goal. Follow Clips' Task-level execution guidance:
+make prerequisites, source/write conflicts, ownership and integrated acceptance
+obligations explicit in the contracts. The dev owner refines and schedules those
+Tasks; Lane Manager does not assign or supervise the owner's sub-agents.
 
 - **Zero Tasks requires a meaningful breakdown.** Do not hand off or execute
   unfinished work with an empty Task set; create its Task requests first. For a
@@ -307,7 +325,8 @@ section above when coordinating or reusing a manager's existing claim.
    unless explicitly planning/deferred or genuinely blocked. Pass a
    self-contained contract, not the chat transcript. Choose a
    verified top-level workspace dev agent for the complete outcome. That dev
-   agent chooses whether Loopz, a Squad Leader, or sub-agents help its execution.
+   agent owns Task-level parallel scheduling under the explicit handoff
+   instruction above and chooses the appropriate execution tools.
    Keep execution-owner selection separate from the strategic Lane. Do not take
    over implementation or substantive verification when a dev agent is unavailable.
 7. **Review actual results.** Reconcile the execution and validation agents'
@@ -422,7 +441,11 @@ Only include relevant fields, but make it usable without the original chat:
 - **Why:** the user-visible outcome and why it matters now.
 - **In / out:** exact scope, explicitly excluded adjacent work, and affected
   component contracts.
-- **Dependencies:** what must already exist and what can run independently.
+- **Dependencies and ownership:** identified Task IDs, prerequisites/`blocked_by`,
+  source/write boundaries, what can run independently, and integration obligations.
+- **Parallel execution:** explicitly instruct the dev owner to use sub-agents
+  for useful dependency-ready, non-conflicting Tasks as far as feasible, with one
+  integration/verification/record coordinator and no filler workers.
 - **Proof:** observable acceptance conditions, necessary tests/manual checks,
   expected artifact (PR, build, demo, docs), and who can accept it.
 - **Risks:** known regressions, unresolved decisions, and required approvals.
