@@ -1,0 +1,24 @@
+{
+  "id": "clips-workspaces",
+  "name": "Clips",
+  "description": "Browse Clips Lanes, Goals and Tasks, run them in Paseo worktree workspaces, and see which agents are working now.",
+  "requirements": {
+    "paseo": ">=0.11.2"
+  },
+  "build": [
+    [
+      "npm",
+      "ci",
+      "--prefix",
+      "../..",
+      "--omit=dev",
+      "--ignore-scripts"
+    ],
+    [
+      "npm",
+      "ci",
+      "--omit=dev",
+      "--ignore-scripts"
+    ]
+  ]
+}

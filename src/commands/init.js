@@ -1,13 +1,17 @@
 // Init command - initialize clips in a repository
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import os from 'node:os';
+import { execFileSync, execSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
 import { initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
-import { ensureProjectIdentity, registerProject } from '../lib/registry.js';
-import { importSkill } from 'skillshop/import';
+import { ensureProjectIdentity, getRegistryPath, registerProject } from '../lib/registry.js';
+import { importSkill, loadSkillLibrary } from 'skillshop/import';
+import { installUserSkill } from 'skillshop/user-install';
+import { isLiveSkill } from '../lib/lane-manager-install.js';
 
 const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -90,7 +94,7 @@ function setupVSCodeSettings(cwd) {
 function resolveAgentDir(cwd) {
   // 1. Check config
   try {
-    const config = readConfig();
+    const config = readConfig(cwd);
     if (config.agent_dir) {
       return path.join(cwd, config.agent_dir);
     }
@@ -118,45 +122,104 @@ function resolveAgentDir(cwd) {
   return path.join(cwd, '.agents');
 }
 
-/**
- * Install or update the Clips router, routed skills, and references in the
- * target repo's agent directory without touching unrelated skills.
- * Returns { installed: bool, updated: bool, path: string }
- */
-async function installSkill(cwd) {
-  const agentDir = resolveAgentDir(cwd);
-  const targetPath = path.join(agentDir, 'skills', 'clips', 'SKILL.md');
-
-  let result;
-  try {
-    // Only explicitly exported skills may be imported. Each import copies
-    // the files into the project; it does not subscribe to future changes.
-    result = await importSkill({
-      library: CLIPS_LIBRARY_ROOT,
-      specifier: 'skill:clips',
-      targetDir: path.dirname(targetPath),
-      cwd,
-      merge: true,
-    });
-  } catch (error) {
-    return { installed: false, updated: false, error: error.message };
-  }
-
-  // Persist the detected agent_dir in config so future runs are consistent.
-  try {
-    const config = readConfig();
-    if (!config.agent_dir) {
-      const relDir = path.relative(cwd, agentDir);
-      config.agent_dir = relDir.startsWith('.') ? relDir : '.' + relDir;
-      writeConfig(config);
+export async function chooseSkillScope(args, { input = process.stdin, output = process.stdout } = {}) {
+  if (args.includes('--help') || args.includes('-h')) return null;
+  if (args.length) {
+    if (args.length === 1 && args[0] === '--global') return 'user';
+    if (args.length !== 2 || args[0] !== '--skills-scope' || !['project', 'user'].includes(args[1])) {
+      throw new Error('Usage: clips init [--global | --skills-scope project|user]');
     }
-  } catch (error) {
-    // Config write is best-effort during init.
+    return args[1];
   }
-  return { installed: result.installed, updated: result.updated, path: targetPath };
+  if (!input.isTTY || !output.isTTY) {
+    throw new Error('No terminal to choose a skill destination. Pass --skills-scope project or --skills-scope user.');
+  }
+  const prompt = createInterface({ input, output });
+  try {
+    while (true) {
+      const answer = (await prompt.question('Install Clips skills in this project or your user account (replaces existing copies)? [project/user] ')).trim().toLowerCase();
+      if (answer === 'project' || answer === 'p') return 'project';
+      if (answer === 'user' || answer === 'u') return 'user';
+      output.write('Enter project or user.\n');
+    }
+  } finally {
+    prompt.close();
+  }
+}
+
+async function installSkills(cwd, scope) {
+  const library = await loadSkillLibrary(CLIPS_LIBRARY_ROOT, { cwd });
+  const specifiers = Object.keys(library.skills).filter((name) => name.startsWith('skill:'));
+  const agentDir = scope === 'project' ? resolveAgentDir(cwd) : null;
+  const results = [];
+  const sources = new Set();
+  for (const specifier of specifiers) {
+    const source = library.skills[specifier];
+    if (sources.has(source)) continue;
+    sources.add(source);
+    const name = specifier.slice('skill:'.length);
+    const targetDir = scope === 'user'
+      ? path.join(os.homedir(), '.agents', 'skills', name)
+      : path.join(agentDir, 'skills', name);
+    if (isLiveSkill(targetDir)) {
+      results.push({ specifier, targetDir, live: true });
+      continue;
+    }
+    const result = scope === 'user'
+      ? await installUserSkill({ library: CLIPS_LIBRARY_ROOT, specifier, cwd })
+      : await importSkill({
+        library: CLIPS_LIBRARY_ROOT,
+        specifier,
+        targetDir: path.join(agentDir, 'skills', name),
+        cwd,
+        merge: true,
+      });
+    results.push(result);
+  }
+
+  if (scope === 'project') {
+    const config = readConfig(cwd);
+    if (!config.agent_dir) {
+      config.agent_dir = path.relative(cwd, agentDir);
+      writeConfig(config, cwd);
+    }
+  }
+  return results;
+}
+
+export function initializeStore(directory) {
+  const cwd = getRepoRoot(directory);
+  const clipsDir = path.join(cwd, '.clips');
+  if (fs.existsSync(clipsDir)) throw new Error('A Clips store already exists in this repository; it was not modified.');
+  const registryPath = getRegistryPath();
+  if (fs.existsSync(registryPath)) {
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    if (!registry || (registry.version !== undefined && registry.version !== 1) || !Array.isArray(registry.projects)) {
+      throw new Error('The Clips project registry is invalid; repair it before initializing.');
+    }
+  }
+  fs.mkdirSync(clipsDir);
+  fs.mkdirSync(path.join(clipsDir, 'db'));
+  for (const type of ['cr', 'adr']) fs.mkdirSync(path.join(clipsDir, 'records', type, 'archived'), { recursive: true });
+  initConfig({}, cwd);
+  setupGitExclude(cwd);
+  execFileSync('git', ['check-ignore', '--quiet', '.clips'], { cwd, stdio: 'pipe' });
+  ensureProjectIdentity(cwd);
+  const project = registerProject(cwd);
+  return { initialized: true, projectPath: cwd, projectId: project.id, warnings: project.warnings };
 }
 
 export async function runInitCommand(args) {
+  if (args.includes('--store-only')) {
+    if (args.length !== 1) throw new Error('--store-only must be used alone; it never installs skills.');
+    console.log(JSON.stringify(initializeStore(process.cwd())));
+    return;
+  }
+  const skillScope = await chooseSkillScope(args);
+  if (!skillScope) {
+    console.log('Usage: clips init [--global | --skills-scope project|user | --store-only]');
+    return;
+  }
   const cwd = getRepoRoot(process.cwd());
   const clipsDir = path.join(cwd, '.clips');
   const clipsDbDir = path.join(cwd, '.clips', 'db');
@@ -225,16 +288,9 @@ export async function runInitCommand(args) {
   const registeredProject = registerProject(cwd);
   console.log(`✓ Registered project ${projectId} in ${registeredProject.path}`);
 
-  // Install or update skill file
-  const skillResult = await installSkill(cwd);
-  if (skillResult.error) {
-    console.log(`• Could not install skill pack (${skillResult.error})`);
-  } else if (skillResult.installed) {
-    console.log(`✓ Installed Clips skill pack → ${path.relative(cwd, skillResult.path)}`);
-  } else if (skillResult.updated) {
-    console.log(`✓ Updated Clips skill pack → ${path.relative(cwd, skillResult.path)}`);
-  } else {
-    console.log(`• Clips skill pack already up to date`);
+  for (const result of await installSkills(cwd, skillScope)) {
+    const action = result.live ? 'Preserved live source for' : result.installed ? 'Installed' : result.updated ? 'Updated' : 'Already current';
+    console.log(`✓ ${action} ${result.specifier} → ${result.targetDir}`);
   }
 
   // Import existing GitHub Issues

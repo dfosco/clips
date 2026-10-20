@@ -6,7 +6,7 @@ description: >-
   record history. Use
   when framing an outcome, negotiating scope or interfaces, assigning work,
   reviewing completion, resuming tracked work, or managing existing CRs, ADRs,
-  and optional GitHub synchronization.
+  optional Paseo work-record/execution association, and GitHub synchronization.
 metadata:
   author: Daniel Fosco
   version: "2026.10.20.4"
@@ -64,8 +64,9 @@ work implements its bounded contract. See the
 and [Clips Dev](../clips-dev/SKILL.md) for autonomous technical planning and
 implementation in the current session. Lane Manager owns continued coordinated
 delivery; the user need not switch skills to make it continue.
-Those optional companion skills are not installed by `clips init`; their absence
-does not block an existing authorized Task or require a new installation.
+`clips init` installs these canonical skills once in the selected project or user
+scope. Their absence in an older installation does not block an existing
+authorized Task or require a new installation.
 
 ## Establish context and capabilities
 
@@ -177,7 +178,9 @@ record history, so `#l1#r2` means Lane 1 revision 2.
    existing Lane, read that Lane for strategic context; create a Lane when this
    work is part of a sustained multi-goal product frame rather than a one-off
    outcome. Add the goal plan and decisions at the level needed for coordination. Create task requests from the available
-   context, without asking the user to author the breakdown.
+   context, without asking the user to author the breakdown. Plan useful
+   Task-level concurrency during this decomposition, before assigning workers;
+   follow the execution guidance below.
 2. Make the task understandable before assignment: state the intended change in
    `description`, identify affected `components`, describe `scope`, and define
    observable `acceptance_criteria`. Add `owner`, `acceptance_owner`, dependencies,
@@ -200,6 +203,63 @@ Distinguish component `dependencies` from task `blocked_by`. The former describe
 system relationships; the latter describe required work ordering. Do not turn
 every runtime dependency into a serial implementation schedule. Treat declared
 blockers as coordination data, not proof that a scheduler enforces them.
+
+## Plan and execute parallel Tasks
+
+When generating or reassessing Tasks, design independently reviewable concurrency
+units up front. Map scope and acceptance to identified Tasks; record prerequisites
+in `blocked_by`, source/write ownership and conflict boundaries in Task scope or
+named sections, and integration/verification obligations in their contracts and
+the Goal plan. Agree interfaces needed for concurrent work before consumers rely
+on them. Reuse or amend existing Tasks rather than inventing untracked slices
+of a broad Goal after handoff. Do not split merely by file, pad the Task count,
+or manufacture parallel work for a genuinely atomic change.
+
+Use useful parallelism through the host-specific execution path when the scope
+and user resource limits support it. Clips Dev normally implements in its own
+session, not through a new team. A Copilot Lane Manager creates any needed
+direct sibling workers; its dev owners do not spawn nested substitutes. Where
+delegation is permitted, assign identified Task IDs, scope, criteria,
+prerequisites, write boundaries, and expected result/evidence. Schedule
+dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and
+conflicting writes. Read-only discovery or preparation may overlap a prerequisite,
+but do not call dependent implementation ready or accepted before its contract is
+met. Preserve technical autonomy within each Task. New independent work discovered
+during execution needs a Task contract before separate assignment.
+
+Keep one dev owner coordinating integration, verification, and workflow-record
+writes. Workers return results and checks mapped to their Task IDs and the actual
+source/artifact checked; they do not independently close shared records. Integrate
+provider/consumer changes and verify the actual combined candidate. Recheck
+affected evidence after changes instead of treating parallel reports on different
+candidates as integrated proof.
+
+Assess dependency order, shared mutable sources, interface readiness, review and
+integration cost, and available sub-agent capabilities. When no useful safe split
+or supported worker capability exists, execute the ready work serially and record
+the concrete constraint briefly. There is no minimum worker quota; the configured
+Lane concurrency ceiling still applies. In Paseo, Lane Manager hands off to a
+verified top-level dev owner. Copilot instead uses the manager's direct children.
+
+## Keep assigned work and optional Paseo execution in sync
+
+An ordinary dev agent can take a direct user request, maintain its agreed
+Goal/Task contracts, and implement the assigned outcome using this skill. It
+does not become Lane Manager or need a Lane management claim to contribute.
+Keep the actual owner, status, blockers, results, and evidence current through
+supported Clips commands. Preserve prior requests and acceptance history.
+
+When working in Paseo or handing work to a Paseo session, read the canonical
+[Paseo integration procedure](references/paseo.md). It covers the plugin's
+planning-versus-runtime sources, discovery of actual session/workspace/project
+identity, native record binding and readback, direct steering/reuse, and optional
+configured launches. Lane Manager uses these same mechanics while retaining
+its host-specific delegation policy and no-primitive fallback.
+
+Without Paseo, continue authorized engineering and Clips record updates with
+the local CLI. Report that runtime association is unavailable; do not fabricate
+a live session, a running board state, or a management claim. A lifecycle status
+or owner string is not evidence that an agent is executing.
 
 ## Accept outcomes with evidence
 
@@ -347,6 +407,34 @@ coordinator writing shared records; workers return results, evidence, and propos
 updates. Separate worktrees do not isolate the workflow store. Use revision
 checks when supported, but do not treat append locks or optimistic checks as a
 distributed scheduler, lease, or full multiwriter workflow.
+
+Lane management claims are separate user-level coordination records. Before
+managing a Lane or contributing overlapping decisions, inspect
+`clips lane manager inspect '#l1' --json` and contact its recorded managers using
+an available, authorized transport. Report missing contact/transport rather than
+claiming coordination occurred. Contributions do not require taking ownership.
+One observed session can manage several Lanes; several managers require explicit
+sharing. Lane identity is shared across worktrees and agent usernames.
+
+An unowned Lane has revision 0. Claim using observed host/runtime/session IDs,
+never an invented session or display label. For example, with actual values:
+
+```bash
+clips lane manager claim '#l1' '{"expected_revision":0,"actor":{"host":"observed-host-id","runtime":"paseo","session_id":"actual-agent-id","workspace_id":"actual-workspace-id","contact":"supported coordination route"}}'
+clips lane manager list --json
+```
+
+`share` adds an `owner` identity and requires the actor to be a current manager.
+`release` removes only the actor's own claim. `handover` replaces one owner and
+requires an `owner`, recorded `authorization` with `by` and `reason`, and an
+explicit user instruction authorizing that replacement. Its optional `from`
+identity selects the displaced owner when different from the actor. Every
+mutation requires the inspected `expected_revision`; reread and coordinate on
+conflict rather than forcing a stale write. Use `--file` or `--stdin` for JSON.
+The CLI records the asserted identity and authority; it does not authenticate
+them. Stopped, unavailable, or disconnected sessions retain ownership until an
+explicit release or authorized handover. Claims live under `CLIPS_HOME` or
+`~/.clips`, are not committed or synced, and do not lock unrelated execution.
 
 Keep execution state in task status, owner, and blocker information; keep
 cross-task coordination in the goal plan and cross-goal strategic context in the

@@ -29,25 +29,36 @@ Open a terminal in the Git repository where you want to work, then run:
 clips init
 ```
 
-Setup creates a local place to keep your plans and progress and installs the
-Clips instructions for your assistant. It also keeps the work records out of
-Git commits. You do not need a GitHub account for local use.
+Setup creates a local place to keep your plans and progress, then asks whether
+to install the skills for this project or your user account. It installs
+**Clips**, **Lane Manager**, and **Clips Dev**, and keeps work records out of
+Git commits. You do not need a GitHub account for local use. For noninteractive
+setup, use `clips init --skills-scope project` or `clips init --global`.
 
 New projects start with GitHub sharing off. Running setup again preserves an
-existing collaboration setting and refreshes the project copy of the Clips
-instructions.
+existing collaboration setting and refreshes ordinary skill copies. Maintained
+source links are preserved.
 
-### 3. Add Lane Manager to your assistant
+### 3. Use Lane Manager in your assistant
 
-`clips init` installs the core **Clips** skill. For the coordinated workflow
-below, [add the **Lane Manager** skill](docs/cli-reference.md#skill-library-exports)
-to your project, then open the project in your AI tool. Lane Manager is a
-separate skill; setup does not install it automatically.
+Open the project in your AI tool and ask it to use **Lane Manager**. The three
+skills have distinct roles: Lane Manager plans and coordinates workers,
+Clips Dev plans and builds in its own session, and Clips keeps their shared
+work records. [Individual skill imports](docs/cli-reference.md#skill-library-exports)
+remain available for custom setups.
 
 A skill is a set of instructions your assistant follows. If it does not
 recognize an installed skill, ask it to read that skill's `SKILL.md` file in
 your project. If setup reports that it could not install a skill, resolve that
 error before expecting the assistant to use it.
+
+### Optional app integrations
+
+The package also includes **Clips Work for GitHub Copilot App** and the **Paseo
+plugin**. They are separate, explicit installations requiring Node.js 22.18 or
+newer; ordinary `clips init` does not install or activate them.
+See [app integration setup](docs/cli-reference.md#app-integrations) for supported
+installation paths and their limits.
 
 ## Meet your Lane Manager
 

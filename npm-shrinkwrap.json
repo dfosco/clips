@@ -9,7 +9,7 @@
       "version": "2.0.0",
       "license": "MIT",
       "dependencies": {
-        "skillshop": "^2.0.0"
+        "skillshop": "2.1.0"
       },
       "bin": {
         "clips": "src/cli.js"
@@ -936,12 +936,12 @@
       "license": "ISC"
     },
     "node_modules/skillshop": {
-      "version": "2.0.0",
-      "resolved": "https://registry.npmjs.org/skillshop/-/skillshop-2.0.0.tgz",
-      "integrity": "sha512-4PAqg/WRZBq3zJ9qGWq9sfgwpeifV3wuiTHnIe1L6Loug2arrVp0uyydXsLrPvNIoT3Nx4xYcCiBrvsh5ctQWw==",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/skillshop/-/skillshop-2.1.0.tgz",
+      "integrity": "sha512-JQfrqunrddtCTmU9NsILzJOmonfZmPM1raoxa+NCAO6Dotg57pfxhonI3aJD5CPP0NOOgFaNOlZ0kNMlKWtixg==",
       "bin": {
-        "skillshop": "src/cli.js",
-        "skillz": "src/cli.js"
+        "sk": "src/cli.js",
+        "skillshop": "src/cli.js"
       },
       "engines": {
         "node": ">=18"

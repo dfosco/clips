@@ -81,8 +81,9 @@ overlapping edits rather than clearing owners or history to proceed.
 Agents use the CLI for records and their host's supported tools for session
 steering and communication. An existing dev owner needs no extra session just
 for an identity or role. Per-agent
-instructions cannot disable hardcoded checks in a separate host integration;
-this package does not include the Copilot canvas runtime.
+instructions cannot disable hardcoded checks in a host integration. The packaged
+Copilot canvas sends only to its actual joined session; native App tools still
+provide direct-child creation and cross-session steering.
 
 In GitHub Copilot App, dev sessions delegated by a Lane Manager are its direct,
 coordinated children. There is no intermediate coordinator, Squad Leader or dev-lead
@@ -407,18 +408,18 @@ Maintainers add exports with `skillshop export skill:<name> <directory>` and
 regenerate with `skillshop build`; do not hand-edit the generated manifest.
 Source delivery does not refresh already installed skills or publish a release.
 
-Clips uses `skillshop/import` during `clips init` to copy the explicitly
-exported `skill:clips` component into the project's selected agent directory.
-Lane Manager and Clips Dev remain explicit Skillshop imports; init does not install
-them automatically. Cross-skill guidance applies when those optional skills are
-available, rather than requiring an import to execute an existing Task.
-Re-running init overlays changed skill files and preserves additional
-project-local files. Imports are independent filesystem snapshots; there is
-no live subscription to the source library or retroactive revocation.
+Clips uses Skillshop 2.1.0 during `clips init` to install the canonical Clips,
+Lane Manager and Clips Dev skills in the selected project or user scope.
+Duplicate export targets are installed once; the legacy alias does not create
+a second `loopz` directory. Re-running project init overlays changed skill files
+and preserves additional project-local files. User-scope installation replaces
+ordinary skill copies. Both paths preserve maintained live source links.
+Ordinary imports remain independent filesystem snapshots, not live subscriptions.
 
-The CLI requires `skillshop@^2.0.0`. Publish Skillshop 2.x **before**
-publishing Clips, then regenerate `package-lock.json` with npm to record
-the published artifact's registry integrity checksum.
+The root `npm-shrinkwrap.json` records locked dependency integrity and ships in
+the npm package. Unlike a root `package-lock.json`, npm includes it in tarballs.
+The Copilot installer verifies these locked root dependencies, plus its separate
+plugin lockfile, before exposing user extension links.
 
 ## Installation and setup
 
@@ -431,18 +432,50 @@ npx @dfosco/clips --help
 Install commands above select the published npm package, not the source in this
 checkout. Check the installed command set before using newer capabilities.
 
-Use the top-level `clips --help` to inspect commands. In this checkout,
-`clips init --help` still runs initialization; it is not a read-only help command.
+Use `clips --help` or the read-only `clips init --help` to inspect commands.
+Interactive `clips init` asks for project or user skill scope. Noninteractive
+callers must select `--skills-scope project`, `--skills-scope user`, or `--global`
+(equivalent to user). Project scope uses the detected agent directory; user
+scope uses `~/.agents/skills`.
 
-`clips init` creates local workflow state and installs the Clips skill into the
-repository's detected agent directory. It does not contact GitHub or import
+`clips init` creates local workflow state and installs the canonical skills.
+It does not contact GitHub or import
 issues by default. Existing repositories with `collaboration: true` preserve
 that setting.
+
+`clips init --store-only` creates only the repository's local store, default
+configuration, Git exclusion and project registration, returning JSON. It
+refuses an existing store or an invalid registry. It performs no skill/plugin
+installation, editor settings changes, network access or synchronization.
+The Copilot canvas uses this path for its current-directory Initialize action.
 
 The system registry lives at `~/.clips/projects.json` or
 `$CLIPS_HOME/projects.json`. Missing project paths are pruned from the registry.
 Projects default to their directory name; change an ID with
 `clips config project_id <id>`. IDs must be unique across registered projects.
+
+## App integrations
+
+Both optional integrations require Node.js 22.18 or newer. Neither is installed
+or activated by ordinary project initialization.
+
+- [Clips Work for GitHub Copilot](../plugins/copilot/README.md) includes the
+  locked SDK runtime, checked renderer, canonical CLI and linked skills. Install
+  from a complete checkout or an extracted published package, not a standalone
+  copy of `plugins/copilot`. The canvas uses advisory claims and associations
+  and sends to the exact current session. Native child-session management remains
+  a separate App capability.
+- [Paseo plugin](../plugins/paseo/README.md) provides work views, observed session
+  activity, steering and configured launches. Its
+  [shared skill procedure](../.agents/skills/clips/references/paseo.md) documents
+  top-level dev-owner launches, real identity/binding readback and host limits.
+
+`clips board --json` is a retained read-only projection of the current
+repository's Lanes, Goals, Tasks, labels and related records. It is a machine
+interface for integrations, not an HTTP server or the removed `clips web`
+command. Inspect and maintain project labels with `clips label --help`.
+Optional Lane claim commands retain advisory coordination history and require
+fresh expected revisions; they do not gate ordinary Goal/Task work.
 
 ### Switch between development and the installed npm package
 
@@ -512,7 +545,11 @@ to limit memory use. The `--skills-only` check packs and reads the
 shipped skills, compatibility alias, relative references and harness-policy
 scenarios. `npm run test:all` also runs the full package smoke check against the
 real tarball, covering retained CLI commands, installation switching, records
-and acceptance. Neither check needs a development server or a frontend build.
+and acceptance, plus packaged board and plugin/installer closure. Neither check
+needs a development server or a frontend build. Run the separate plugin suites
+and Paseo typechecks for integration changes. The Copilot package carries a
+checked renderer; changing its build inputs requires a destination rebuild
+and `npm run check:build --prefix plugins/copilot`.
 Release commands perform external versioning and publication workflow:
 
 ```bash

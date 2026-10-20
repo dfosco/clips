@@ -34,10 +34,22 @@
     ".agents/skills/lane-manager",
     ".agents/skills/clips-dev",
     "skillshop.manifest.mjs",
+    "npm-shrinkwrap.json",
     "README.md",
     "docs/",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/install-copilot.js",
+    "scripts/install-lane-manager.js",
+    "scripts/install-live-skills.js",
+    "plugins/copilot/",
+    "!plugins/copilot/node_modules/**",
+    "!plugins/copilot/**/*.test.js",
+    "!plugins/copilot/**/*.test.mjs",
+    "plugins/paseo/",
+    "!plugins/paseo/node_modules/**",
+    "!plugins/paseo/**/*.test.ts",
+    "!plugins/paseo/**/*.test.tsx"
   ],
   "keywords": [
     "cli",
@@ -60,7 +72,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "skillshop": "^2.0.0"
+    "skillshop": "2.1.0"
   },
   "exports": {
     "./skillshop": "./skillshop.manifest.mjs",

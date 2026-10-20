@@ -1,0 +1,3 @@
+# Vite preserves upstream Radix CSS template whitespace inside the JS bundle.
+# Keep emitted bytes unchanged; source files retain normal whitespace checks.
+canvas/dist/app.js whitespace=-blank-at-eol

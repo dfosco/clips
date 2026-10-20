@@ -3,6 +3,7 @@ import { appendEvent, formatRef, readGoalWithTasks } from '../lib/core.js';
 import { readJsonInput } from '../lib/json-input.js';
 import { appendLaneEvent, laneToTrackId, listLanes, nextLaneId, normalizeLaneId, readLane, readLaneHistory, validateLane } from '../lib/lanes.js';
 import { pushGoal, pushTrack } from '../lib/sync.js';
+import { listLaneClaims, mutateLaneClaim, readLaneClaim } from '../lib/lane-claims.js';
 
 const STATUSES = new Set(['open', 'in_progress', 'not_planned', 'duplicate']);
 
@@ -130,9 +131,9 @@ function closeLane(ref, data) {
   const lane = readLane(laneId);
   if (lane.status === 'closed') throw new Error(`Lane ${laneId} is already closed`);
   for (const field of ['summary', 'decision_log', 'system_overview']) {
-    if (typeof data[field] !== 'string' || !data[field].trim()) throw new Error(`${field} is required to close a lane`);
+    if (data[field] !== undefined && typeof data[field] !== 'string') throw new Error(`${field} must be a string`);
   }
-  const productGoalsAchieved = stringList(data.product_goals_achieved, 'product_goals_achieved', { required: true });
+  const productGoalsAchieved = stringList(data.product_goals_achieved, 'product_goals_achieved') || [];
   const explicitComponents = stringList(data.components, 'components') || [];
   const members = goalsForLane(laneId);
   const derivedComponents = new Set(explicitComponents);
@@ -147,10 +148,10 @@ function closeLane(ref, data) {
   }
   const closure = {
     closed_at: new Date().toISOString(),
-    summary: data.summary.trim(),
-    decision_log: data.decision_log.trim(),
+    summary: (data.summary || '').trim(),
+    decision_log: (data.decision_log || '').trim(),
     goal_decisions: goalDecisions,
-    system_overview: data.system_overview.trim(),
+    system_overview: (data.system_overview || '').trim(),
     components: [...derivedComponents],
     product_goals_achieved: productGoalsAchieved,
     media: mediaList(data.media),
@@ -161,7 +162,79 @@ function closeLane(ref, data) {
   console.log(JSON.stringify({ success: true, lane_id: laneId, status: 'closed', closure }));
 }
 
+function fillLaneClosure(ref, data) {
+  const laneId = requireLane(ref);
+  const lane = readLane(laneId);
+  if (lane.status !== 'closed' || !lane.closure) throw new Error(`Lane ${laneId} must be closed before its retrospective can be filled`);
+
+  const updates = {};
+  for (const field of ['summary', 'decision_log', 'system_overview']) {
+    if (data[field] !== undefined && typeof data[field] !== 'string') throw new Error(`${field} must be a string`);
+    if (!String(lane.closure[field] || '').trim() && typeof data[field] === 'string' && data[field].trim()) {
+      updates[field] = data[field].trim();
+    }
+  }
+  const productGoalsAchieved = stringList(data.product_goals_achieved, 'product_goals_achieved') || [];
+  if (!(lane.closure.product_goals_achieved || []).length && productGoalsAchieved.length) {
+    updates.product_goals_achieved = productGoalsAchieved;
+  }
+
+  if (Object.keys(updates).length) {
+    appendLaneEvent(laneId, { event: 'lane_closure_updated', closure: updates });
+    syncLane(laneId);
+  }
+  console.log(JSON.stringify({ success: true, lane_id: laneId, updated: Object.keys(updates).length > 0, fields: Object.keys(updates) }));
+}
+
+function runManagerCommand([action, ...rawArgs]) {
+  const options = {};
+  const args = [];
+  for (let index = 0; index < rawArgs.length; index++) {
+    if (rawArgs[index] === '--json') continue;
+    args.push(rawArgs[index]);
+  }
+  if (action === 'list') {
+    if (args.length) throw new Error('Usage: clips lane manager list [--json]');
+    console.log(JSON.stringify(listLaneClaims(options), null, 2));
+    return;
+  }
+  if (action === 'inspect') {
+    if (args.length !== 1) throw new Error('Usage: clips lane manager inspect <lane> [--json]');
+    const laneId = requireLane(args[0]);
+    console.log(JSON.stringify(readLaneClaim(laneId, options), null, 2));
+    return;
+  }
+  if (['claim', 'share', 'release', 'handover'].includes(action)) {
+    const laneId = requireLane(args[0]);
+    console.log(JSON.stringify(mutateLaneClaim(laneId, action, readJsonInput(args.slice(1)), options), null, 2));
+    return;
+  }
+  console.log(`Usage: clips lane manager <command>
+
+Commands (JSON output):
+  list                      List this repository's Lane ownership and history
+  inspect <lane>            Read ownership and revision (unclaimed starts at 0)
+  claim <lane> <json>       Claim only an unowned Lane; never displaces a manager
+  share <lane> <json>       Existing manager explicitly adds another owner
+  release <lane> <json>     Release only the calling manager's own claim
+  handover <lane> <json>    Replace one owner with explicit user authorization
+
+All mutations require expected_revision and actor {host,runtime,session_id}.
+Optional actor fields: workspace_id, contact. Use observed identities, not labels.
+share/handover also require owner {host,runtime,session_id,...}.
+handover requires authorization {by,reason}; optional from identifies an owner
+being replaced when the calling actor is not that owner. Other owners remain.
+JSON input: one argument, --file <path>, or --stdin.
+Option: --json. Lanes are repository-global; usernames do not fork ownership.
+Inspect and contact existing managers before overlapping work. Offline ownership
+persists. Authorization records the user's instruction; it is not authentication.`);
+}
+
 export function runLaneCommand([action, ...args]) {
+  if (action === 'manager') {
+    runManagerCommand(args);
+    return;
+  }
   if (/^#?[lr]\d+$/i.test(action || '') && args[0] === 'add') {
     addGoals(action, args.slice(1));
     return;
@@ -204,6 +277,10 @@ export function runLaneCommand([action, ...args]) {
     closeLane(args[0], readJsonInput(args.slice(1)));
     return;
   }
+  if (action === 'closure' && args[0] === 'fill') {
+    fillLaneClosure(args[1], readJsonInput(args.slice(2)));
+    return;
+  }
   if (action === 'status') {
     const laneId = requireLane(args[0]);
     const status = args[1];
@@ -222,9 +299,11 @@ Commands:
   <lane> add <goal...>       Add or move goals into the lane
   show <lane[#rN]>           Show the lane and its goals
   history <lane[#rN]>        Show lane history
+  manager <command>         Inspect, claim, share, release, or hand over management
   status <lane> <status>     Set open, in_progress, not_planned, or duplicate
-  close <lane> <json>        Close with summary, decision log, system overview,
+  close <lane> <json>        Close with optional summary, decision log, system overview,
                              product_goals_achieved, and optional media/components
+  closure fill <lane> <json> Fill only empty retrospective fields on a closed lane
 
 Lane refs use #l1. Historical Track refs such as #r1 are accepted as aliases.
 Host identity and Lane claims are not prerequisites for work.

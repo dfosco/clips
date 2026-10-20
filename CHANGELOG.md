@@ -31,6 +31,15 @@ board; the CLI and work records remain.
 - Define host-specific delegation: direct coordinated child sessions in Copilot,
   top-level dev agents in Paseo, native sub-agents on other supported hosts, and
   linear implementation only where delegation is unavailable.
+- Add the optional Clips Workspaces Paseo plugin and read-only `clips board --json` interface.
+- Include the current Clips Work Copilot canvas with its Primer renderer,
+  advisory coordination metadata, exact-current-session sends and checked
+  source/build manifest. Ship the complete SDK/installer closure in the package.
+- Add `clips init --store-only` for local current-directory initialization without
+  skill installation, editor settings, network access or synchronization.
+- Ask on every interactive `clips init` whether to install exported Clips skills
+  in the project or user account, using Skillshop 2.1.0.
+- Accept `clips init --global` as the direct user-scope skill installation option.
 - Add persistent system components with responsibility, contract, source references,
   dependencies, named sections, and project-defined metadata.
 - Add task scope, component references, ownership, result records, and work
@@ -58,6 +67,9 @@ board; the CLI and work records remain.
   Include the linked technical reference in the npm package.
 - Preserve shared goal discovery, installation switching, GitHub synchronization
   and core test coverage while removing web-only dependencies and tooling.
+- Ship `npm-shrinkwrap.json` so extracted npm packages retain the installer's
+  locked root dependency checks. Both setup and live-skill installation use the
+  canonical skills without materializing a duplicate legacy alias.
 
 The worker budget is an agent dispatch policy, not a native process limiter.
 Reducing it does not terminate existing workers. GitHub collaboration remains

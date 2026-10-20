@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getClipsDbDir, readGoalWithTasks } from './core.js';
+import { appendJsonEvent, withRecordLock } from './journal.js';
 
 export function normalizeTrackId(ref) {
   const match = String(ref || '').match(/^#?r(\d+)$/i);
@@ -22,7 +23,7 @@ export function readTrack(id, dbDir = getClipsDbDir(), { revision } = {}) {
   const track = { track_id: normalizeTrackId(id), revision: 0 };
   for (const [index, event] of events.slice(0, revision ?? events.length).entries()) {
     if (['track_created', 'track_updated', 'lane_created', 'lane_updated'].includes(event.event)) {
-      for (const key of ['title', 'description', 'acceptance_criteria', 'product_goals', 'sections', 'extensions']) {
+      for (const key of ['title', 'description', 'acceptance_criteria', 'product_goals', 'sections', 'extensions', 'label_ids']) {
         if (Object.hasOwn(event, key)) track[key] = event[key];
       }
       if (event.event.startsWith('lane_')) track.record_kind = 'lane';
@@ -33,6 +34,10 @@ export function readTrack(id, dbDir = getClipsDbDir(), { revision } = {}) {
     if (event.event === 'lane_closed') {
       track.record_kind = 'lane';
       track.closure = event.closure;
+    }
+    if (event.event === 'lane_closure_updated') {
+      track.record_kind = 'lane';
+      track.closure = { ...track.closure, ...event.closure };
     }
     if (event.event === 'track_github_synced' || event.event === 'lane_github_synced') {
       track.issue_number = event.issue_number;
@@ -54,8 +59,7 @@ export function listTracks(dbDir = getClipsDbDir()) {
 
 export function appendTrackEvent(id, event, dbDir = getClipsDbDir()) {
   const file = trackPath(id, dbDir);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify({ ...event, track_id: normalizeTrackId(id), timestamp: new Date().toISOString() })}\n`);
+  return withRecordLock(file, () => appendJsonEvent(file, { ...event, track_id: normalizeTrackId(id), timestamp: new Date().toISOString() }));
 }
 
 export function nextTrackId(dbDir = getClipsDbDir()) {

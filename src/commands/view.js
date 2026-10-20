@@ -6,6 +6,10 @@ import { readConfig } from '../lib/config.js';
 import { readComponent } from '../lib/components.js';
 import { renderComponent } from './component.js';
 import { listLanes, normalizeLaneId, readLane } from '../lib/lanes.js';
+import { labelCatalog, readLabelConfig, projectLabels, projectGoalLabels } from '../lib/labels.js';
+
+const catalog = () => labelCatalog(readLabelConfig());
+const labelText = (record) => projectLabels(record, catalog()).labels.map((l) => `${l.name} (${l.id}, ${l.color})`).join(', ');
 
 const STATUS_ICONS = {
   open: '🟢',
@@ -81,6 +85,7 @@ function viewGoal(goalId, username = null, options = {}) {
   console.log(`${BOLD}├─────────────────────────────────────────────────────────────┤${RESET}`);
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(goal.status)}`);
   console.log(`${BOLD}│${RESET} Revision: r${goal.revision}`);
+  if (goal.label_ids?.length) console.log(`${BOLD}│${RESET} Labels: ${labelText(goal)}`);
   if (goal.lane_id) console.log(`${BOLD}│${RESET} Lane:   #${goal.lane_id}`);
   if (goal.blocked_by?.length) console.log(`${BOLD}│${RESET} Blocked by: ${goal.blocked_by.map((id) => id.startsWith('#') ? id : `#${id}`).join(', ')}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(goal.verification_mode)}`);
@@ -145,6 +150,7 @@ function viewGoal(goalId, username = null, options = {}) {
       // Show task ref with username if viewing namespaced goal
       const taskRef = formatRef({ username, goalId: goal.goal_id, taskId: task.task_id }, { includeUsername: !!username });
       console.log(`  ${color}[${checkbox}]${RESET} ${BOLD}${taskRef}${RESET}: ${task.title}`);
+      if (task.label_ids?.length) console.log(`      Labels: ${labelText(task)}`);
       if (task.description) {
         console.log(`      ${DIM}${wrapText(task.description, 50, '      ')}${RESET}`);
       }
@@ -180,6 +186,7 @@ function viewTask(goalId, taskId, username = null, options = {}) {
   console.log(`${BOLD}│${RESET} Status: ${formatStatus(task.status)}`);
   console.log(`${BOLD}│${RESET} Goal:   ${DIM}${goalRef} ${goal.title}${RESET}`);
   console.log(`${BOLD}│${RESET} Revision: r${task.revision}`);
+  if (task.label_ids?.length) console.log(`${BOLD}│${RESET} Labels: ${labelText(task)}`);
   console.log(`${BOLD}│${RESET} Verification: ${formatVerificationMode(task.effective_verification_mode)}`);
   if (task.issue_number) {
     console.log(`${BOLD}│${RESET} GitHub: #${task.issue_number}`);
@@ -276,6 +283,7 @@ function viewLane(ref) {
   console.log(`${BOLD}#${id} ${lane.title}${RESET}`);
   console.log(`Status: ${formatStatus(lane.status)}`);
   console.log(`Revision: r${lane.revision}`);
+  if (lane.label_ids?.length) console.log(`Labels: ${labelText(lane)}`);
   console.log(`Progress: ${members.filter(({ goal }) => goal.status === 'closed').length}/${members.length} goals closed`);
   if (lane.issue_number) console.log(`GitHub: #${lane.issue_number} ${DIM}${lane.issue_url || ''}${RESET}`);
   console.log();
@@ -496,7 +504,7 @@ export function resolveViewRecord(parsed) {
       acceptance: record.acceptance?.criteria?.find((item) => item.id === parsed.criterionId) || null,
     };
   }
-  return { ...record, ref };
+  return { ...(parsed.componentId ? record : parsed.taskId ? projectLabels(record, catalog()) : projectGoalLabels(record, catalog())), ref };
 }
 
 export function runViewCommand(args) {
@@ -511,7 +519,7 @@ export function runViewCommand(args) {
     if (json) {
       const currentUser = getCurrentUsername();
       const goals = discoverGoals().filter((entry) => showAllUsers || !currentUser || !entry.username || entry.username === currentUser)
-        .map((entry) => ({ ...readGoalWithTasks(entry.goalId, entry.username), ref: formatRef(entry) }));
+        .map((entry) => ({ ...projectGoalLabels(readGoalWithTasks(entry.goalId, entry.username), catalog()), ref: formatRef(entry) }));
       console.log(JSON.stringify(goals, null, 2));
     } else listAllGoals(ref === 'all', showAllUsers);
     return;
@@ -520,7 +528,7 @@ export function runViewCommand(args) {
     const match = String(ref).match(/^#?([lr]\d+)(?:#r(\d+))?$/i);
     const lane = readLane(normalizeLaneId(match[1]), undefined, { revision: match[2] ? Number(match[2]) : undefined });
     if (!lane) throw new Error(`${/^#?r/i.test(ref) ? 'Track' : 'Lane'} ${ref} not found`);
-    if (json) console.log(JSON.stringify(lane, null, 2));
+    if (json) console.log(JSON.stringify(projectLabels(lane, catalog()), null, 2));
     else viewLane(ref);
     return;
   }

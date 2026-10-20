@@ -5,6 +5,8 @@ import fs from 'fs';
 import path from 'path';
 import { getClipsDir, getRepoRoot } from './core.js';
 import { assertProjectIdAvailable, validateProjectId } from './registry.js';
+import { withRecordLock } from './journal.js';
+import { randomUUID } from 'node:crypto';
 
 export const CONFIG_FILE = 'clips.config.json';
 
@@ -64,7 +66,13 @@ export function writeConfig(config, repoRoot) {
     validateLaneLimit(config.lane_max_active_agents);
   }
   const configPath = getConfigPath(repoRoot);
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
+  const temporary = `${configPath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(config, null, 2) + '\n');
+    fs.renameSync(temporary, configPath);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 /**
@@ -86,6 +94,10 @@ function validateLaneLimit(value) {
  * Set a single config value
  */
 export function setConfigValue(key, value, repoRoot = getRepoRoot()) {
+  return withRecordLock(getConfigPath(repoRoot), () => setConfigValueLocked(key, value, repoRoot));
+}
+
+function setConfigValueLocked(key, value, repoRoot) {
   const config = readConfig(repoRoot, { strict: key === 'lane_max_active_agents' });
 
   // Validate key

@@ -283,9 +283,10 @@ supports it. Check actual readback with `paseo inspect <agent-id> --json`:
 proof. Inspect the repository/workspace and association separately.
 
 Honor the requested model/profile, permissions, effort and workspace choice.
-Discover live supported values instead of inventing them. This package does not
-ship a Paseo launcher or a shared Paseo reference; consult the installed host's
-guidance/help rather than assuming a Clips command exists. Do not detach an
+Discover live supported values instead of inventing them. Read the shared
+[Paseo procedure](../clips/references/paseo.md) for the packaged launcher,
+identity, binding and steering interfaces. Inspect installed guidance/help
+before relying on version-specific capabilities. Do not detach an
 unexpected child or launch replacements to evade a topology mismatch.
 
 ### Other hosts and portable handoffs
@@ -378,11 +379,7 @@ claim for evidence. Agent verification is not human approval.
 Use Clips acceptance only when evidence and authority support it. Preserve
 waivers with their actual authorization, and keep deferred or duplicate work
 distinct from delivered behavior. Do not relax criteria to justify completion.
-For a human-validation handoff, use a supported `ready-to-review` project label
-only after implementation and required checks are complete and no current
-acceptance exists. Inspect local label help/catalog, reuse the actual returned
-ID and verify its assignment. It is a review request, not acceptance or status.
-If labels are unsupported, report that limit; do not import unrelated features.
+For a human-validation handoff, follow the label procedure below.
 
 For a completed Lane, reconcile the intended product outcome across Goals and
 write the strategic retrospective: summary, cross-Goal decisions, system and
@@ -394,3 +391,49 @@ Report the delivered outcome, remaining blockers or authorized exceptions,
 actual source/installation/publication state, and the next required owner/action
 only when something remains. Scope recommendations (ship, fix first, defer, cut)
 are recommendations, not new Clips statuses or permission to reduce scope.
+
+## Hand completed Goals to human validation
+
+When an execution agent reports that a Goal's implementation is complete, reconcile
+its changed artifact, required Tasks, checks, and unresolved issues. If the required
+implementation and verification are complete and you are presenting that result
+to a human for validation, add the project label **`ready-to-review`** to that Goal.
+Do this as part of the handoff, before claiming the review-ready label was applied.
+Do not add it merely because work started, a Task closed, or an agent stopped.
+Unfinished or blocked Goals and Goals with current acceptance are not eligible.
+
+With local Clips access, check `clips label --help`, then inspect the Goal and the
+project catalog. The canonical name is exactly `ready-to-review`; its initial
+default ID is `ready-to-review`. Existing catalog identity takes precedence:
+reuse the ID returned for that name, including one generated after an earlier ID
+was retired. Do not rename or recolor an existing project label to enforce defaults.
+
+```bash
+clips view '#g1' --json
+clips label list --json
+```
+
+If that name is absent, create it once. Use the **returned ID**, rather than
+assuming it equals the name. If another writer created it first, reread the
+catalog and reuse that definition; do not create a duplicate. For example, in a
+fresh project catalog these supported commands create and assign it:
+
+```bash
+clips label create '{"name":"ready-to-review","color":"#8b5cf6"}'
+clips label add '#g1' ready-to-review
+```
+
+Replace `#g1` with the actual Goal ref, retaining its namespace. Confirm the label
+in `clips view '<actual-goal-ref>' --json`. If an existing label has ID
+`review-handoff`, for example, use `clips label add '#g1' review-handoff`.
+If work becomes unfinished or blocked again, remove the readiness assignment with
+`clips label remove '#g1' <returned-id>` and explain the remaining work.
+
+This label is a request for human validation, **not acceptance** and not a Goal
+lifecycle status. Preserve the actual status, receipts, and accepting actor. Do
+not close or accept a Goal just to produce the label. If local commands are
+unavailable or fail, report that the label was not applied; never infer it from a
+Clips status or claim a Paseo agent is running without runtime evidence.
+This procedure requires the labels capability. If this checkout does not yet
+support it, report that limitation; do not import an unrelated feature branch
+just to add the label.

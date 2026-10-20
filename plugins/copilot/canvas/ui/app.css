@@ -1,0 +1,217 @@
+.clips-app {
+  min-width: 0;
+  color: var(--fgColor-default);
+  background: var(--bgColor-default);
+}
+
+.clips-app-feedback,
+.clips-app-session-list,
+.clips-app-dialog-content,
+.clips-app-form,
+.clips-app-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--base-size-16);
+  min-width: 0;
+}
+
+.clips-app-feedback {
+  padding: var(--base-size-16);
+}
+
+.clips-app-recovery-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--base-size-8);
+  padding: var(--base-size-12) var(--base-size-16);
+  background: var(--bgColor-muted);
+}
+
+.clips-app-recovery-title {
+  margin: 0;
+  font-size: var(--text-title-size-medium);
+  font-weight: var(--base-text-weight-semibold);
+  line-height: var(--text-title-lineHeight-medium);
+}
+
+.clips-app-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--base-size-8);
+  margin-inline-start: auto;
+}
+
+.clips-app-project-tabs {
+  display: flex;
+  min-width: 0;
+  padding: 0 var(--base-size-16);
+  border-bottom: var(--borderWidth-thin) solid var(--borderColor-default);
+  background: var(--bgColor-muted);
+}
+
+.clips-app-start,
+.clips-app-empty,
+.clips-app-loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--base-size-12);
+  padding: var(--base-size-24);
+  text-align: center;
+}
+
+.clips-app-empty {
+  color: var(--fgColor-muted);
+}
+
+.clips-app-empty-title {
+  color: var(--fgColor-default);
+  font-size: var(--text-title-size-small);
+}
+
+.clips-app-muted {
+  color: var(--fgColor-muted);
+  font-size: var(--text-body-size-medium);
+}
+
+.clips-app-loading-dots {
+  display: inline-block;
+}
+
+.clips-app-loading-dots > :nth-child(2) {
+  animation: clips-app-loading-second-dot 1.5s step-end infinite;
+}
+
+.clips-app-loading-dots > :nth-child(3) {
+  animation: clips-app-loading-third-dot 1.5s step-end infinite;
+}
+
+@keyframes clips-app-loading-second-dot {
+  0% { opacity: 0; }
+  33.333%, 100% { opacity: 1; }
+}
+
+@keyframes clips-app-loading-third-dot {
+  0% { opacity: 0; }
+  66.667%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clips-app-loading-state svg {
+    animation: none;
+  }
+
+  .clips-app-loading-state .clips-app-loading-dots > span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.clips-app-session p,
+.clips-app-empty p,
+.clips-app-loading-state p,
+.clips-app-dialog p {
+  margin: 0;
+}
+
+.clips-app-sessions {
+  margin: var(--base-size-16);
+  border: var(--borderWidth-thin) solid var(--borderColor-default);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-default);
+}
+
+.clips-app-sessions > summary {
+  padding: var(--base-size-12) var(--base-size-16);
+  cursor: pointer;
+  font-weight: var(--base-text-weight-semibold);
+  font-size: var(--text-body-size-medium);
+  background: var(--bgColor-muted);
+  border-radius: inherit;
+}
+
+.clips-app-sessions > summary:focus-visible {
+  outline: var(--borderWidth-thick) solid var(--focus-outlineColor);
+  outline-offset: var(--base-size-2);
+}
+
+.clips-app-session-list {
+  gap: 0;
+}
+
+.clips-app-session-list > [role],
+.clips-app-session-list > p {
+  margin: var(--base-size-16);
+}
+
+.clips-app-session {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: var(--base-size-16);
+  padding: var(--base-size-16);
+  border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+}
+
+.clips-app-session-info {
+  flex: 1 1 18rem;
+  min-width: 0;
+  display: grid;
+  gap: var(--base-size-4);
+}
+
+.clips-app-session-title {
+  font-size: var(--text-body-size-medium);
+  font-weight: var(--base-text-weight-semibold);
+}
+
+.clips-app-session-info .clips-app-muted,
+.clips-app-empty > .clips-app-muted {
+  font-size: var(--text-body-size-small);
+}
+
+.clips-app-empty > .clips-app-muted code {
+  font-size: inherit;
+}
+
+.clips-app-session-actions,
+.clips-app-dialog-actions,
+.clips-app-loading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--base-size-8);
+}
+
+.clips-app-dialog {
+  overflow-wrap: anywhere;
+}
+
+.clips-app-fields {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.clips-app-dialog-actions {
+  justify-content: flex-end;
+  padding-top: var(--base-size-16);
+  border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+}
+
+.clips-app-dialog hr {
+  margin: 0;
+  border: 0;
+  border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+}
+
+.clips-app-session,
+.clips-app-empty,
+.clips-app-feedback,
+.clips-app-dialog-content {
+  overflow-wrap: anywhere;
+}

@@ -22,7 +22,7 @@ async function verifyPackage() {
   assert(paths.includes('src/cli.js'), 'tarball is missing the CLI');
   assert(paths.includes('src/lib/goal-discovery.js'), 'tarball is missing shared goal discovery');
   assert(!paths.some((file) => file.startsWith('web/') || file.startsWith('dist/web/')), 'tarball contains retired web assets');
-  for (const retired of ['src/commands/web.js', 'src/lib/web-server.js', 'src/lib/board.js']) {
+  for (const retired of ['src/commands/web.js', 'src/lib/web-server.js']) {
     assert(!paths.includes(retired), `tarball contains retired implementation: ${retired}`);
   }
   assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
@@ -35,6 +35,15 @@ async function verifyPackage() {
   assert(!paths.some((file) => file.startsWith('.agents/skills/clips-') && !file.startsWith('.agents/skills/clips-dev/')), 'tarball contains routed Clips skills');
   assert(paths.includes('CHANGELOG.md'), 'tarball is missing the changelog');
   assert(paths.includes('docs/cli-reference.md'), 'tarball is missing the linked technical reference');
+  for (const required of [
+    'npm-shrinkwrap.json', 'src/commands/board.js', 'src/lib/board.js',
+    'scripts/install-copilot.js', 'src/lib/copilot-install.js',
+    'plugins/copilot/extension.mjs', 'plugins/copilot/package-lock.json',
+    'plugins/copilot/canvas/dist/app.js', 'plugins/copilot/canvas/dist/style.css',
+    'plugins/copilot/canvas/dist/build-manifest.json',
+    'plugins/paseo/paseo-plugin.json', 'plugins/paseo/index.server.ts',
+    'plugins/paseo/package-lock.json',
+  ]) assert(paths.includes(required), `tarball is missing integration closure: ${required}`);
   assert(!paths.some((file) => file.endsWith('.test.js')), 'tarball contains source tests');
   assert(!paths.some((file) => file.startsWith('.agents/plans/')), 'tarball contains local agent plans');
 
@@ -51,7 +60,7 @@ async function verifyPackage() {
   }
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
   assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
-  assert.equal(packedPackage.dependencies.skillshop, '^2.0.0');
+  assert.equal(packedPackage.dependencies.skillshop, '2.1.0');
   assert(packedPackage.devDependencies.vitest, 'package is missing the retained test runner');
   assert.equal(packedPackage.scripts.test, 'vitest run --config vitest.config.js');
   assert.equal(packedPackage.scripts['test:package'], 'node scripts/package-smoke.js');
@@ -64,12 +73,19 @@ async function verifyPackage() {
   // The smoke test extracts the tarball, rather than npm-installing it.
   // Supply the real installed SDK at the path an npm install would create.
   const installedSdk = path.join(packageRoot, 'node_modules', 'skillshop');
-  assert(fs.existsSync(installedSdk), 'Install skillshop@^2 before running package smoke');
+  assert(fs.existsSync(installedSdk), 'Install skillshop@2.1.0 before running package smoke');
   fs.mkdirSync(path.join(extractedRoot, 'node_modules'), { recursive: true });
   fs.cpSync(installedSdk, path.join(extractedRoot, 'node_modules', 'skillshop'), {
     recursive: true,
     dereference: true,
   });
+  const { verifyCanvasBuild } = await import(pathToFileURL(path.join(extractedRoot, 'plugins/copilot/src/canvas-build.js')));
+  assert.equal(verifyCanvasBuild(path.join(extractedRoot, 'plugins/copilot')).bridgeVersion, 2);
+  const { verifyCopilotPrerequisites } = await import(pathToFileURL(path.join(extractedRoot, 'src/lib/copilot-install.js')));
+  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+  if (nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 18)) {
+    assert.equal(verifyCopilotPrerequisites(extractedRoot, { clipsHome: path.join(tempRoot, 'copilot-home') }).clipsVersion, packedPackage.version);
+  }
   assert.equal(packedPackage.exports['./skillshop'], './skillshop.manifest.mjs');
   assert.equal(packedPackage.exports['./skills'], undefined);
   const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.mjs')).href)).default;
@@ -157,7 +173,7 @@ async function verifyPackage() {
   const initializedProject = path.join(tempRoot, 'initialized-project');
   fs.mkdirSync(initializedProject);
   execFileSync('git', ['init', '--quiet'], { cwd: initializedProject });
-  execFileSync(process.execPath, [cli, 'init'], {
+  execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
     stdio: 'pipe',
@@ -166,9 +182,14 @@ async function verifyPackage() {
     fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
     'packaged init did not install the Clips skill',
   );
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', 'SKILL.md')), 'packaged init did not install Lane Manager');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'references', 'paseo.md')), 'packaged init did not install shared Paseo guidance');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', '..', 'clips', 'references', 'paseo.md')), 'Lane Manager cannot resolve shared installed guidance');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips-dev', 'SKILL.md')), 'packaged init did not install Clips Dev');
+  assert(!fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'loopz')), 'init installed a duplicate legacy alias');
   const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
   fs.writeFileSync(localNote, 'local notes survive reinitialization\n');
-  execFileSync(process.execPath, [cli, 'init'], {
+  execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
     env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
     stdio: 'pipe',
@@ -207,8 +228,21 @@ async function verifyPackage() {
   runPackaged('goal', 'assign', 'g1', lane.lane_id);
   assert.deepEqual(JSON.parse(runPackaged('lane', 'show', lane.lane_id)).goals.map((goal) => goal.goal_id), ['g001']);
   assert.equal(JSON.parse(runPackaged('goal', 'create', '{"title":"Next goal"}')).goal_id, 'g002');
+  const board = JSON.parse(runPackaged('board', '--json'));
+  assert.equal(board.goals.find((goal) => goal.goal_id === 'g001').tasks[0].title, 'Persist selection');
+  assert(board.lanes.some((item) => item.lane_id === lane.lane_id));
+  const storeOnly = path.join(tempRoot, 'store-only');
+  fs.mkdirSync(storeOnly);
+  execFileSync('git', ['init', '--quiet'], { cwd: storeOnly });
+  const initialized = JSON.parse(execFileSync(process.execPath, [cli, 'init', '--store-only'], {
+    cwd: storeOnly, env: cliEnv, encoding: 'utf8',
+  }));
+  assert.equal(initialized.initialized, true);
+  for (const entry of ['.agents', '.github', '.claude', '.vscode']) {
+    assert(!fs.existsSync(path.join(storeOnly, entry)), `store-only init created ${entry}`);
+  }
 
-  console.log(`Verified ${manifest.id}: CLI-only package, removed web command, skills and alias, worker-budget config and policy, documentation, installation switching, components, goals, Lanes, revisions, and acceptance`);
+  console.log(`Verified ${manifest.id}: CLI, retired web command, canonical skills/alias, worker budget, store-only init, JSON board, Copilot build/installer and Paseo package closure, records and acceptance`);
 }
 
 try {

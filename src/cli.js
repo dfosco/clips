@@ -8,11 +8,13 @@ import { runViewCommand } from './commands/view.js';
 import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
+import { runBoardCommand } from './commands/board.js';
 import { runRecordCommand } from './commands/record.js';
 import { runTrackCommand } from './commands/track.js';
 import { runLaneCommand } from './commands/lane.js';
 import { runComponentCommand } from './commands/component.js';
 import { runHistoryCommand } from './commands/history.js';
+import { runLabelCommand } from './commands/label.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
 import { version } from './version.js';
 
@@ -45,7 +47,7 @@ if (command === '--help' || command === '-h' || !command) {
 Usage: clips <command> [args]
 
 Commands:
-  init                    Initialize local-only clips state
+  init [--global | --skills-scope S | --store-only] Initialize state; optional skills
   dev [--project P]       Use the development checkout and refresh its skills
   prod [--project P]      Use the saved local npm installation and refresh its skills
   view [ref] [--json]     View a goal, task, criterion, or component
@@ -55,9 +57,11 @@ Commands:
   track <action> [args]   Legacy Track command alias
   task <action> [args]    Manage tasks
   component <action>     Manage persistent system components
+  label <action>         Manage project labels and record assignments
   record <action> [args]  Manage optional legacy CR and ADR records
   sync [ref]              Sync GitHub only when collaboration is enabled
   config [key] [value]    View/set configuration; --help lists flags
+  board --json             Output the current repository's Lanes, Goals and Tasks as JSON
 
 Options:
   --version, -v           Show version
@@ -65,6 +69,8 @@ Options:
 
 Examples:
   clips init
+  clips init --global             # Install skills in the user account
+  clips init --skills-scope project  # Use in scripts without a terminal
   clips dev --project /path/to/repo
   clips prod --project /path/to/repo
   clips lane create '{"title":"Workspace improvements","description":"Strategic product workstream"}'
@@ -95,12 +101,14 @@ const commands = {
   track: runTrackCommand,
   component: runComponentCommand,
   history: runHistoryCommand,
+  label: runLabelCommand,
   task: runTaskCommand,
   record: runRecordCommand,
   view: runViewCommand,
   config: runConfigCommand,
   init: runInitCommand,
   sync: runSyncCommand,
+  board: runBoardCommand,
 };
 
 const handler = commands[command];

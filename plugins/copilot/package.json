@@ -1,0 +1,40 @@
+{
+  "name": "@dfosco/clips-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "description": "GitHub Copilot App canvas adapter for canonical Clips records and sessions",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dfosco/clips.git",
+    "directory": "plugins/copilot"
+  },
+  "homepage": "https://github.com/dfosco/clips/tree/main/plugins/copilot#readme",
+  "keywords": [
+    "clips",
+    "copilot",
+    "canvas"
+  ],
+  "scripts": {
+    "test": "node --test runtime/*.test.mjs canvas/*.test.mjs test/*.test.js",
+    "build": "node scripts/build-canvas.mjs",
+    "check:build": "node --input-type=module -e \"import { verifyCanvasBuild } from './src/canvas-build.js'; verifyCanvasBuild(process.cwd())\""
+  },
+  "dependencies": {
+    "@github/copilot-sdk": "1.0.22",
+    "@primer/octicons-react": "19.40.0",
+    "@primer/primitives": "11.10.0",
+    "@primer/react": "38.40.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-is": "19.3.1"
+  },
+  "devDependencies": {
+    "jsdom": "30.0.1",
+    "vite": "8.3.4"
+  }
+}
