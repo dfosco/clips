@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readBoardData } from '../lib/board.js';
 
 const cliPath = path.resolve(process.cwd(), 'src', 'cli.js');
 const tempDirs = [];
@@ -58,12 +57,8 @@ describe('goal unlink', () => {
     expect(goal.issue_number).toBeUndefined();
     expect(goal.tasks[0].issue_number).toBeUndefined();
 
-    const board = readBoardData({
-      dbDir: path.join(cwd, '.clips', 'db'),
-      recordsDir: path.join(cwd, '.clips', 'records', 'cr'),
-    });
-    expect(board.goals[0].source).toBe('local');
-    expect(board.goals[0].tasks[0].source).toBe('local');
+    expect(goal.issue_url).toBeUndefined();
+    expect(goal.tasks[0].issue_url).toBeUndefined();
 
     const eventPath = path.join(cwd, '.clips', 'db', 'g001.jsonl');
     const eventCount = fs.readFileSync(eventPath, 'utf8').trim().split('\n').length;

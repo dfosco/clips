@@ -366,7 +366,7 @@ function assertSnapshotRevision(revision, label) {
   }
 }
 
-/** Replay the same durable model for the CLI and the read-only web board.
+/** Replay the durable model for current and historical record views.
  * Goal revisions count all events in its aggregate stream. A task revision counts
  * events affecting that task, including changes to inherited verification mode.
  * Reading a task revision stops at the event that first produced that snapshot.

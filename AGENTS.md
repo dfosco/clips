@@ -5,6 +5,8 @@
 | Skill | Path | Description |
 |---|---|---|
 | **clips** | `.agents/skills/clips/SKILL.md` | Goals, atomic task requests and records, system components, evidence, history, and optional GitHub collaboration. |
+| **lane-manager** | `.agents/skills/lane-manager/SKILL.md` | Plan and coordinate continued delivery, delegating development through the current harness. |
+| **clips-dev** | `.agents/skills/clips-dev/SKILL.md` | Plan, implement and verify a requested outcome as an autonomous staff developer in its own session. |
 
 ## Work model
 
@@ -33,6 +35,41 @@ identifier, or a fixed planning ceremony.
 
 Reuse context and the user's authorization. Do not add routine goal-drafting,
 task-plan, or continuation confirmations to work that is already authorized.
+
+The default for actionable work is comprehensive plans within one coherent Lane,
+detailed Goals with observable acceptance criteria, meaningful Task contracts and
+dependencies, then implementation and verification. Reuse the existing frame and
+preserve atomic/selected-Task scope. Comprehensive means complete coverage, not
+filler Tasks or a new record type. Explicit brainstorming, plan-only, defer,
+queue or narrower-output instructions override that default. A plan, records or
+a launch preview alone does not satisfy an authorized implementation request.
+Lane Managers delegate through the current harness; dev execution owners implement
+and verify. Lane Manager already owns continuation through the agreed outcome;
+no separate skill invocation or routine "go" is needed between tasks. Clips Dev
+can also take a direct request and plan/build it in its own session without
+becoming a Lane Manager. Other harnesses' Lane Managers must use available native
+sub-agents even without user steering. When no delegation primitive exists, the
+manager implements and
+verifies authorized Tasks linearly in dependency/dispatch order. This fallback
+does not bypass denied authorization or missing tool/file access.
+
+Lane Manager reads `clips config lane_max_active_agents` and announces the
+effective budget before dispatch. The project default is 5 concurrent active
+workers per Lane, excluding its manager; configure it with
+`clips config --lane-max-active-agents N`. Explicit user overrides can apply to
+one Lane, and tighter resource limits still apply. Count existing/starting/reused
+workers and any permitted nested helpers. Unknown activity is not free capacity;
+completion or confirmed idle frees a slot. Reductions never implicitly terminate
+workers. This is dispatch policy, not a native scheduler or ownership gate.
+
+When a Lane Manager delegates work in GitHub Copilot App, its dev execution
+sessions are direct children, never grandchildren behind an intermediary
+coordinator/Squad/dev lead. A standalone Clips Dev session needs no manager.
+The manager creates needed siblings using native `create_session`; keep them
+coordinated, user-steerable and in two-way `send_session_message` contact. Verify
+both creator fields with native session readback. A technical integration owner
+is not an extra parent. Serialize for resource limits; do not detach/reparent or
+spawn invisible substitutes. This does not replace Paseo's top-level dev path.
 
 ## Quick reference
 
@@ -69,6 +106,14 @@ result, recheck the affected criteria. Keep waived scope distinct from delivered
 behavior and preserve the authority for exceptions.
 
 ## Storage and ownership
+
+Work ownership is advisory coordination metadata, not an execution lock.
+Authorized work does not require host identity, a Lane claim, an exclusive
+management role, or an empty session association. Preserve existing attribution
+and coordinate actual overlapping edits; do not claim or reassign work just to
+proceed. Respect user resource limits and reuse the current session when needed.
+Acceptance attribution, external-action approval, and data-integrity checks
+remain separate requirements.
 
 Workflow instances live under the resolved `.clips/` store and must not be
 committed. Committed product documentation, source, and templates are repository

@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { readBoardData } from '../lib/board.js';
 
 const cli = path.resolve(process.cwd(), 'src/cli.js');
 
@@ -60,7 +59,7 @@ describe('tracks', () => {
         track_id: second.track_id, added: ['g001'], moved: [{ goal_id: 'g001', from_track_id: first.track_id }],
       });
       expect(run(root, 'track', 'show', first.track_id).goals.map((goal) => goal.goal_id)).toEqual(['g002', 'g010']);
-      expect(readBoardData({ dbDir: path.join(root, '.clips', 'db') }).tracks.find((track) => track.track_id === second.track_id).goal_refs).toEqual(['#g001']);
+      expect(run(root, 'track', 'show', second.track_id).goals.map((goal) => goal.goal_id)).toEqual(['g001']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   }, 15000);
 
@@ -79,7 +78,7 @@ describe('tracks', () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  it('replays tracks, assigns goals, and exposes board progress without migrating old goals', () => {
+  it('replays tracks, assigns goals, and exposes progress without migrating old goals', () => {
     const root = workspace();
     try {
       const legacy = run(root, 'goal', 'create', '{"title":"Existing goal"}');
@@ -87,10 +86,9 @@ describe('tracks', () => {
       expect(track.track_id).toBe('r001');
       const goal = run(root, 'goal', 'create', JSON.stringify({ title: 'Convert core', track_id: track.track_id, blocked_by: [legacy.goal_id] }));
       expect(run(root, 'track', 'show', track.track_id)).toMatchObject({ goal_count: 1, completed_goal_count: 0 });
-      const board = readBoardData({ dbDir: path.join(root, '.clips', 'db') });
-      expect(board.tracks[0].goal_refs).toEqual([`#${goal.goal_id}`]);
-      expect(board.goals.find((item) => item.goal_id === legacy.goal_id).track_id).toBeNull();
-      expect(board.goals.find((item) => item.goal_id === goal.goal_id).blocked_by).toEqual([legacy.goal_id]);
+      expect(run(root, 'track', 'show', track.track_id).goals.map((item) => item.goal_id)).toEqual([goal.goal_id]);
+      expect(run(root, 'goal', 'show', legacy.goal_id).track_id).toBeUndefined();
+      expect(run(root, 'goal', 'show', goal.goal_id).blocked_by).toEqual([legacy.goal_id]);
       run(root, 'goal', 'assign', goal.goal_id, 'none');
       expect(run(root, 'track', 'show', track.track_id).goal_count).toBe(0);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -16,7 +16,8 @@ export const DEFAULT_CONFIG = {
   body_max_length: null,        // max chars for imported issue descriptions (null = no limit)
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
-  project_id: null,             // stable board identifier; repository name when unset
+  project_id: null,             // stable project identifier; repository name when unset
+  lane_max_active_agents: 5,    // concurrent workers per Lane, excluding its manager
   view: {
     hide_goal_statuses: [],
     hide_task_statuses: [],
@@ -34,7 +35,7 @@ export function getConfigPath(repoRoot) {
 /**
  * Read config from file, returns merged with defaults
  */
-export function readConfig(repoRoot) {
+export function readConfig(repoRoot, { strict = false } = {}) {
   const configPath = getConfigPath(repoRoot);
 
   if (!fs.existsSync(configPath)) {
@@ -44,8 +45,12 @@ export function readConfig(repoRoot) {
   try {
     const content = fs.readFileSync(configPath, 'utf8');
     const parsed = JSON.parse(content);
+    if (strict && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
+      throw new Error('Configuration must be a JSON object');
+    }
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
+    if (strict) throw new Error(`Could not read config file: ${e.message}`, { cause: e });
     console.error(`Warning: Could not parse config file: ${e.message}`);
     return { ...DEFAULT_CONFIG };
   }
@@ -55,6 +60,9 @@ export function readConfig(repoRoot) {
  * Write config to file
  */
 export function writeConfig(config, repoRoot) {
+  if (Object.hasOwn(config, 'lane_max_active_agents')) {
+    validateLaneLimit(config.lane_max_active_agents);
+  }
   const configPath = getConfigPath(repoRoot);
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
 }
@@ -63,15 +71,22 @@ export function writeConfig(config, repoRoot) {
  * Get a single config value
  */
 export function getConfigValue(key, repoRoot) {
-  const config = readConfig(repoRoot);
+  const config = readConfig(repoRoot, { strict: key === 'lane_max_active_agents' });
+  if (key === 'lane_max_active_agents') validateLaneLimit(config[key]);
   return config[key];
+}
+
+function validateLaneLimit(value) {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error('lane_max_active_agents must be a positive safe integer');
+  }
 }
 
 /**
  * Set a single config value
  */
 export function setConfigValue(key, value, repoRoot = getRepoRoot()) {
-  const config = readConfig(repoRoot);
+  const config = readConfig(repoRoot, { strict: key === 'lane_max_active_agents' });
 
   // Validate key
   if (!(key in DEFAULT_CONFIG)) {
@@ -80,6 +95,10 @@ export function setConfigValue(key, value, repoRoot = getRepoRoot()) {
 
   // Validate value based on key
   switch (key) {
+    case 'lane_max_active_agents':
+      if (typeof value === 'string' && /^\d+$/.test(value)) value = Number(value);
+      validateLaneLimit(value);
+      break;
     case 'project_id':
       validateProjectId(value);
       assertProjectIdAvailable(value, repoRoot);

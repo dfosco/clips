@@ -9,7 +9,7 @@ description: >-
   and optional GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.11.1"
+  version: "2026.10.20.4"
 ---
 
 # Clips
@@ -18,6 +18,54 @@ Use a small set of durable work identities: strategic Lanes, goals, tasks, and
 system components.
 Make each task the agent's work contract before execution and its change record
 afterward. Add detail when it helps another agent act or accept the result.
+
+## Default delivery flow
+
+Unless directly contradicted by the user, turn an actionable request into
+comprehensive plans within one coherent Lane, detailed Goals with observable
+acceptance criteria, meaningful Task contracts and dependencies, then actual
+implementation and verification. Reuse matching records and existing scope.
+Comprehensive means coverage of the agreed outcomes, constraints, failure cases,
+interfaces and verification, not filler Tasks, numerical quotas, or a new
+"blend" record type. Put planning content in existing Lane/Goal fields.
+
+Explicit brainstorming, plan-only, defer, queue or narrower-output instructions
+override this default. Preserve a selected Task's bounded scope; do not expand it
+into unrelated Goals or require a fresh Lane when an existing frame suffices.
+For a standalone atomic outcome, proportionate records remain valid. Do not stop
+at a plan, created records or launch preview when implementation is authorized.
+Ask only for material missing product authority, not routine permission to begin.
+
+Before delegation, Lane Manager reads `clips config lane_max_active_agents`
+from the Lane's project and announces its effective worker budget. The project
+default is 5 concurrently active workers per Lane, excluding the manager.
+`clips config --lane-max-active-agents N` stores a positive-integer project
+default; an explicit user override can apply to one Lane. Existing, starting,
+reused and permitted nested workers share that budget. Completion or confirmed
+idle frees capacity; reductions do not terminate workers, and unknown activity
+is not proof of a free slot. This is manager dispatch policy, not native runtime
+enforcement. See Lane Manager for accounting and capability limits.
+
+Assess each involved Goal's complete Task set against its scope and criteria.
+Record useful coverage/dependency reasoning in the Goal plan or named sections.
+Split independently reviewable work, not ordinary implementation steps. Identify
+integration obligations, write conflicts and feasible Task-level parallelism;
+serialize coupled work or resource-limited execution with one integration and
+shared-record coordinator. Task count alone proves neither coverage nor progress.
+
+A Lane Manager uses the current harness's execution path: Paseo workspace
+agents, direct coordinated Copilot App children, or other harnesses' available
+native sub-agents even if they are not user-steerable. When no delegation
+primitive exists, the manager implements and verifies authorized Tasks itself,
+linearly in dependency/dispatch order. Missing delegation does not bypass denied
+authorization or unavailable tools/files. An agent already assigned execution
+work implements its bounded contract. See the
+[Lane Manager skill](../lane-manager/SKILL.md) for role and host-specific handoffs
+and [Clips Dev](../clips-dev/SKILL.md) for autonomous technical planning and
+implementation in the current session. Lane Manager owns continued coordinated
+delivery; the user need not switch skills to make it continue.
+Those optional companion skills are not installed by `clips init`; their absence
+does not block an existing authorized Task or require a new installation.
 
 ## Establish context and capabilities
 
@@ -247,6 +295,47 @@ notes, risk descriptions, migration details, or project-specific relationships.
 
 ## Preserve workflow state and coordinate writers
 
+Treat host identity, Lane claims, management roles, and previous session
+associations as advisory metadata, not prerequisites for authorized work. The
+canonical CLI does not require a host ID or a manager claim. Do not invent
+identity, clear history, or change a work owner merely to let an agent proceed.
+An `owner` records responsibility; it is not an execution lock.
+
+Use the canonical CLI for records and the host's supported tools for session
+creation, steering, and communication. Do not require a canvas-specific
+management action when these paths can perform the authorized work. Per-agent
+instructions govern agent behavior; they cannot disable hardcoded checks in an
+external integration. Report that distinction rather than claiming a bypass.
+Respect the user's session and resource constraints; do not start another
+session just to acquire an identity or role.
+
+When a Lane Manager delegates work in GitHub Copilot App, every dev execution
+session it creates is a **direct child of the Lane Manager session**, with no
+intermediary coordinator, Squad Leader or
+dev-lead App session. The manager uses native `create_session` with coordination
+enabled; dev owners do not spawn nested App workers or invisible substitutes.
+Additional useful Task workers are direct siblings created by the manager;
+technical integration ownership does not require another parenting layer.
+Serialize within one existing child when RAM or coupled writes warrant it.
+
+For those manager-assigned sessions, verify actual `creator_session_id` and
+`coordinating_creator_session_id` with
+`get_session`/session listings, both pointing to the manager, and the intended
+repository/workspace. Preserve the real manager contact and two-way
+`send_session_message` communication throughout execution. Expose the returned
+`app_url` for user inspection and direct steering. Claims, titles, canvas Send,
+workspace placement and activity are not parentage evidence. Do not detach,
+reparent or create proof-only sessions. Missing native capabilities are limits
+to report, not reasons to fabricate runtime facts. Paseo's Lane Manager path
+instead uses verified top-level dev agents; do not universalize either topology.
+A standalone Clips Dev session needs neither a Lane Manager nor a new parent
+to plan and build its directly requested outcome.
+
+This policy does not bypass authentication, credential handling, external-action
+approval, exact action targets, acceptance attribution, atomic writes, journal
+locks, or stale-revision conflicts. Reread and reconcile an actual write conflict
+instead of disabling its protection.
+
 Keep record instances in the resolved `.clips/` store. Goals and tasks use
 append-only events under `.clips/db/`; components and optional legacy records
 also remain local workflow state. Do not commit `.clips/` instances. Committed
@@ -285,5 +374,6 @@ type's `archived/` directory. Copy committed templates only when needed.
 Keep GitHub collaboration opt-in. `clips init` is local and `clips sync` performs
 no GitHub work while collaboration is disabled. Enable it only when authorized
 with `clips config collaboration true`. Use `clips goal unlink <ref>` or `--all`
-to keep local history while leaving existing remote issues unchanged. Use `clips web` for the read-only board and Lane summaries. The legacy
-`clips track` command remains only for compatibility. These optional surfaces do not change task acceptance.
+to keep local history while leaving existing remote issues unchanged. The legacy
+`clips track` command remains only for compatibility. These optional workflows do
+not change task acceptance.

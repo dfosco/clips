@@ -3,7 +3,7 @@ import fs from 'fs';
 import { appendEvent, readGoalWithTasks, getClipsDbDir, getClipsRecordsDir, getGoalFilePath, getCurrentCommitSha, normalizeGoalId as canonicalGoalId, parseRef } from '../lib/core.js';
 import { pushGoal } from '../lib/sync.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
-import { discoverBoardGoals } from '../lib/board.js';
+import { discoverGoals } from '../lib/goal-discovery.js';
 import { adrRecordExists, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
 import { validateTrack } from '../lib/tracks.js';
 import { laneToTrackId, trackToLaneId, validateLane } from '../lib/lanes.js';
@@ -76,7 +76,7 @@ function generateId() {
     return 'g001';
   }
   
-  const sequentialIds = discoverBoardGoals(clipsDbDir)
+  const sequentialIds = discoverGoals(clipsDbDir)
     .map(({ goalId }) => goalId)
     .filter(id => /^g\d+$/.test(id))
     .map(id => parseInt(id.replace('g', ''), 10));
@@ -257,7 +257,7 @@ function unlinkGoal(goalRef) {
 }
 
 function unlinkAllGoals() {
-  const results = discoverBoardGoals(getClipsDbDir())
+  const results = discoverGoals(getClipsDbDir())
     .map(({ goalId, username }) => unlinkGoalRecord(goalId, username))
     .filter(Boolean);
   console.log(JSON.stringify({
@@ -346,7 +346,8 @@ Goal fields:
   plan, decisions      Markdown plan and durable design decisions
   scope, components    Scope text and affected component refs
   acceptance_criteria  Strings or {id: "A1", description: "..."} entries
-  owner, acceptance_owner  Work and acceptance responsibility
+  owner                Advisory work responsibility, not an execution lock
+  acceptance_owner     Expected accepting actor for receipt consistency
   record               Markdown outcome/change record
   sections, extensions Additional Markdown sections and custom JSON
   expected_revision    Reject an update based on a stale record revision
@@ -360,6 +361,7 @@ Behavior fields:
   verification_mode    behavior | behavior_and_tests
 
 JSON input: one argument, --file <path>, or --stdin.
+Host identity and Lane claims are not prerequisites for work.
 Acceptance receipt: artifact, accepted_by, summary, criteria [{id, status,
 evidence, reason?}]; status is satisfied or waived (waivers need a reason).
 Goal acceptance requires resolved tasks and explicit exceptions for any

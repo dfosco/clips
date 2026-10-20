@@ -253,7 +253,8 @@ Fields:
   title, description         Title and requested outcome
   scope, components          Change boundaries and affected component refs
   acceptance_criteria        Strings or {id: "A1", description: "..."} entries
-  owner, acceptance_owner    Work and acceptance responsibility
+  owner                      Advisory work responsibility, not an execution lock
+  acceptance_owner           Expected accepting actor for receipt consistency
   blocked_by                 Task or goal references, including qualified refs
   record                     Markdown implementation/result record
   sections, extensions       Additional Markdown sections and custom JSON
@@ -271,6 +272,7 @@ Acceptance receipt:
   own journal do not automatically invalidate existing work acceptance.
 
 JSON input: one argument, --file <path>, or --stdin.
+Host identity and Lane claims are not prerequisites for work.
 Use g1 t1 or a combined '#g1#t1' reference. Quote #refs in shells.
 Request-affecting edits reopen accepted work and retain the old receipt;
 record/section/extension notes and task ownership do not change the obligation.

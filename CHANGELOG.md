@@ -1,13 +1,36 @@
 # Clips
 
-## Unreleased
+## 2.0.0
 
-Use goals, atomic tasks, and system components as a small, extensible work model
-for agents. A task is the change request before execution and the change record
-after acceptance.
+Plan, coordinate and verify work through linked Lanes, Goals and Tasks. Lane
+Manager owns continued delivery across agents, while Clips Dev plans and builds
+an outcome in its own session. This major version removes the legacy local web
+board; the CLI and work records remain.
+
+### Breaking changes
+
+- Remove `clips web`, its server, UI, packaged assets and frontend build commands.
+  Use `clips view`, `clips goal`, `clips lane` and `clips task` to inspect and
+  manage the retained work records. Existing records are not deleted or migrated.
+- Rename the Loopz skill to `clips-dev`, including its directory and invocation.
+  The `skill:loopz` import remains a compatibility alias for `skill:clips-dev`;
+  it does not install a second skill. Existing installed copies are not
+  automatically refreshed.
 
 ### Features
 
+- Ship `lane-manager` for comprehensive planning, task breakdown, delegated
+  development and continued delivery, with explicit plan-only and scope controls.
+- Ship `clips-dev` as an autonomous staff-developer workflow that plans,
+  implements and verifies in its own session. Keep `clips` as the shared
+  work-record and acceptance skill.
+- Add a default of five concurrently active workers per Lane, excluding its
+  manager. Set the project default with `clips config --lane-max-active-agents N`
+  and read it with `clips config lane_max_active_agents`. Lane Manager announces
+  the effective budget and honors per-Lane user overrides and tighter limits.
+- Define host-specific delegation: direct coordinated child sessions in Copilot,
+  top-level dev agents in Paseo, native sub-agents on other supported hosts, and
+  linear implementation only where delegation is unavailable.
 - Add persistent system components with responsibility, contract, source references,
   dependencies, named sections, and project-defined metadata.
 - Add task scope, component references, ownership, result records, and work
@@ -29,9 +52,16 @@ after acceptance.
 - Update the Clips skill and repository guidance to avoid repeated confirmations
   for authorized work and to coordinate shared workflow state through one writer
   by default.
+- Keep ownership and management metadata advisory without removing authentication,
+  acceptance attribution, revision checks or journal protections.
+- Lead the README with installation, onboarding and practical Lane Manager use.
+  Include the linked technical reference in the npm package.
+- Preserve shared goal discovery, installation switching, GitHub synchronization
+  and core test coverage while removing web-only dependencies and tooling.
 
-These changes describe the development branch. They do not publish a new npm
-release or upgrade existing installations.
+The worker budget is an agent dispatch policy, not a native process limiter.
+Reducing it does not terminate existing workers. GitHub collaboration remains
+opt-in, and publication or other external updates still require authorization.
 
 ## 1.5.0
 

@@ -1,4 +1,4 @@
-import { discoverBoardGoals } from '../lib/board.js';
+import { discoverGoals } from '../lib/goal-discovery.js';
 import { appendEvent, formatRef, readGoalWithTasks } from '../lib/core.js';
 import { readJsonInput } from '../lib/json-input.js';
 import { appendLaneEvent, laneToTrackId, listLanes, nextLaneId, normalizeLaneId, readLane, readLaneHistory, validateLane } from '../lib/lanes.js';
@@ -18,7 +18,7 @@ function syncLane(laneId) {
 }
 
 function goalsForLane(laneId) {
-  return discoverBoardGoals()
+  return discoverGoals()
     .map(({ goalId, username }) => ({ goal: readGoalWithTasks(goalId, username), username }))
     .filter(({ goal }) => goal?.lane_id === laneId);
 }
@@ -226,5 +226,7 @@ Commands:
   close <lane> <json>        Close with summary, decision log, system overview,
                              product_goals_achieved, and optional media/components
 
-Lane refs use #l1. Historical Track refs such as #r1 are accepted as aliases.`);
+Lane refs use #l1. Historical Track refs such as #r1 are accepted as aliases.
+Host identity and Lane claims are not prerequisites for work.
+Work ownership is advisory; storage and revision protections still apply.`);
 }

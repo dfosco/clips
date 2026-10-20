@@ -1,5 +1,5 @@
 import { appendTrackEvent, listTracks, nextTrackId, normalizeTrackId, readTrack } from '../lib/tracks.js';
-import { discoverBoardGoals } from '../lib/board.js';
+import { discoverGoals } from '../lib/goal-discovery.js';
 import { appendEvent, readGoalWithTasks } from '../lib/core.js';
 import { pushGoal, pushTrack } from '../lib/sync.js';
 
@@ -16,7 +16,7 @@ function requireTrack(ref) {
 }
 
 function trackWithGoals(track) {
-  const goals = discoverBoardGoals().map(({ goalId, username }) => readGoalWithTasks(goalId, username))
+  const goals = discoverGoals().map(({ goalId, username }) => readGoalWithTasks(goalId, username))
     .filter((goal) => goal?.track_id === track.track_id)
     .map((goal) => ({ goal_id: goal.goal_id, title: goal.title, status: goal.status }));
   return { ...track, goals, goal_count: goals.length, completed_goal_count: goals.filter((goal) => goal.status === 'closed').length };

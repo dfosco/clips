@@ -8,7 +8,6 @@ import { runViewCommand } from './commands/view.js';
 import { runConfigCommand } from './commands/config.js';
 import { runInitCommand } from './commands/init.js';
 import { runSyncCommand } from './commands/sync.js';
-import { runWebCommand } from './commands/web.js';
 import { runRecordCommand } from './commands/record.js';
 import { runTrackCommand } from './commands/track.js';
 import { runLaneCommand } from './commands/lane.js';
@@ -58,8 +57,7 @@ Commands:
   component <action>     Manage persistent system components
   record <action> [args]  Manage optional legacy CR and ADR records
   sync [ref]              Sync GitHub only when collaboration is enabled
-  config [key] [value]    View/set configuration
-  web [--host H] [--port P] Start the read-only local or multi-project board
+  config [key] [value]    View/set configuration; --help lists flags
 
 Options:
   --version, -v           Show version
@@ -84,8 +82,8 @@ Examples:
   clips history '#g001#t01'
   clips task status g1 t1 closed
   clips sync
-  clips web
   clips config project_id my-project
+  clips config --lane-max-active-agents 5
 `);
   process.exit(0);
 }
@@ -103,7 +101,6 @@ const commands = {
   config: runConfigCommand,
   init: runInitCommand,
   sync: runSyncCommand,
-  web: runWebCommand,
 };
 
 const handler = commands[command];

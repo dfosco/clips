@@ -21,6 +21,12 @@ function run(root, ...args) {
 }
 
 describe('lanes', () => {
+  it.each(['lane', 'goal', 'task'])('documents advisory management in %s help', (command) => {
+    const help = execFileSync(process.execPath, [cli, command, '--help'], { encoding: 'utf8' });
+    expect(help).toContain('Host identity and Lane claims are not prerequisites for work.');
+    expect(help).toMatch(/advisory/i);
+  });
+
   it('creates strategic lanes without technical acceptance criteria and uses #l refs', () => {
     const root = workspace();
     try {
@@ -45,6 +51,43 @@ describe('lanes', () => {
       expect(run(root, 'goal', 'show', 'g1')).toMatchObject({ lane_id: 'l001', track_id: 'r001' });
       expect(run(root, 'lane', 'l2', 'add', 'g1')).toMatchObject({ lane_id: 'l002', moved: [{ goal_id: 'g001', from_lane_id: 'l001' }] });
       expect(run(root, 'lane', 'show', 'l2').goals.map((goal) => goal.goal_id)).toEqual(['g001']);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('allows work without host configuration or claims while preserving owners and rejecting stale edits', () => {
+    const root = workspace();
+    try {
+      const configPath = path.join(root, '.clips', 'clips.config.json');
+      const config = fs.readFileSync(configPath, 'utf8');
+      run(root, 'lane', 'create', '{"title":"Advisory coordination"}');
+      const laneHistory = run(root, 'lane', 'history', 'l1');
+      run(root, 'goal', 'create', '{"title":"Deliver work","lane_id":"l1","owner":"manager"}');
+      run(root, 'task', 'create', 'g1', '{"title":"Implement work","owner":"worker","acceptance_owner":"reviewer"}');
+      const originalTask = run(root, 'goal', 'show', 'g1').tasks[0];
+
+      run(root, 'goal', 'update', 'g1', '{"record":"Coordinator recorded progress."}');
+      run(root, 'task', 'update', 'g1', 't1', JSON.stringify({
+        expected_revision: originalTask.revision,
+        record: 'Implementation recorded without acquiring a management role.',
+      }));
+      run(root, 'task', 'status', 'g1', 't1', 'in_progress');
+      const goal = run(root, 'goal', 'show', 'g1');
+      expect(goal.owner).toBe('manager');
+      expect(goal.tasks[0]).toMatchObject({
+        owner: 'worker', acceptance_owner: 'reviewer', status: 'in_progress',
+        record: 'Implementation recorded without acquiring a management role.',
+      });
+      expect(run(root, 'lane', 'history', 'l1')).toEqual(laneHistory);
+      expect(fs.readFileSync(configPath, 'utf8')).toBe(config);
+
+      const journalPath = path.join(root, '.clips', 'db', 'g001.jsonl');
+      const journal = fs.readFileSync(journalPath, 'utf8');
+      const stale = spawnSync(process.execPath, [cli, 'task', 'update', 'g1', 't1', JSON.stringify({
+        expected_revision: originalTask.revision, record: 'Stale result must not replace current work.',
+      })], { cwd: root, encoding: 'utf8', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+      expect(stale.status).toBe(1);
+      expect(stale.stderr).toContain('Revision conflict');
+      expect(fs.readFileSync(journalPath, 'utf8')).toBe(journal);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 

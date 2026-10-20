@@ -6,8 +6,10 @@ It is not a claim that an older installed CLI supports every command below.
 ## Contents
 
 - [Core records](#core-records)
+- [Planning through implementation](#planning-through-implementation)
 - [Fields and extensions](#fields-and-extensions)
 - [Identity and revisions](#identity-and-revisions)
+- [Management policy](#management-policy)
 - [Acceptance](#acceptance)
 - [Dependencies and coordination](#dependencies-and-coordination)
 - [Compatibility and storage](#compatibility-and-storage)
@@ -69,6 +71,42 @@ The Lane supplies strategic context across goals. The goal owns engineering
 orchestration. Component dependencies describe the system. Task dependencies
 describe ordering of work. Merely sharing a Lane does not imply a dependency.
 Neither the agent hierarchy nor a file tree has to mirror these records.
+
+## Planning through implementation
+
+For actionable requests, the skills default to comprehensive plans within one
+coherent Lane, detailed Goals with observable acceptance criteria, meaningful
+Task contracts and dependencies, then implementation and verification. Reuse
+matching records; preserve a selected Task's scope and proportionate records for
+an atomic outcome. Explicit brainstorming, plan-only, defer, queue or narrower
+instructions override the default. This is agent guidance, not a new CLI record
+type, scheduler or requirement to repeat intake interviews.
+
+Comprehensive means the agreed behavior, constraints, interfaces, failure cases
+and verification are covered. Map a Goal's full Task set to its scope/criteria,
+record gaps or a coherent atomic-scope rationale, and identify real prerequisites
+and write conflicts. Task count and a mandatory split by file/layer do not prove
+coverage. Useful independent work can run in parallel within resource limits;
+coupled work can stay serial with one integration and record coordinator.
+
+For example, an authorized workspace-restoration feature may use one Lane with
+Goals for persistence and user-facing restoration. Each Goal owns observable
+criteria and reviewable Tasks, including the real integration check where needed.
+Creating those records means **planned**, not delivered. An observed dev handoff
+means **launched**; candidate-specific checks establish **verified**; a truthful
+receipt naming the actual actor and criterion evidence records **accepted**.
+For "plan this only", deliver the same necessary planning detail but do not
+launch implementation or claim any of those later states.
+
+A Lane Manager delegates engineering and substantive verification through the
+current harness. Paseo uses workspace agents; Copilot uses direct coordinated
+children. Other harnesses must invoke available native sub-agents even if they
+are not user-steerable. If no delegation primitive exists, the manager implements
+and verifies authorized Tasks itself, linearly in dependency/dispatch order,
+using the same contracts and evidence. The actual executor records results under
+the existing Task IDs. Do not fabricate a worker, parallel execution, independent
+review or human approval. Missing delegation does not bypass denied authorization,
+missing tools/files or any real dependency.
 
 ## Fields and extensions
 
@@ -215,6 +253,45 @@ Revisions identify agreements and historical records. A separate commit,
 tree/diff identity, or immutable artifact reference identifies what was
 implemented and checked. A record's current revision is not verification
 evidence, and a Git HEAD alone does not identify a dirty working tree.
+
+## Management policy
+
+Work ownership is advisory coordination metadata, not an authorization or
+execution lock. Authorized Lane, goal, and task work does not require a host ID,
+manager claim, exclusive management role, or unused session association.
+The canonical CLI has no host-identity or Lane-claim prerequisite. Integrations
+must not turn those optional relationships into requirements for ordinary work.
+
+Preserve existing owners, associations, and history unless explicitly updating
+them. Do not fabricate an actor, erase metadata, or claim a Lane just to start
+work. Coordinate actual overlapping writes rather than treating a recorded owner
+as proof that another agent is currently writing.
+
+Use the CLI for records and supported host tools for agent sessions and
+communication. User-requested coordinated children remain steerable through
+those tools; they do not require a Clips role or claim. Respect resource limits
+and reuse an existing session when another is unnecessary. This package does not
+provide a Copilot canvas runtime or change checks in a separately installed
+integration through agent instructions.
+
+For GitHub Copilot App handoffs, every dev session is a direct coordinated child
+of the Lane Manager, without an intermediate coordinator/Squad/dev-lead session.
+The manager calls native `create_session` and verifies `creator_session_id` and
+`coordinating_creator_session_id` through `get_session`/listings, together with
+the intended repository and workspace. The actual listed `app_url` exposes user
+navigation; `send_session_message` maintains manager/worker contact throughout
+execution. Claims, titles, activity or a canvas Send do not establish parentage.
+Do not detach/reparent or use hidden replacement workers to satisfy the rule.
+If useful parallel Tasks need more dev sessions, the manager creates direct
+siblings while one owner integrates. RAM limits or shared writes can justify
+one serial dev child. Paseo's separate top-level path is unaffected.
+
+This policy leaves authentication, credential safeguards, external-action
+approval, exact-target validation, atomic writes, canonical journal locks, and
+stale-revision conflicts intact. It also preserves acceptance receipt checks:
+`acceptance_owner` identifies the expected accepting actor, not who may implement
+the work. A receipt must still name its actual authorized actor and satisfy the
+recorded acceptance agreement.
 
 ## Acceptance
 

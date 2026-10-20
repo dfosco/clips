@@ -2,6 +2,8 @@
   "schemaVersion": 1,
   "exports": {
     "skill:clips": "./.agents/skills/clips",
-    "skill:loopz": "./.agents/skills/loopz"
+    "skill:clips-dev": "./.agents/skills/clips-dev",
+    "skill:lane-manager": "./.agents/skills/lane-manager",
+    "skill:loopz": "./.agents/skills/clips-dev"
   }
 }

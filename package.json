@@ -1,21 +1,17 @@
 {
   "name": "@dfosco/clips",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "description": "Local-first planning and change-record workflow CLI",
   "type": "module",
   "bin": {
     "clips": "src/cli.js"
   },
   "scripts": {
-    "test": "vitest run --config web/vitest.config.js",
+    "test": "vitest run --config vitest.config.js",
     "test:all": "npm test && npm run test:package",
-    "test:package": "npm run web:build && node scripts/package-smoke.js",
+    "test:package": "node scripts/package-smoke.js",
     "clips": "node src/cli.js",
-    "web:dev": "vite --config web/vite.config.js",
-    "web:build": "vite build --config web/vite.config.js",
-    "web:test": "vitest run --config web/vitest.config.js",
     "prepublishOnly": "npm run test:all",
-    "prepack": "npm run web:build",
     "preversion": "npm test",
     "publish:npm": "npm publish --access public",
     "update": "npm install -g @dfosco/clips && npm list -g @dfosco/clips --depth=0",
@@ -35,12 +31,13 @@
     "src/**/*.js",
     "!src/**/*.test.js",
     ".agents/skills/clips",
-    ".agents/skills/loopz",
+    ".agents/skills/lane-manager",
+    ".agents/skills/clips-dev",
     "skillshop.manifest.mjs",
     "README.md",
+    "docs/",
     "CHANGELOG.md",
-    "LICENSE",
-    "dist/web/"
+    "LICENSE"
   ],
   "keywords": [
     "cli",
@@ -60,16 +57,7 @@
     "url": "https://github.com/dfosco/clips/issues"
   },
   "devDependencies": {
-    "@internationalized/date": "^3.12.3",
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@testing-library/jest-dom": "^7.0.1",
-    "@testing-library/svelte": "^5.4.2",
-    "bits-ui": "^2.18.1",
-    "jsdom": "^30.0.1",
-    "svelte": "^5.56.8",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10",
-    "iconoir": "^7.12.1"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "skillshop": "^2.0.0"
@@ -77,5 +65,9 @@
   "exports": {
     "./skillshop": "./skillshop.manifest.mjs",
     "./*": "./*"
+  },
+  "skillshop": {
+    "schemaVersion": 1,
+    "managedFiles": []
   }
 }
