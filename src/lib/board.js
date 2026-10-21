@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getClipsDbDir, getClipsRecordsDir, replayGoalEvents } from './core.js';
+import { getClipsDir, getClipsDbDir, getClipsRecordsDir, replayGoalEvents } from './core.js';
+import { configPathIn } from './storage-paths.js';
 import { readJsonEvents } from './journal.js';
 import { listComponents } from './components.js';
 import { effectiveVerificationMode } from './behavior.js';
@@ -9,6 +10,9 @@ import { listLanes } from './lanes.js';
 import { readLaneClaim } from './lane-claims.js';
 import { labelCatalog, projectLabels } from './labels.js';
 import { discoverGoals as discoverBoardGoals } from './goal-discovery.js';
+import { displayRecordAttachments } from './attachments.js';
+import { readCollaborationCapability } from './collaboration.js';
+import { githubPullRequestKey } from './github-identity.js';
 
 export { discoverBoardGoals };
 
@@ -110,7 +114,7 @@ function readGithubCache(dbDir) {
   for (const [index, line] of fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean).entries()) {
     try {
       const event = JSON.parse(line);
-      if (event.event === 'github_pr_synced' && event.pr_number) latest.set(`${event.repository || ''}#${event.pr_number}`, event);
+      if (event.event === 'github_pr_synced' && event.pr_number) latest.set(githubPullRequestKey(event), event);
     } catch (error) {
       warnings.push({ path: filePath, message: `Invalid JSON at line ${index + 1}: ${error.message}` });
     }
@@ -134,7 +138,11 @@ export function parseGoalFile(filePath, goalId) {
   return replayGoalEvents(readJsonEvents(filePath), goalId);
 }
 
-function normalizeGoal(rawGoal, username, records, allPrs) {
+function displayAttachments(record, repoRoot) {
+  return displayRecordAttachments(record, { repoRoot });
+}
+
+function normalizeGoal(rawGoal, username, records, allPrs, repoRoot) {
   const goalStatus = normalizeStatus(rawGoal.status);
   const goalVerificationMode = effectiveVerificationMode(rawGoal.verification_mode);
   const source = rawGoal.issue_number ? 'github' : 'local';
@@ -160,10 +168,11 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
     status: goalStatus,
     issue_number: rawGoal.issue_number || null,
     issue_url: rawGoal.issue_url || null,
+    attachments: displayAttachments(rawGoal, repoRoot),
     source,
     closed_commit_sha: goalStatus === 'closed' ? rawGoal.closed_commit_sha || null : null,
     linked_crs: linkedRecords(records, goalRef, shortGoalRef),
-    linked_prs: [...new Map([...linkedPrs(allPrs, goalRef, shortGoalRef), ...goalPrs].map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()],
+    linked_prs: [...new Map([...linkedPrs(allPrs, goalRef, shortGoalRef), ...goalPrs].map((pr) => [githubPullRequestKey(pr), pr])).values()],
     tasks: orderedTasks(rawGoal).map((rawTask) => {
       const status = normalizeStatus(rawTask.status);
       const taskRef = formatRef(username, rawGoal.goal_id, rawTask.task_id);
@@ -184,6 +193,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
         column: columnForStatus(status),
         issue_number: rawTask.issue_number || null,
         issue_url: rawTask.issue_url || null,
+        attachments: displayAttachments(rawTask, repoRoot),
         source,
         goal_id: rawGoal.goal_id,
         goal_ref: goalRef,
@@ -191,7 +201,7 @@ function normalizeGoal(rawGoal, username, records, allPrs) {
         goal_status: goalStatus,
         closed_commit_sha: status === 'closed' ? rawTask.closed_commit_sha || null : null,
         linked_crs: linkedRecords(records, taskRef, shortTaskRef),
-        linked_prs: [...new Map([...linkedPrs(allPrs, taskRef, shortTaskRef), ...goalPrs.filter((pr) => prMatchesRef(pr, taskRef, shortTaskRef))].map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()],
+        linked_prs: [...new Map([...linkedPrs(allPrs, taskRef, shortTaskRef), ...goalPrs.filter((pr) => prMatchesRef(pr, taskRef, shortTaskRef))].map((pr) => [githubPullRequestKey(pr), pr])).values()],
       };
     }),
   };
@@ -206,8 +216,10 @@ export function readBoardData({
 } = {}) {
   const warnings = [];
   const goals = [];
-  const configPath = path.join(path.dirname(dbDir), 'clips.config.json');
+  const configPath = configPathIn(path.dirname(dbDir));
+  const collaboration = readCollaborationCapability(projectPath);
   let labels = [];
+  if (collaboration.error) warnings.push({ path: configPath, message: collaboration.error });
   try {
     labels = labelCatalog(fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {});
   } catch (error) {
@@ -223,18 +235,18 @@ export function readBoardData({
     try {
       const rawGoal = parseGoalFile(entry.filePath, entry.goalId);
       allPrs.push(...Object.values(rawGoal.github_prs || {}));
-      const goal = normalizeGoal(rawGoal, entry.username, changeRecords.records, allPrs);
+      const goal = normalizeGoal(rawGoal, entry.username, changeRecords.records, allPrs, projectPath);
       goals.push({ ...projectLabels(goal, labels), tasks: goal.tasks.map((task) => projectLabels(task, labels)) });
     } catch (error) {
       warnings.push({ path: entry.filePath, message: error.message });
     }
   }
 
-  const uniquePrs = [...new Map(allPrs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
+  const uniquePrs = [...new Map(allPrs.map((pr) => [githubPullRequestKey(pr), pr])).values()];
   const records = changeRecords.records.map((record) => ({ ...record, linked_prs: uniquePrs.filter((pr) => (pr.cr_ids || []).includes(record.id)) }));
   for (const goal of goals) {
-    goal.linked_prs = [...new Map(goal.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
-    for (const task of goal.tasks) task.linked_prs = [...new Map(task.linked_prs.map((pr) => [`${pr.repository || ''}#${pr.pr_number}`, pr])).values()];
+    goal.linked_prs = [...new Map(goal.linked_prs.map((pr) => [githubPullRequestKey(pr), pr])).values()];
+    for (const task of goal.tasks) task.linked_prs = [...new Map(task.linked_prs.map((pr) => [githubPullRequestKey(pr), pr])).values()];
   }
   const lanes = listLanes(dbDir).map((lane) => {
     const members = goals.filter((goal) => goal.lane_id === lane.lane_id);
@@ -245,12 +257,33 @@ export function readBoardData({
       manager_claim_error = error.message;
       warnings.push({ kind: 'lane_claim', lane_id: lane.lane_id, message: error.message });
     }
-    return { ...projectLabels(lane, labels), ref: `#${lane.lane_id}`, manager_claim, manager_claim_error, goal_refs: members.map((goal) => goal.ref), goal_count: members.length, completed_goal_count: members.filter((goal) => goal.status === 'closed').length };
+    return {
+      ...projectLabels(lane, labels),
+      attachments: displayAttachments(lane, projectPath),
+      ref: `#${lane.lane_id}`,
+      manager_claim,
+      manager_claim_error,
+      goal_refs: members.map((goal) => goal.ref),
+      goal_count: members.length,
+      completed_goal_count: members.filter((goal) => goal.status === 'closed').length,
+    };
   });
   const components = listComponents({ componentsDir, onError: (warning) => warnings.push(warning) });
   // Keep tracks as a read-only compatibility alias while Lane is the product model.
   const tracks = lanes.map((lane) => ({ ...lane, track_id: lane.legacy_track_id, ref: `#${lane.legacy_track_id}` }));
-  return { version: 1, generated_at: new Date().toISOString(), labels, lanes, tracks, goals, components, change_records: records, github_prs: uniquePrs, warnings };
+  return {
+    version: 1,
+    generated_at: new Date().toISOString(),
+    collaboration,
+    labels,
+    lanes,
+    tracks,
+    goals,
+    components,
+    change_records: records,
+    github_prs: uniquePrs,
+    warnings,
+  };
 }
 
 function qualifyRef(projectId, ref) {
@@ -280,9 +313,9 @@ function qualifyRecordSummary(project, record) {
 
 export function readProjectBoard(project) {
   const localBoard = readBoardData({
-    dbDir: path.join(project.path, '.clips', 'db'),
-    recordsDir: path.join(project.path, '.clips', 'records', 'cr'),
-    componentsDir: path.join(project.path, '.clips', 'components'),
+    dbDir: getClipsDbDir(project.path),
+    recordsDir: getClipsRecordsDir('cr', project.path),
+    componentsDir: path.join(getClipsDir(project.path), 'components'),
     projectPath: project.path,
   });
   const goals = localBoard.goals.map((goal) => {

@@ -28,7 +28,7 @@ associations are advisory metadata, not gates. Idle activity is not required.
 Missing catalog activity does not disable an otherwise valid joined send;
 the runtime still verifies the exact record, Git project and current session.
 
-The Clips project tabs read the existing canonical local-user projects.json
+The Lanes project tabs read the existing canonical local-user projects.json
 registry through `src/project-discovery.js`. It accepts only discovered opaque
 IDs, revalidates selections, and scopes persistence by userScope/session/canvas;
 focus additionally includes the canonical project. It never initializes a repo,
@@ -37,7 +37,7 @@ Tabs occupy only the former Board strip. No project-picker modal remains.
 Initial default selection prefers the registered current repository, otherwise
 the first available project. Saved selection is preserved without fallback.
 The separate Initialize control is authorized only for the actual session Git
-root with no store, independent of selected tabs; it uses `clips init --store-only`.
+root with no store, independent of selected tabs; it uses `lanes init --store-only`.
 
 ## Build and activation
 
@@ -50,7 +50,7 @@ unauthenticated chunks. A build manifest checks source and emitted hashes before
 local installation and through the installed extension link.
 
 After changing provider/build source, run extensions_reload in the intended
-actual Copilot conversation, then reopen Clips Work. Refresh rereads state only.
+actual Copilot conversation, then reopen Lanes. Refresh rereads state only.
 An external SDK sidecar is not the App's live joined connection. Source linking,
 DOM tests and previously loaded build logs do not prove this build was loaded.
 

@@ -104,7 +104,7 @@ test("exposes supported app session links and rejects unsafe command families", 
   assert.equal(appSessionUrl("session one"), "ghapp://sessions/session%20one");
   assert.throws(() => appSessionUrl(""), /session ID/);
   assert.equal(commandFamily(["task", "create", "g1", "{}"]), "task create");
-  assert.throws(() => commandFamily(["exec", "rm", "-rf", "."]), /Unsupported Clips command/);
+  assert.throws(() => commandFamily(["exec", "rm", "-rf", "."]), /Unsupported Lanes command/);
   assert.throws(() => commandFamily(["task", "create", "--file", "/tmp/request.json"]), /external file/);
   const canvasCommands = [
     ["lane", "create", "{}"], ["lane", "status", "#l001", "in_progress"], ["lane", "#l001", "add", "#g001"],
@@ -115,6 +115,37 @@ test("exposes supported app session links and rejects unsafe command families", 
     ["label", "add", "#g001", "bug"], ["label", "remove", "#g001", "bug"],
   ];
   for (const args of canvasCommands) assert.doesNotThrow(() => commandFamily(args), args.join(" "));
+});
+
+test("uses fixed project-scoped commands for live Markdown reads and local collaboration settings", async () => {
+  const project = await gitProject();
+  const canonicalProject = await fs.realpath(project);
+  const calls = [];
+  const attachmentId = "att-123e4567-e89b-12d3-a456-426614174000";
+  const runtime = await createClipsRuntime({
+    cliPath: "src/cli.js",
+    cliRunner: async (_bin, args, cwd) => {
+      calls.push({ args, cwd });
+      if (args.includes("attachment")) return { stdout: `${JSON.stringify({
+        ref: "#g001", revision: 3,
+        attachment: { id: attachmentId, type: "markdown", title: "Plan", status: "available", content: "# Current", path: "/private/plan.md" },
+      })}\n` };
+      return { stdout: "updated locally\n" };
+    },
+    dataRoot: await tempData(),
+  });
+
+  const result = await runtime.readAttachment("#g001", attachmentId, project);
+  assert.deepEqual(result, {
+    id: attachmentId, type: "markdown", title: "Plan", status: "available", content: "# Current",
+  });
+  await runtime.setCollaboration(true, project);
+  assert.deepEqual(calls.map(({ args, cwd }) => ({ args: args.slice(args.findIndex((arg) => ["attachment", "config"].includes(arg))), cwd })), [
+    { args: ["attachment", "read", "#g001", attachmentId, "--json"], cwd: canonicalProject },
+    { args: ["config", "collaboration", "true"], cwd: canonicalProject },
+  ]);
+  await assert.rejects(runtime.readAttachment("#g001", "../outside", project), /canonical attachment ID/);
+  await assert.rejects(runtime.setCollaboration("true", project), /explicitly enabled or disabled/);
 });
 
 test("resolves the locked SDK platform runtime package from the extension package", () => {
@@ -250,15 +281,15 @@ test("minimal initialization uses only the supported fixed CLI mode and requires
   assert.equal((await runtime.initializeProject(project)).initialized, true);
   assert.deepEqual(calls[0].args.slice(-2), ['init', '--store-only']);
   assert.equal(calls[0].cwd, await fs.realpath(project));
-  await assert.rejects(runtime.recordCommand(['init', '--store-only'], project), /Unsupported Clips command family/);
+  await assert.rejects(runtime.recordCommand(['init', '--store-only'], project), /Unsupported Lanes command family/);
   confirmed = false;
   await assert.rejects(runtime.initializeProject(project), /did not confirm minimal store initialization/);
   await runtime.close();
 });
 
-test("canonical Clips CLI adapter creates real isolated Goal and Task history", async () => {
+test("canonical Lanes CLI adapter creates real isolated Goal and Task history", async () => {
   const project = await gitProject();
-  execFileSync(process.execPath, [clipsCli, "init", "--skills-scope", "project"], { cwd: project, stdio: "ignore", env: { ...process.env, CLIPS_HOME: await tempData() } });
+  execFileSync(process.execPath, [clipsCli, "init", "--skills-scope", "project"], { cwd: project, stdio: "ignore", env: { ...process.env, LANES_HOME: await tempData() } });
   const runtime = await createClipsRuntime({ cliPath: clipsCli });
   const goalResult = await runtime.recordCommand(["goal", "create", JSON.stringify({ title: "Adapter Goal", description: "Created through the canvas adapter." })], project);
   assert.equal(goalResult.success, true);
@@ -343,7 +374,7 @@ test("one joined App session keeps distinct bindings while managing multiple Lan
       claimRefs.push(commandArgs[3]);
       return { stdout: `${JSON.stringify({ revision: 1, owners: [] })}\n`, stderr: "" };
     }
-    throw new Error(`unexpected Clips invocation ${commandArgs.join(" ")}`);
+    throw new Error(`unexpected Lanes invocation ${commandArgs.join(" ")}`);
   };
   const dataRoot = await tempData();
   const runtime = await createClipsRuntime({ client, hostSession, cliPath: "src/cli.js", cliRunner, dataRoot, hostId: "observed-host-id" });
@@ -492,7 +523,7 @@ test("unavailable optional Lane claim commands cannot block current-session deli
     if (commandArgs[0] === "view") return { stdout: `${JSON.stringify({ ref: "#l001", kind: "lane", title: "Product" })}\n`, stderr: "" };
     if (commandArgs[0] === "lane" && commandArgs[1] === "manager" && commandArgs[2] === "inspect") return { stdout: `${JSON.stringify({ revision: 0, owners: [] })}\n`, stderr: "" };
     if (commandArgs[0] === "lane" && commandArgs[1] === "manager" && commandArgs[2] === "claim") throw new Error("revision conflict");
-    throw new Error(`unexpected Clips invocation ${commandArgs.join(" ")}`);
+    throw new Error(`unexpected Lanes invocation ${commandArgs.join(" ")}`);
   };
   const runtime = await createClipsRuntime({ client, hostSession, cliPath: "src/cli.js", cliRunner, dataRoot: await tempData(), hostId: "observed-host-id" });
   assert.equal((await runtime.launchRecord({ projectPath: project, ref: "#l001", prompt: "Coordinate" })).id, sessionId);
@@ -509,7 +540,7 @@ test("record launch is unavailable when the extension is not joined to a foregro
   assert.equal(client.calls.some(([kind]) => kind === "createSession"), false);
 });
 
-test("record launch rejects a Clips view response with a mismatched reference or kind", async () => {
+test("record launch rejects a Lanes view response with a mismatched reference or kind", async () => {
   const project = await gitProject();
   const sessionId = "joined-record-binding-check";
   const client = clientFixture({ sessions: [{ sessionId, startTime: new Date(), modifiedTime: new Date(), context: { workingDirectory: project, gitRoot: project } }] });
@@ -639,7 +670,7 @@ test("historical visibility evidence never enables nonjoined sidecar steering", 
   assert.equal((await runtime.listSessions(project)).sessions[0].steerable, false);
 });
 
-test('embedded Copilot executable is never selected as the Clips JS interpreter', async () => {
+test('embedded Copilot executable is never selected as the Lanes JS interpreter', async () => {
   const calls = [];
   const chosen = await resolveNodeExecutable({ executable: '/app/copilot', env: {}, run: async (bin, args) => {
     calls.push(bin);
@@ -650,6 +681,50 @@ test('embedded Copilot executable is never selected as the Clips JS interpreter'
   assert.deepEqual(calls, ['node', 'node']);
   await assert.rejects(resolveNodeExecutable({ configured: '/bad/node', run: async () => ({ stdout: 'not node' }) }), /CLIPS_NODE_PATH/);
   assert.equal(await resolveNodeExecutable({ executable: '/app/copilot', env: {} }), process.execPath);
+});
+
+test('canonical CLI, Node and host overrides precede compatible legacy values', async (t) => {
+  const keys = ['LANES_CLI_PATH', 'CLIPS_CLI_PATH', 'LANES_NODE_PATH', 'CLIPS_NODE_PATH', 'LANES_COPILOT_HOST_ID', 'CLIPS_COPILOT_HOST_ID'];
+  const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  process.env.LANES_CLI_PATH = '/canonical/lanes';
+  process.env.CLIPS_CLI_PATH = '/legacy/clips';
+  process.env.LANES_NODE_PATH = process.execPath;
+  process.env.CLIPS_NODE_PATH = '/invalid/legacy-node';
+  process.env.LANES_COPILOT_HOST_ID = 'canonical-host';
+  process.env.CLIPS_COPILOT_HOST_ID = 'legacy-host';
+  assert.equal(await resolveNodeExecutable(), process.execPath);
+  const project = await gitProject();
+  const calls = [];
+  const options = {
+    dataRoot: await tempData(),
+    cliRunner: async (bin, args) => {
+      calls.push({ bin, args });
+      return { stdout: '{"lanes":[],"goals":[]}' };
+    },
+  };
+  const runtime = await createClipsRuntime(options);
+  t.after(() => runtime.close());
+  await runtime.listBoard(project);
+  assert.equal(calls[0].bin, '/canonical/lanes');
+  assert.equal((await runtime.hostCapabilities()).hostId, 'canonical-host');
+  assert.equal((await runtime.hostCapabilities()).hostIdentitySource, 'LANES_COPILOT_HOST_ID');
+  const failing = await createClipsRuntime({
+    ...options, cliRunner: async bin => { assert.equal(bin, '/canonical/lanes'); throw new Error('bad canonical CLI'); },
+  });
+  t.after(() => failing.close());
+  await assert.rejects(failing.listBoard(project), /bad canonical CLI/);
+  delete process.env.LANES_CLI_PATH;
+  delete process.env.LANES_COPILOT_HOST_ID;
+  const legacy = await createClipsRuntime(options);
+  t.after(() => legacy.close());
+  await legacy.listBoard(project);
+  assert.equal(calls.at(-1).bin, '/legacy/clips');
+  assert.equal((await legacy.hostCapabilities()).hostId, 'legacy-host');
 });
 
 test('musl runtime lookup matches the locked installer platform', () => {
@@ -737,9 +812,9 @@ test('explicit record sends replace only advisory client keys and serialize read
   assert.deepEqual(calls.map((call) => call[2]), ['First', 'Second']);
 });
 
-test('missing Clips store reports the intended project without falling back to the source checkout', async () => {
+test('missing Lanes store reports the intended project without falling back to the source checkout', async () => {
   const project = await gitProject();
   const runtime = await createClipsRuntime({ dataRoot: await tempData() });
-  await assert.rejects(runtime.listBoard(project), (error) => error.message.includes(project) && /Choose an initialized Clips project/.test(error.message));
+  await assert.rejects(runtime.listBoard(project), (error) => error.message.includes(project) && /Choose an initialized Lanes project/.test(error.message));
   await assert.rejects(fs.access(path.join(project, '.clips')));
 });

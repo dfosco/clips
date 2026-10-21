@@ -1,13 +1,15 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { getUserStoreDir, projectConfigPath, readJsonObject } from './storage-paths.js';
+import { withRecordLock } from './journal.js';
 
 const REGISTRY_VERSION = 1;
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-export function getSystemClipsDir() {
-  return process.env.CLIPS_HOME ? path.resolve(process.env.CLIPS_HOME) : path.join(os.homedir(), '.clips');
+export function getSystemClipsDir(options) {
+  return getUserStoreDir(options);
 }
+export const getSystemLanesDir = getSystemClipsDir;
 
 export function getRegistryPath() {
   return path.join(getSystemClipsDir(), 'projects.json');
@@ -30,11 +32,12 @@ export function validateProjectId(value) {
 }
 
 function readProjectConfig(repoRoot) {
-  const configPath = path.join(repoRoot, '.clips', 'clips.config.json');
+  const configPath = projectConfigPath(repoRoot);
   try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch {
-    return {};
+    return readJsonObject(configPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw error;
   }
 }
 
@@ -51,7 +54,9 @@ function writeRegistry(projectPaths, registryPath = getRegistryPath()) {
   const dir = path.dirname(registryPath);
   fs.mkdirSync(dir, { recursive: true });
   const tempPath = `${registryPath}.${process.pid}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify({ version: REGISTRY_VERSION, projects: projectPaths.map((projectPath) => ({ path: projectPath })) }, null, 2)}\n`, { mode: 0o600 });
+  const previous = fs.existsSync(registryPath) ? readJsonObject(registryPath) : {};
+  const entries = new Map((previous.projects || []).map(entry => [typeof entry === 'string' ? entry : entry.path, typeof entry === 'string' ? {} : entry]));
+  fs.writeFileSync(tempPath, `${JSON.stringify({ ...previous, version: REGISTRY_VERSION, projects: projectPaths.map(projectPath => ({ ...entries.get(projectPath), path: projectPath })) }, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(tempPath, registryPath);
 }
 
@@ -60,7 +65,11 @@ export function readProjectRegistry({ prune = true, registryPath = getRegistryPa
 
   let parsed;
   try {
-    parsed = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
+    parsed = readJsonObject(registryPath);
+    if ((parsed.version !== undefined && parsed.version !== REGISTRY_VERSION) || !Array.isArray(parsed.projects) ||
+        parsed.projects.some(entry => typeof (typeof entry === 'string' ? entry : entry?.path) !== 'string')) {
+      throw new Error('Project registry is invalid');
+    }
   } catch (error) {
     return { projects: [], warnings: [{ kind: 'invalid_registry', message: `Could not read project registry: ${error.message}` }] };
   }
@@ -75,11 +84,18 @@ export function readProjectRegistry({ prune = true, registryPath = getRegistryPa
     try {
       repoRoot = canonicalPath(entryPath);
     } catch {
-      warnings.push({ kind: 'stale_project', project_id: normalizeProjectId(path.basename(entryPath)), message: `Removed unavailable Clips project: ${entryPath}` });
+      warnings.push({ kind: 'stale_project', path: entryPath, project_id: normalizeProjectId(path.basename(entryPath)), message: `${prune ? 'Removed unavailable' : 'Unavailable'} Lanes project: ${entryPath}` });
       continue;
     }
-    if (!fs.existsSync(path.join(repoRoot, '.clips', 'clips.config.json'))) {
-      warnings.push({ kind: 'stale_project', project_id: normalizeProjectId(path.basename(repoRoot)), message: `Removed unavailable Clips project: ${entryPath}` });
+    let configPath;
+    try { configPath = projectConfigPath(repoRoot); }
+    catch (error) {
+      warnings.push({ kind: 'project_data', message: error.message, path: repoRoot });
+      livePaths.push(repoRoot);
+      continue;
+    }
+    if (!fs.existsSync(configPath)) {
+      warnings.push({ kind: 'stale_project', path: entryPath, project_id: normalizeProjectId(path.basename(repoRoot)), message: `${prune ? 'Removed unavailable' : 'Unavailable'} Lanes project: ${entryPath}` });
       continue;
     }
     if (!seen.has(repoRoot)) {
@@ -95,9 +111,14 @@ export function readProjectRegistry({ prune = true, registryPath = getRegistryPa
   const ids = new Set();
   const projects = [];
   for (const repoRoot of livePaths) {
-    const id = effectiveProjectId(repoRoot);
+    let id;
+    try { id = effectiveProjectId(repoRoot); }
+    catch (error) {
+      warnings.push({ kind: 'project_data', message: error.message, path: repoRoot });
+      continue;
+    }
     if (ids.has(id.toLowerCase())) {
-      warnings.push({ kind: 'duplicate_project_id', project_id: id, message: `Skipped duplicate project_id '${id}' at ${repoRoot}.` });
+      warnings.push({ kind: 'duplicate_project_id', path: repoRoot, project_id: id, message: `Skipped duplicate project_id '${id}' at ${repoRoot}.` });
       continue;
     }
     ids.add(id.toLowerCase());
@@ -108,14 +129,14 @@ export function readProjectRegistry({ prune = true, registryPath = getRegistryPa
 
 export function assertProjectIdAvailable(projectId, repoRoot, options = {}) {
   const canonicalRoot = canonicalPath(repoRoot);
-  const { projects } = readProjectRegistry(options);
+  const { projects } = readProjectRegistry({ prune: false, ...options });
   const collision = projects.find((project) => project.path !== canonicalRoot && project.id.toLowerCase() === projectId.toLowerCase());
   if (collision) throw new Error(`project_id '${projectId}' is already used by ${collision.path}.`);
 }
 
 export function ensureProjectIdentity(repoRoot, options = {}) {
   const canonicalRoot = canonicalPath(repoRoot);
-  const configPath = path.join(canonicalRoot, '.clips', 'clips.config.json');
+  const configPath = projectConfigPath(canonicalRoot);
   const config = readProjectConfig(canonicalRoot);
   const baseId = config.project_id || normalizeProjectId(path.basename(canonicalRoot));
   if (config.project_id) {
@@ -124,7 +145,7 @@ export function ensureProjectIdentity(repoRoot, options = {}) {
     return config.project_id;
   }
 
-  const existingIds = new Set(readProjectRegistry(options).projects.filter((project) => project.path !== canonicalRoot).map((project) => project.id.toLowerCase()));
+  const existingIds = new Set(readProjectRegistry({ prune: false, ...options }).projects.filter((project) => project.path !== canonicalRoot).map((project) => project.id.toLowerCase()));
   let projectId = baseId;
   let suffix = 2;
   while (existingIds.has(projectId.toLowerCase())) projectId = `${baseId.slice(0, 61)}-${suffix++}`;
@@ -136,9 +157,14 @@ export function ensureProjectIdentity(repoRoot, options = {}) {
 
 export function registerProject(repoRoot, options = {}) {
   const canonicalRoot = canonicalPath(repoRoot);
-  const registry = readProjectRegistry(options);
-  const paths = registry.projects.map((project) => project.path);
-  if (!paths.includes(canonicalRoot)) paths.push(canonicalRoot);
-  writeRegistry(paths, options.registryPath || getRegistryPath());
-  return { id: effectiveProjectId(canonicalRoot), label: path.basename(canonicalRoot), path: canonicalRoot, warnings: registry.warnings };
+  const registryPath = options.registryPath || getRegistryPath();
+  return withRecordLock(registryPath, () => {
+    const registry = readProjectRegistry({ ...options, prune: false });
+    if (registry.warnings.some(warning => warning.kind === 'invalid_registry')) throw new Error(registry.warnings[0].message);
+    const previous = fs.existsSync(registryPath) ? readJsonObject(registryPath).projects : [];
+    const paths = [...new Set(previous.map(entry => typeof entry === 'string' ? entry : entry.path))];
+    if (!paths.includes(canonicalRoot)) paths.push(canonicalRoot);
+    writeRegistry(paths, registryPath);
+    return { id: effectiveProjectId(canonicalRoot), label: path.basename(canonicalRoot), path: canonicalRoot, warnings: registry.warnings };
+  });
 }

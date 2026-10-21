@@ -73,7 +73,7 @@ export async function openLanePanel(
     await openPanel(workspaceId);
     return null;
   } catch (error) {
-    return `Workspace is ready, but the Clips panel could not open: ${error instanceof Error ? error.message : String(error)}`;
+    return `Workspace is ready, but the Lanes panel could not open: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 

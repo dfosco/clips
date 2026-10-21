@@ -8,7 +8,7 @@ export type ClipsCommand = { bin: string; prefix: string[] };
 /** Server bundles are evaluated as CommonJS, without a source-file URL. Resolve
  * the installed checkout through the public SDK, after Paseo moves staging. */
 export async function findClips(paseo: Paseo): Promise<ClipsCommand> {
-  const override = process.env.CLIPS_CLI_PATH?.trim();
+  const override = (process.env.LANES_CLI_PATH || process.env.CLIPS_CLI_PATH)?.trim();
   let binary = override;
   if (!binary) {
     const { config } = await paseo.config.get();
@@ -23,7 +23,7 @@ export async function findClips(paseo: Paseo): Promise<ClipsCommand> {
       }
     }
     if (roots.size !== 1) {
-      throw new Error(`Cannot identify the Clips plugin checkout (${roots.size} enabled sources). Set CLIPS_CLI_PATH explicitly when the source is missing or ambiguous.`);
+      throw new Error(`Cannot identify the Lanes plugin checkout (${roots.size} enabled sources). Set LANES_CLI_PATH explicitly when the source is missing or ambiguous.`);
     }
     binary = path.resolve([...roots][0], "../../src/cli.js");
   }
@@ -34,7 +34,7 @@ export async function findClips(paseo: Paseo): Promise<ClipsCommand> {
     await execCommand(candidate.bin, [...candidate.prefix, "--version"], { timeout: 60_000 });
   } catch (error) {
     const detail = (error as { stderr?: string })?.stderr?.trim() || String(error);
-    throw new Error(`${override ? "CLIPS_CLI_PATH" : "The plugin checkout's Clips CLI"} cannot run: ${detail}. Ensure the full repository and its locked production dependencies are installed.`);
+    throw new Error(`${override ? "LANES_CLI_PATH/CLIPS_CLI_PATH" : "The plugin checkout's Lanes CLI"} cannot run: ${detail}. Ensure the full repository and its locked production dependencies are installed.`);
   }
   return candidate;
 }

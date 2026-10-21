@@ -1,4 +1,0 @@
-interface:
-  display_name: "Clips Dev"
-  short_description: "Plan and build as an autonomous staff developer"
-  default_prompt: "Use $clips-dev to plan, implement, and verify the requested outcome in this session, keeping its Clips work records current through completion."

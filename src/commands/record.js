@@ -8,7 +8,7 @@ export function runRecordCommand(args) {
     return;
   }
 
-  console.log(`Usage: clips record <command> [args]
+  console.log(`Usage: lanes record <command> [args]
 
 Commands:
   status <record_id> <status>  Update a CR or ADR status
@@ -17,8 +17,8 @@ Statuses:
   ${RECORD_STATUSES.join(' | ')}
 
 Examples:
-  clips record status CR-017 in_review
-  clips record status ADR-003 accepted
-  clips record status CR-017 archived
+  lanes record status CR-017 in_review
+  lanes record status ADR-003 accepted
+  lanes record status CR-017 archived
 `);
 }

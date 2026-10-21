@@ -1,18 +1,19 @@
 {
-  "name": "@dfosco/clips",
+  "name": "@dfosco/lanes",
   "version": "2.0.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
-      "name": "@dfosco/clips",
+      "name": "@dfosco/lanes",
       "version": "2.0.0",
       "license": "MIT",
       "dependencies": {
         "skillshop": "2.1.0"
       },
       "bin": {
-        "clips": "src/cli.js"
+        "clips": "src/cli.js",
+        "lanes": "src/cli.js"
       },
       "devDependencies": {
         "vitest": "^4.1.10"

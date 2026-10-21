@@ -1,6 +1,7 @@
 // A task is one work contract: a change request before, a change record after.
 import { appendEvent, readGoalWithTasks, getGoalFilePath, getCurrentCommitSha, normalizeGoalId, parseRef, normalizeTaskId } from '../lib/core.js';
-import { pushGoal } from '../lib/sync.js';
+import { autoSyncGoal } from '../lib/sync.js';
+import { reportAutoSyncResult } from './sync-output.js';
 import { effectiveVerificationMode, planningBehaviorFields } from '../lib/behavior.js';
 import { acceptanceFields, invalidateAcceptanceFields, referenceList, validateWorkInput, workFields } from '../lib/work-fields.js';
 import { readJsonInput } from '../lib/json-input.js';
@@ -53,7 +54,9 @@ function expectedRevision(data, current) {
 }
 
 function syncGoal(target) {
-  if (!target.username) try { pushGoal(target.goalId); } catch (error) { /* best effort */ }
+  if (target.username) return;
+  const result = autoSyncGoal(target.goalId);
+  reportAutoSyncResult(result, `#${target.goalId}`);
 }
 
 function nextTaskNumber(goal) {
@@ -238,7 +241,7 @@ export function runTaskCommand(args) {
       reorderTasks(goalTarget(rest[0]), readJsonInput(rest.slice(1)));
       break;
     default:
-      console.log(`Usage: clips task <command> [args]
+      console.log(`Usage: lanes task <command> [args]
 
 Commands:
   create <goal> <json>         Create a change request

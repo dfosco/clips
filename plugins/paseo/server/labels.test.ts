@@ -11,6 +11,10 @@ vi.mock("@getpaseo/plugin/server", () => ({
   execCommand: async (bin: string, args: string[], opts: { cwd?: string }) => {
     state.calls.push({ bin, args, cwd: opts.cwd });
     if (bin === "git") return { stdout: path.join(state.root, ".git") };
+    if (args.includes("paths")) return { stdout: JSON.stringify({
+      repoRoot: state.root, storeDir: path.join(state.root, ".clips"),
+      configPath: path.join(state.root, ".clips", "clips.config.json"),
+    }) };
     if (args.includes("uses")) return { stdout: JSON.stringify({ id: "review", uses: [{ ref: "#g001", kind: "goal", status: "closed" }], count: 1 }) };
     if (args.includes("board")) return { stdout: JSON.stringify({ lanes: [], goals: [], labels: [], warnings: [] }) };
     if (args.includes("delete") && !args.some((arg) => arg.startsWith("--"))) throw { stderr: "Label review is assigned to #g001. Remove those assignments before deleting it.\nextra" };
@@ -18,8 +22,11 @@ vi.mock("@getpaseo/plugin/server", () => ({
   },
 }));
 let previousCli: string | undefined;
+let previousCanonicalCli: string | undefined;
 beforeEach(() => {
   previousCli = process.env.CLIPS_CLI_PATH;
+  previousCanonicalCli = process.env.LANES_CLI_PATH;
+  delete process.env.LANES_CLI_PATH;
   process.env.CLIPS_CLI_PATH = "/fixture/src/cli.js";
   state.root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "clips-label-rpc-")));
   fs.mkdirSync(path.join(state.root, ".git"));
@@ -29,6 +36,8 @@ beforeEach(() => {
 afterEach(() => {
   if (previousCli === undefined) delete process.env.CLIPS_CLI_PATH;
   else process.env.CLIPS_CLI_PATH = previousCli;
+  if (previousCanonicalCli === undefined) delete process.env.LANES_CLI_PATH;
+  else process.env.LANES_CLI_PATH = previousCanonicalCli;
   fs.rmSync(state.root, { recursive: true, force: true });
 });
 const paseo = () => ({ projects: { list: async () => ({ projects: [{

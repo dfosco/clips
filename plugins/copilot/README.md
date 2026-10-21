@@ -1,19 +1,19 @@
-# Clips Work for GitHub Copilot
+# Lanes for GitHub Copilot
 
-This repository ships a Copilot App canvas extension and shared Clips skills.
-Install from a **complete Clips checkout or extracted npm package**. The extension calls that directory's
+This repository ships a Copilot App canvas extension and shared Lanes skills.
+Install from a **complete Lanes checkout or extracted npm package**. The extension calls that directory's
 canonical `src/cli.js` and links its canonical skills. Copying only
 `plugins/copilot` omits required source and dependencies.
 
 This is a repository-installed canvas extension, not a marketplace submission.
-`copilot plugin install dfosco/clips:plugins/copilot` is not a supported setup
+`copilot plugin install dfosco/lanes:plugins/copilot` is not a supported setup
 command: generic plugin installation does not provision this package's full
 canonical CLI, skills, locked SDK runtime, or user extension links.
 
 ## Requirements
 
 - Git, npm, and Node.js **22.18 or newer** on the machine running Copilot.
-  Node must remain available to the extension host. Set `CLIPS_NODE_PATH` to
+  Node must remain available to the extension host. Set `LANES_NODE_PATH` to
   an absolute Node executable if the App's PATH cannot find it.
 - GitHub Copilot App with canvas extensions enabled, an authenticated Copilot
   session, and any required organization permission to use extensions/skills.
@@ -32,8 +32,8 @@ canonical CLI, skills, locked SDK runtime, or user extension links.
 ## Install from the repository
 
 ```sh
-git clone https://github.com/dfosco/clips.git clips-copilot
-cd clips-copilot
+git clone https://github.com/dfosco/lanes.git lanes-copilot
+cd lanes-copilot
 # Record this commit; use a reviewed full commit SHA for a reproducible install.
 git rev-parse HEAD
 npm ci --omit=dev --ignore-scripts
@@ -44,10 +44,10 @@ For a published release, extract its complete package into a retained directory
 instead of cloning. After 2.0.0 is published:
 
 ```sh
-mkdir clips-copilot-2.0.0
-cd clips-copilot-2.0.0
-npm pack @dfosco/clips@2.0.0
-tar -xzf dfosco-clips-2.0.0.tgz
+mkdir lanes-copilot-2.0.0
+cd lanes-copilot-2.0.0
+npm pack @dfosco/lanes@2.0.0
+tar -xzf dfosco-lanes-2.0.0.tgz
 cd package
 npm ci --omit=dev --ignore-scripts
 node scripts/install-copilot.js
@@ -56,13 +56,13 @@ node scripts/install-copilot.js
 Keep the tarball checksum as the installation identity. The included root
 `npm-shrinkwrap.json` and plugin `package-lock.json` provide the same locked
 dependency checks as the source route. No Git checkout is required for this
-package installation. Git is still required for repositories managed by Clips.
+package installation. Git is still required for repositories managed by Lanes.
 
 To pin a chosen version, run `git switch --detach FULL_COMMIT_SHA` after cloning,
 replacing `FULL_COMMIT_SHA` with the reviewed commit, before either install step.
 The private extension package remains version `0.1.0`; identify repository
 installations by commit as well as package version. This route does not use the
-published npm Clips CLI or require a global install or `npm link`.
+published npm Lanes CLI or require a global install or `npm link`.
 
 The installer first checks Node and loads the checkout CLI with its locked
 root production dependencies. It then verifies the committed canvas source and
@@ -76,24 +76,33 @@ It installs these user-scoped directory links:
 | User path | Source in the retained checkout |
 | --- | --- |
 | `~/.copilot/extensions/clips-workspaces` | `plugins/copilot` |
-| `~/.copilot/skills/clips-copilot` | `plugins/copilot/skills/clips-copilot` |
-| `~/.copilot/skills/clips` | `.agents/skills/clips` |
+| `~/.copilot/skills/lanes-copilot` | `plugins/copilot/skills/lanes-copilot` |
+| `~/.copilot/skills/lanes` | `.agents/skills/lanes` |
 | `~/.copilot/skills/lane-manager` | `.agents/skills/lane-manager` |
-| `~/.copilot/skills/clips-dev` | `.agents/skills/clips-dev` |
+| `~/.copilot/skills/lane-dev` | `.agents/skills/lane-dev` |
+| `~/.copilot/skills/lane-radar` | `.agents/skills/lane-radar` |
+| `~/.copilot/skills/lane-plugin` | `.agents/skills/lane-plugin` |
 
-Existing paths are backed up under `~/.clips/copilot-backups`. A private receipt
-is written at `~/.clips/copilot-workspaces-install.json`. Settings, credentials,
+Existing paths are backed up under the resolved Lanes user directory's
+`copilot-backups`. A private receipt is written there as
+`copilot-workspaces-install.json`. Settings, credentials,
 existing sessions, and workflow records are not rewritten. `COPILOT_HOME` and
-`CLIPS_HOME` override the user directories for isolated installation/testing.
+`LANES_HOME` override the user directories for isolated installation/testing.
+`CLIPS_HOME` remains a fallback for `LANES_HOME`; populated legacy `~/.clips`
+homes remain readable until explicit migration. `LANES_CLI_PATH`,
+`LANES_NODE_PATH` and `LANES_COPILOT_HOST_ID` similarly take precedence over
+their `CLIPS_*` aliases.
+Persisted extension/canvas IDs, protocol keys and selection hashes retain their
+`clips-*` identities so existing sessions and selections remain reachable.
 Keep the checkout and its installed dependencies in place while using the links.
 The installer replaces the extension checkout's `node_modules` through `npm ci`.
 
 GitHub documents direct extension discovery under `~/.copilot/extensions` and
 project extensions under `.github/extensions`; this installer uses user scope.
 It does not create a canvas in a running session. Start a new Copilot session,
-ask it to open **Clips Work**, and check that `clips`, `lane-manager`, `clips-dev`, and
-`clips-copilot` appear in its skills. Select an existing Clips project. To create
-one, run this checkout's `node /path/to/clips-copilot/src/cli.js init` from that
+ask it to open **Lanes**, and check that `lanes`, `lane-manager`, `lane-dev`,
+`lane-radar`, `lane-plugin`, and `lanes-copilot` appear in its skills. Select an existing Lanes project. To create
+one, run this checkout's `node /path/to/lanes-copilot/src/cli.js init` from that
 project first, or use Initialize for the current session's Git directory.
 Initialize uses `init --store-only`; it does not install skills or change editor
 settings. Installation itself does not initialize stores or trust projects.
@@ -152,7 +161,16 @@ npm run check:build --prefix plugins/copilot
 npm test --prefix plugins/copilot
 ```
 
-The canvas uses canonical Clips records and the current joined session. A valid
+Lane, Goal, and Task cards show supported attachment titles and types. External
+links are restricted to safe HTTP(S) URLs. Markdown content is read only when
+requested, against the exact selected record and attachment, so edits and
+missing files are reflected rather than cached as snapshots. Markdown is rendered
+as text and a limited set of formatting; HTML and remote content are not executed
+or fetched. The project-local GitHub collaboration control changes only local
+configuration and does not publish. When enabled, later supported record
+mutations may sync automatically.
+
+The canvas uses canonical Lanes records and the current joined session. A valid
 install or source/build hash proves distribution closure, not native App
 activation, visibility, or full session parity. App session
 creation/parentage and other-session steering remain subject

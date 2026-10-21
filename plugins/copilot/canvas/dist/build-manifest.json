@@ -3,25 +3,25 @@
   "bridgeVersion": 2,
   "sources": {
     "canvas/board-view.mjs": "66e1e4c6ba57bdc9db6e2c37e711a4a2786f0552351604b3dc41af1e22af70fa",
-    "canvas/index.html": "5d6bf0dbfc448740bfba7b42f82d95c48d3a3d2a9a1eb2118c002f177f48a235",
-    "canvas/model.mjs": "e3af71e0ade29452730d4aa6047dd67cf2ce189b5a155b9d133408ae02f52e03",
-    "canvas/ui/actions.js": "b9190fb81bcfcf7a53a4f1983d46bf43e403d8afe86292a1d5ef49c50660f9fc",
+    "canvas/index.html": "21d1de46d042c0089585993fc296969ff73b48fdbd78d83f734750d23c5fcbaa",
+    "canvas/model.mjs": "1f648cc41e28ca286b0b8b533cff5f262cb372db48151f9d370194dbea77affd",
+    "canvas/ui/actions.js": "fcbf9b648575dd5aa5ff0ddeae2656f5c874aa9948c2a4e5b00dc49a79f53100",
     "canvas/ui/app.css": "7c58edf2a8ce530125298ae88b195ea4e0b5c9a7b78295813f5fd0291ef0cbcc",
-    "canvas/ui/app.jsx": "5fb9dab18c5d4658a0a635ee42f9a7b97ce894ac0da11641662daab2b3672f50",
-    "canvas/ui/board.css": "3a89b12058c51b5fbfbf355fb4ac8f863de929787a6af0444146bb78e70cebb7",
-    "canvas/ui/board.jsx": "e85e3529fa5ca8ba22506059f657a4745d419c96ef019a8b3343e2cdb1aa17d6",
-    "canvas/ui/main.jsx": "3bbf0e965c332a7149e5699dafd06919a9243fd71ea0e044981639913eab6136",
+    "canvas/ui/app.jsx": "3a7c3e6eba52b2a9886fbeaf09bca6e8e057c62513d3a1f04b3dc73f6f5e3842",
+    "canvas/ui/board.css": "5d26cd72460dc624ed1479832e3a0eae915159f79c04c16ef509ca3b08811602",
+    "canvas/ui/board.jsx": "a765318550e00f9a4c43f3683a0dd9dff8871794eec5070326d850ddfb05ed60",
+    "canvas/ui/main.jsx": "2977d60b255e5de335ed5c7bedb836726e72807649bc1140f895f272cae0d7ad",
     "canvas/ui/primer-theme.jsx": "c1f1ccef24fccc53924f0269aa9ebfa0baca8ddedd34e238554b3a273e151b5c",
     "canvas/ui/theme.css": "839b612729c06e0a67d5e764f0b2b3881d0aaabf23e47cedf53eea6a5d515a1e",
     "jsconfig.json": "afe068db7a606f23ea3783be34f3614e3dcd323847a5e211025529438df73149",
-    "package-lock.json": "01cd452471f3b73c66a48549334eea66ead9b3ddad9165fd3d2b0b28853ee175",
-    "package.json": "ffcb9259560130dc983db63bd01dc3d0208769fb0ab0c6d445fcf40d2a52efc1",
+    "package-lock.json": "42d60885ceb57f2f45c9d0ee66255585a44776aa238dd5a3f744eae13e955147",
+    "package.json": "ad702f2d27117818767b9bc2ac4eddf6e1e10ca29ba7e1039d4c7357ebdee5de",
     "scripts/build-canvas.mjs": "e1499a252d87fd74d3eecc72c541d7857f18befff09ba01e596bdf2151e1cc93",
     "src/canvas-build.js": "cb2a08b3a478d842ac6e6ba792bae9e1591ae168010bf9cc9d5640cd332599d1",
     "vite.config.js": "b0138c566a79f95db2c43e713bbf5298314b86be7ba8fb8796600bb6bf23e78f"
   },
   "assets": {
-    "app.js": "fe68835e73493d417552737596678fed5ffabdfbe22145d7129312e12b50585f",
-    "style.css": "76e66d2ee5f80def364285e9e18ba287c64cf4fea179a3d5f589eb09103b9c73"
+    "app.js": "ff91572553fd07eb10ef109ac0c3504461725d92d3eb745f2edf52fbc38d4e4f",
+    "style.css": "8f34526669ed41cb680399ff0a070bfa524816045481104a4d56cdfe0e17712f"
   }
 }

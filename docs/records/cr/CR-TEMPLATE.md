@@ -3,7 +3,7 @@
 > Optional independent or legacy record. New atomic changes normally keep their
 > request, result, and acceptance in the task itself. Use this template when a
 > separate review packet is useful, and link the authoritative task instead of
-> duplicating its agreement. Store instances under `.clips/records/cr/`.
+> duplicating its agreement. Store instances under the resolved `.lanes/records/cr/`.
 
 **Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Type:** Feature | Bugfix | Maintenance | Documentation

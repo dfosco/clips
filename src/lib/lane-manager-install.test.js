@@ -18,7 +18,7 @@ function fixture() {
   for (const dir of [home, project, source]) fs.mkdirSync(dir);
   execFileSync('git', ['init', '--quiet'], { cwd: project });
   fs.writeFileSync(path.join(source, 'SKILL.md'), 'maintained source\n');
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, '.codex'), CLIPS_HOME: path.join(home, '.clips') };
+  const env = { ...process.env, LANES_HOME: '', HOME: home, CODEX_HOME: path.join(home, '.codex'), CLIPS_HOME: path.join(home, '.clips') };
   return { root, home, project, source, env };
 }
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
@@ -54,8 +54,8 @@ describe('live Lane Manager installation', () => {
         const skills = path.join(base, '.agents', 'skills');
         expect(fs.lstatSync(path.join(skills, 'lane-manager')).isSymbolicLink()).toBe(true);
         expect(fs.readFileSync(path.join(source, 'SKILL.md'), 'utf8')).toBe('maintained source\n');
-        expect(fs.readFileSync(path.join(skills, 'clips', 'SKILL.md'), 'utf8')).toContain('name: clips');
-        fs.writeFileSync(path.join(skills, 'clips', 'SKILL.md'), 'stale unrelated skill\n');
+        expect(fs.readFileSync(path.join(skills, 'lanes', 'SKILL.md'), 'utf8')).toContain(repeat ? 'stale unrelated skill' : 'name: lanes');
+        fs.writeFileSync(path.join(skills, 'lanes', 'SKILL.md'), 'stale unrelated skill\n');
       }
     }
   });
@@ -70,7 +70,7 @@ describe('live Lane Manager installation', () => {
     expect(fs.readFileSync(path.join(manager, 'SKILL.md'), 'utf8')).toBe('uncommitted source\n');
     const result = spawnSync(process.execPath, [cli, 'prod'], { cwd: project, env, encoding: 'utf8' });
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toMatch(/Cannot refresh production skills over a live (Clips|Lane Manager) source/);
+    expect(result.stderr).toMatch(/Cannot refresh production skills over a live (Lanes|Lane Manager) source/);
     expect(fs.existsSync(path.join(env.CLIPS_HOME, 'installation.json'))).toBe(false);
     execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'fixture', '--quiet'], { cwd: project });
     const worktree = path.join(path.dirname(project), 'worktree');
@@ -79,7 +79,7 @@ describe('live Lane Manager installation', () => {
     fs.mkdirSync(nested);
     const nestedResult = spawnSync(process.execPath, [cli, 'prod'], { cwd: nested, env, encoding: 'utf8' });
     expect(nestedResult.status).not.toBe(0);
-    expect(nestedResult.stderr).toMatch(/Cannot refresh production skills over a live (Clips|Lane Manager) source/);
+    expect(nestedResult.stderr).toMatch(/Cannot refresh production skills over a live (Lanes|Lane Manager) source/);
     expect(fs.existsSync(path.join(env.CLIPS_HOME, 'installation.json'))).toBe(false);
     expect(fs.readFileSync(path.join(manager, 'SKILL.md'), 'utf8')).toBe('uncommitted source\n');
   });
@@ -108,8 +108,8 @@ describe('live Lane Manager installation', () => {
       mode: 'prod', dev_checkout: process.cwd(), prod_package: '/does-not-exist',
     }));
     const result = spawnSync(process.execPath, [cli, 'init', '--global'], { cwd: project, env, encoding: 'utf8' });
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('Cannot run saved production init over a live Lane Manager source');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Preserved live source');
     expect(fs.lstatSync(path.join(home, '.agents', 'skills', 'lane-manager')).isSymbolicLink()).toBe(true);
     expect(fs.readFileSync(path.join(source, 'SKILL.md'), 'utf8')).toBe('maintained source\n');
     const manager = path.join(project, '.agents', 'skills', 'lane-manager');
@@ -118,8 +118,8 @@ describe('live Lane Manager installation', () => {
     const nested = path.join(project, 'nested');
     fs.mkdirSync(nested);
     const nestedResult = spawnSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], { cwd: nested, env, encoding: 'utf8' });
-    expect(nestedResult.status).not.toBe(0);
-    expect(nestedResult.stderr).toContain('Cannot run saved production init over a live Lane Manager source');
+    expect(nestedResult.status).toBe(0);
+    expect(nestedResult.stdout).toContain('Preserved live source');
     expect(fs.readFileSync(path.join(source, 'SKILL.md'), 'utf8')).toBe('maintained source\n');
   });
 });

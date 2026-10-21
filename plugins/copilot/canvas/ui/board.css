@@ -38,6 +38,73 @@
   overflow-wrap: anywhere;
 }
 
+.clips-board-project-heading-focused {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--base-size-8);
+}
+
+.clips-board-project-heading-focused .clips-board-project-context {
+  flex-basis: auto;
+}
+
+.clips-board-back {
+  appearance: none;
+  align-self: flex-start;
+  margin: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  color: var(--fgColor-default);
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.clips-board-back:hover,
+.clips-board-back:active {
+  background-color: transparent;
+}
+
+.clips-board-back:hover {
+  text-decoration: underline;
+}
+
+.clips-board-back:focus-visible {
+  outline: var(--borderWidth-thick) solid var(--focus-outlineColor);
+  outline-offset: var(--base-size-2);
+  text-decoration: underline;
+}
+
+.clips-board-back:disabled {
+  color: var(--fgColor-muted);
+  cursor: not-allowed;
+}
+
+.clips-board-focused-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--base-size-8);
+  width: 100%;
+  min-width: 0;
+}
+
+.clips-board-focused-title-row h1 {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
+.clips-board-focused-title-row [data-record-status] {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
 .clips-board-brand {
   display: inline-flex;
   align-items: center;
@@ -71,6 +138,11 @@
   flex-basis: 100%;
   display: grid;
   gap: var(--base-size-8);
+}
+
+.clips-board-lane-context .clips-board-description {
+  width: 100%;
+  max-width: 72ch;
 }
 
 .clips-board-view-bar {
@@ -501,6 +573,136 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.clips-board-collaboration {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--base-size-4);
+  min-width: 0;
+  max-width: 32rem;
+  font-size: var(--text-body-size-small);
+}
+
+.clips-board-collaboration-note,
+.clips-board-collaboration-error {
+  flex-basis: 100%;
+  color: var(--fgColor-muted);
+  font-size: var(--text-body-size-small);
+  overflow-wrap: anywhere;
+}
+
+.clips-board-collaboration-error {
+  color: var(--fgColor-danger);
+}
+
+.clips-board-attachments {
+  display: grid;
+  gap: var(--base-size-4);
+  min-width: 0;
+  padding: var(--base-size-8);
+  border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+}
+
+.clips-board-attachments h3 {
+  font-size: var(--text-body-size-small);
+  font-weight: var(--base-text-weight-semibold);
+}
+
+.clips-board-attachments ul {
+  display: grid;
+  gap: var(--base-size-8);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clips-board-attachments li {
+  display: grid;
+  gap: var(--base-size-4);
+  min-width: 0;
+}
+
+.clips-board-attachment-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--base-size-4) var(--base-size-8);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.clips-board-attachment-heading a,
+.clips-attachment-markdown a {
+  color: var(--fgColor-accent);
+  overflow-wrap: anywhere;
+}
+
+.clips-board-attachment-heading > span:not(:first-child) {
+  color: var(--fgColor-muted);
+  font-size: var(--text-body-size-small);
+}
+
+.clips-board-attachment-read {
+  display: grid;
+  justify-items: start;
+  gap: var(--base-size-4);
+  min-width: 0;
+}
+
+.clips-board-attachment-read > p {
+  color: var(--fgColor-muted);
+  font-size: var(--text-body-size-small);
+  overflow-wrap: anywhere;
+}
+
+.clips-attachment-markdown {
+  display: grid;
+  gap: var(--base-size-4);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 72ch;
+  min-width: 0;
+  padding: var(--base-size-8);
+  border: var(--borderWidth-thin) solid var(--borderColor-muted);
+  border-radius: var(--borderRadius-medium);
+  background: var(--bgColor-muted);
+  overflow-wrap: anywhere;
+}
+
+.clips-attachment-markdown h3 {
+  font-size: var(--text-body-size-medium);
+  font-weight: var(--base-text-weight-semibold);
+}
+
+.clips-attachment-markdown p,
+.clips-attachment-markdown li,
+.clips-attachment-markdown blockquote {
+  color: var(--fgColor-muted);
+  font-size: var(--text-body-size-small);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.clips-attachment-markdown ul,
+.clips-attachment-markdown ol {
+  display: grid;
+  gap: var(--base-size-4);
+  margin: 0;
+  padding-inline-start: var(--base-size-16);
+}
+
+.clips-attachment-markdown pre {
+  max-width: 100%;
+  margin: 0;
+  padding: var(--base-size-8);
+  overflow-x: auto;
+  border-radius: var(--borderRadius-small);
+  background: var(--bgColor-default);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 480px) {

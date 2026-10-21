@@ -12,11 +12,11 @@ import { assertUnclaimed, launchLaneManager } from "./server/lane-managers.ts";
 
 const pluginRoot = path.dirname(fileURLToPath(import.meta.url));
 const localClipsCli = path.resolve(pluginRoot, "../../src/cli.js");
-const help = `Clips Paseo CLI
+const help = `Lanes Paseo CLI
 
 Usage:
   node plugins/paseo/cli.js options --project <path> [--provider <provider[/model]>]
-  node plugins/paseo/cli.js start --project <path> --ref <clips-ref> --provider <provider/model> [options]
+  node plugins/paseo/cli.js start --project <path> --ref <lanes-ref> --provider <provider/model> [options]
 
 Options:
   --thinking <id>              Provider-supported reasoning level
@@ -35,7 +35,7 @@ Options:
   --help                       Show this help
 
 Environment:
-  PASEO_WS_URL, PASEO_PASSWORD, CLIPS_CLI_PATH
+  PASEO_WS_URL, PASEO_PASSWORD, LANES_CLI_PATH (legacy CLIPS_CLI_PATH)
 `;
 
 function parseArgs(argv) {
@@ -71,14 +71,14 @@ function gitCommonDir(root) {
 }
 
 function clipsCommand() {
-  const override = process.env.CLIPS_CLI_PATH?.trim();
+  const override = (process.env.LANES_CLI_PATH || process.env.CLIPS_CLI_PATH)?.trim();
   if (override) {
     return override.endsWith(".js")
       ? { bin: process.execPath, prefix: [path.resolve(override)] }
       : { bin: override, prefix: [] };
   }
   if (existsSync(localClipsCli)) return { bin: process.execPath, prefix: [localClipsCli] };
-  fail("The matching Clips CLI is missing. Keep the full repository checkout or set CLIPS_CLI_PATH explicitly.");
+  fail("The matching Lanes CLI is missing. Keep the full repository checkout or set LANES_CLI_PATH explicitly.");
 }
 
 function readBoard(root) {
@@ -92,7 +92,7 @@ function readBoard(root) {
     }));
   } catch (error) {
     const stderr = error?.stderr?.toString?.().trim();
-    fail(`Cannot read the Clips board: ${stderr || error.message}`);
+    fail(`Cannot read the Lanes board: ${stderr || error.message}`);
   }
 }
 
@@ -250,7 +250,7 @@ async function clipsProjectIds(client, root) {
   const matches = projects.filter((project) => project.projectKind === "git" && project.projectRootPath).filter((project) => {
     try { return gitCommonDir(project.projectRootPath) === common; } catch { return false; }
   });
-  if (!matches.length) fail("Add this Git project to Paseo before starting Clips work.");
+  if (!matches.length) fail("Add this Git project to Paseo before starting Lanes work.");
   return matches.map((project) => project.projectId);
 }
 
@@ -266,7 +266,7 @@ export async function start(client, options) {
   // Dry-run is read-only. Live launches share the daemon handler's repository/ref lock.
   if (options["dry-run"]) return startUnlocked(client, options);
   const root = path.resolve(options.project ?? process.cwd());
-  if (!options.ref) fail("start requires --ref <clips-ref>.");
+  if (!options.ref) fail("start requires --ref <lanes-ref>.");
   const release = acquireLaunchLock(root, options.ref);
   try { return await startUnlocked(client, options); }
   finally { release(); }
@@ -276,14 +276,14 @@ async function startUnlocked(client, options) {
   const root = path.resolve(options.project ?? process.cwd());
   const ref = options.ref;
   const agent = options.provider;
-  if (!ref) fail("start requires --ref <clips-ref>.");
+  if (!ref) fail("start requires --ref <lanes-ref>.");
   if (!agent?.includes("/")) fail("start requires an exact --provider <provider/model> value.");
 
   const board = readBoard(root);
   const target = findTarget(board, ref);
-  if (!target) fail(`Clips reference ${ref} does not exist in ${root}.`);
+  if (!target) fail(`Lanes reference ${ref} does not exist in ${root}.`);
   if (["closed", "not_planned", "duplicate"].includes(target.status)) {
-    fail(`${ref} is ${target.status}; reopen it in Clips before starting an agent.`);
+    fail(`${ref} is ${target.status}; reopen it in Lanes before starting an agent.`);
   }
   const managerClaim = target.kind === "lane" ? managerCommand(root, "inspect", ref) : null;
   if (managerClaim) {
@@ -343,12 +343,12 @@ async function startUnlocked(client, options) {
   if (options.workspace) {
     workspace = workspaces.find((candidate) => candidate.id === options.workspace);
     if (!workspace || !projectIds.includes(workspace.projectId)) {
-      fail("Choose a Paseo workspace that belongs to this Clips project.");
+      fail("Choose a Paseo workspace that belongs to this Lanes project.");
     }
   } else {
     const matching = workspaces.filter((candidate) => matchesWorkspace(candidate, target, projectIds));
     if (matching.length > 1) {
-      fail(`More than one Clips workspace matches ${ref}. Pass --workspace <id> to choose one.`);
+      fail(`More than one Lanes workspace matches ${ref}. Pass --workspace <id> to choose one.`);
     }
     workspace = matching[0];
   }
@@ -368,7 +368,7 @@ async function startUnlocked(client, options) {
     if (orphan) fail(`Branch ${orphan} exists without a Paseo workspace. Reattach or remove it before starting another agent.`);
     branch = branchName(target);
     const baseBranch = options.base || git(root, ["branch", "--show-current"]);
-    if (!baseBranch) fail("The selected Clips project checkout is detached from a Git branch.");
+    if (!baseBranch) fail("The selected Lanes project checkout is detached from a Git branch.");
     workspace = { name: workspaceTitle(target), branch, projectId: projectIds[0] };
     workspace.baseBranch = baseBranch;
   }
@@ -398,7 +398,7 @@ async function startUnlocked(client, options) {
     workspace = client.workspaces.ref(workspace.id);
   }
   try {
-    const creation = { config, title: options.title || `Clips ${ref}`, labels: plan.labels };
+    const creation = { config, title: options.title || `Lanes ${ref}`, labels: plan.labels };
     const created = managerClaim
       ? await launchLaneManager({
         ref, hostId: options["host-id"], claim: managerClaim, prompt,

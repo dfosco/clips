@@ -63,6 +63,36 @@ const permissionMode = z.object({
 });
 
 const criterion = z.object({ id: z.string(), description: z.string() });
+export const attachment = z.object({
+  id: z.string(),
+  type: z.enum(["markdown", "url", "github_issue", "github_pr"]),
+  title: z.string(),
+  url: z.string().optional(),
+  host: z.string().nullable().optional(),
+  repository: z.string().nullable().optional(),
+  number: z.number().int().positive().nullable().optional(),
+  source: z.string().optional(),
+  status: z.enum(["available", "missing", "unreadable", "remote", "invalid"]).optional(),
+  content: z.string().nullable().optional(),
+  content_semantics: z.string().optional(),
+  error: z.string().nullable().optional(),
+  identity_error: z.string().optional(),
+}).passthrough();
+export type Attachment = z.infer<typeof attachment>;
+export const collaborationCapability = z.object({
+  enabled: z.boolean().nullable(),
+  state: z.string(),
+  scope: z.string(),
+  automatic_mutation_sync: z.boolean().nullable().optional(),
+  error: z.string().optional(),
+}).passthrough();
+export type CollaborationCapability = z.infer<typeof collaborationCapability>;
+export const attachmentReadData = z.object({
+  ref: z.string(),
+  revision: z.number().int().nonnegative(),
+  attachment,
+});
+export type AttachmentReadData = z.infer<typeof attachmentReadData>;
 export const label = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,79}$/),
   name: z.string().trim().min(1).max(80).regex(/^[^\x00-\x1f\x7f]+$/),
@@ -78,6 +108,7 @@ export const workItem = z.object({
   decisions: z.string(),
   scope: z.string(),
   acceptanceCriteria: z.array(criterion),
+  attachments: z.array(attachment).default([]),
   labels: z.array(label).default([]),
 });
 export const task = workItem.extend({ kind: z.literal("task") });
@@ -120,10 +151,22 @@ export const boardData = z.object({
   goals: z.array(goal),
   warnings: z.array(z.string()),
   labels: z.array(label).default([]),
+  collaboration: collaborationCapability.nullable().optional(),
+  generatedAt: z.string().nullable().optional(),
 });
 export const boardRpc = defineRpc({
   name: "clips.board",
   input: z.object({ projectId: z.string() }),
+  output: boardData,
+});
+export const attachmentReadRpc = defineRpc({
+  name: "clips.attachment.read",
+  input: z.object({ projectId: z.string(), ref: z.string(), attachmentId: z.string() }).strict(),
+  output: attachmentReadData,
+});
+export const collaborationRpc = defineRpc({
+  name: "clips.collaboration.set",
+  input: z.object({ projectId: z.string(), enabled: z.boolean() }).strict(),
   output: boardData,
 });
 export const labelChange = z.discriminatedUnion("action", [

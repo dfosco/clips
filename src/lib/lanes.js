@@ -38,9 +38,9 @@ export function listLanes(dbDir) {
   return listTracks(dbDir).map(toLane);
 }
 
-export function appendLaneEvent(ref, event, dbDir) {
+export function appendLaneEvent(ref, event, dbDir, options) {
   const laneId = normalizeLaneId(ref);
-  appendTrackEvent(laneToTrackId(laneId), { ...event, lane_id: laneId }, dbDir);
+  appendTrackEvent(laneToTrackId(laneId), { ...event, lane_id: laneId }, dbDir, options);
 }
 
 export function nextLaneId(dbDir) {

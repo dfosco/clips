@@ -1,4 +1,4 @@
-# Clips records and optional Paseo execution
+# Lanes records and optional Paseo execution
 
 This is the shared procedure for ordinary dev agents, direct user steering,
 and Lane Manager handoffs. Use the installed interfaces you actually have;
@@ -10,15 +10,15 @@ task-coverage, authorization, and management-claim policies.
 
 ## Distinguish the sources
 
-- **Planning:** the plugin reads `clips board --json` from the selected Git
-  repository's shared Clips store. Update records through the Clips CLI, never
+- **Planning:** the plugin reads `lanes board --json` from the selected Git
+  repository's shared Lanes store. Update records through the Lanes CLI, never
   raw journals or a parallel UI store. Linked worktrees share that store.
 - **Activity and navigation:** the plugin reads the selected Paseo host's
   workspace/agent directory. An `in_progress` Goal can have no running agent;
   an idle, failed, or input-blocked session is different from active execution.
   A stopped agent is not evidence that its Task is complete or accepted.
 - **Association:** an observed session/workspace is attached to an exact work
-  record by native Paseo labels. Titles and Clips `owner` prose do not make
+  record by native Paseo labels. Titles and Lanes `owner` prose do not make
   that link. A Task binding is not an automatic binding to its parent Goal.
 - **Management:** durable Lane claims are separate from work execution. They
   survive disconnection. Contributing to an agreed Goal/Task requires no Lane
@@ -36,12 +36,12 @@ and cross-task decisions, and tasks for independently acceptable changes.
 Use actual supported commands, for example:
 
 ```sh
-clips view '#g1#t1' --json
-clips task update g1 t1 --file task-request.json
-clips task status g1 t1 in_progress
-clips task update g1 t1 --file task-result.json
-clips task accept g1 t1 --file task-acceptance.json
-clips view '#g1#t1' --json
+lanes view '#g1#t1' --json
+lanes task update g1 t1 --file task-request.json
+lanes task status g1 t1 in_progress
+lanes task update g1 t1 --file task-result.json
+lanes task accept g1 t1 --file task-acceptance.json
+lanes view '#g1#t1' --json
 ```
 
 `task-request.json` can set `owner` to the actual execution identity and amend
@@ -49,7 +49,7 @@ clips view '#g1#t1' --json
 Record an execution destination that another agent can identify; that owner
 field is coordination metadata, not the runtime association below. Keep a
 truthful result/record while working or blocked. Acceptance requires the checked
-artifact, actual accepting actor and criterion evidence under the main Clips
+artifact, actual accepting actor and criterion evidence under the main Lanes
 skill; administrative status alone is insufficient. Update the Goal's plan or
 record when coordination/outcome changes. Use expected revisions when supported.
 
@@ -65,9 +65,9 @@ For the native Paseo tools, the supported sequence is:
 2. Read `list_workspaces({})` and match the snapshot's `workspaceId` to the
    returned `workspaceId`, `cwd`, and **`projectId`**. Verify the actual project
    and selected workspace belong to the repository/worktree being worked on.
-   The Paseo project ID is not Clips config `project_id`, a title, or a guessed
+   The Paseo project ID is not Lanes config `project_id`, a title, or a guessed
    hash. Resolve ambiguous repositories/workspaces before writing a binding.
-3. Read the exact Clips ref, retaining any namespace, and select its real kind:
+3. Read the exact Lanes ref, retaining any namespace, and select its real kind:
    `goal` for a whole-Goal owner, `task` for a bounded Task, or `lane` only for
    actual Lane management. Read current labels immediately before an update.
    With `update_agent`, merge the three fields below into those fresh labels;
@@ -79,9 +79,9 @@ For the native Paseo tools, the supported sequence is:
      agentId: observedSessionId,
      labels: {
        ...freshSnapshot.labels,
-       "clips.ref": qualifiedRecordRef,
-       "clips.projectId": observedWorkspace.projectId,
-       "clips.kind": recordKind,
+       "lanes.ref": qualifiedRecordRef,
+       "lanes.projectId": observedWorkspace.projectId,
+       "lanes.kind": recordKind,
      },
    })
    ```
@@ -105,10 +105,10 @@ match the actual agent ID. Substitute observed values; do not copy placeholders:
 
 ```sh
 paseo agent update '<actual-agent-id>' \
-  --label 'clips.ref=<qualified-ref>' \
-  --label 'clips.projectId=<observed-project-id>' --label 'clips.kind=<kind>' --json
-paseo ls --global --label 'clips.ref=<qualified-ref>' \
-  --label 'clips.projectId=<observed-project-id>' --label 'clips.kind=<kind>' --json
+  --label 'lanes.ref=<qualified-ref>' \
+  --label 'lanes.projectId=<observed-project-id>' --label 'lanes.kind=<kind>' --json
+paseo ls --global --label 'lanes.ref=<qualified-ref>' \
+  --label 'lanes.projectId=<observed-project-id>' --label 'lanes.kind=<kind>' --json
 ```
 
 The compact list omits the complete label map and workspace ID. Use a native
@@ -128,7 +128,7 @@ which sessions it may choose; this procedure does not grant it child creation.
 A user may steer the current dev agent directly. Keep its Task/Goal records
 and binding aligned with the new agreed outcome. Reuse after the previous work
 is complete or explicitly transferred; do not steal another owner's session
-or silently relabel an unrelated active outcome. A single `clips.ref` cannot
+or silently relabel an unrelated active outcome. A single `lanes.ref` cannot
 represent several simultaneous Goals. Use separate authorized owners or actual
 supported multi-record association; do not claim nonexistent aggregation.
 
@@ -150,8 +150,26 @@ provider/model, permission mode, thinking and feature values; if no profile fits
 discover live capabilities and report the fallback rather than guessing values.
 Workspace choice follows the request/settings, not a universal isolation default.
 
-From the Clips checkout on Node.js 22.18 or later, the supported top-level
-launch path is the Clips Paseo CLI (or its plugin launch dialog):
+For a new manager, read `lane_manager_model` and
+`lane_manager_reasoning_effort`; for a new dev owner, read `lane_dev_model` and
+`lane_dev_reasoning_effort` from the Lane project's effective configuration.
+An explicit user choice for that Lane or worker takes precedence. These saved
+preferences do not change an existing or resumed manager; preserve its current
+model and effort.
+
+Lanes stores a model ID, while Paseo launch requires a `provider/model` pair.
+Use live `options` output to find a ready provider that exposes the exact
+preferred model ID. Do not invent a provider prefix or assume every host has
+the same catalog. Resolve reasoning effort through the selected model's
+discovered `--thinking` options. If the preference is unavailable, select a
+supported role-appropriate model and effort from the live results; use the
+only available model or provider default when no tier comparison exists.
+Disclose requested and selected values and do not rewrite the stored
+preference. If no launchable provider/model or native default exists, report
+that actual capability blocker.
+
+From the Lanes checkout on Node.js 22.18 or later, the supported top-level
+launch path is the Lanes Paseo CLI (or its plugin launch dialog):
 
 ```sh
 node plugins/paseo/cli.js options --project . --provider codex
@@ -179,22 +197,24 @@ Manager for strategic management and claim/authority policy. Goal/Task launches
 require neither Lane ownership nor that host-ID option.
 
 Within the user's authorization, run the same start command without `--dry-run`,
-then verify actual returned parentage, workspace and binding. Lane Manager's
-actionable-request policy already authorizes necessary scoped dev sessions;
-do not add a routine start confirmation. Explicit plan/defer/queue instructions
-and real blockers still override execution. The checkout CLI uses an unscoped
+then verify actual returned parentage, workspace and binding. Lane Manager must
+first resolve its delivery-mode choice or honor the user's explicit selection.
+The planning-validation path permits no worker launch before user approval.
+Once execution is authorized, do not add a routine start confirmation.
+Explicit plan/defer/queue instructions and real blockers still override
+execution. The checkout CLI uses an unscoped
 workspace SDK route. Agent-scoped `create_agent` and `paseo run` create children
 even in another workspace, so are not substitutes for a top-level-owner launch.
-Dev owners follow Clips' Task-level parallel execution guidance when assigning
+Dev owners follow Lanes' Task-level parallel execution guidance when assigning
 their own sub-agents within their role and authority; those workers do not
 replace the verified top-level owner or imply a new Lane management claim.
 
 ## When Paseo is absent
 
-Use Clips locally for authorized requests, owners, statuses, blockers, results
+Use Lanes locally for authorized requests, owners, statuses, blockers, results
 and acceptance. Runtime integration is optional. Report missing session/project
 discovery, tooling or daemon access precisely; do not block unrelated engineering,
-start a manager, fake a Lane claim, or infer a running agent from Clips status.
+start a manager, fake a Lane claim, or infer a running agent from Lanes status.
 Filesystem skill updates become visible through live links, but already-loaded
 session instructions require explicit rereading; dissemination is not prompt
 hot-reload or future compliance proof.

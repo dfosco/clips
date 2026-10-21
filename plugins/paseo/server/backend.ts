@@ -7,7 +7,11 @@ import type { ManagerClaim } from "./lane-managers";
 import os from "node:os";
 import path from "node:path";
 import { execCommand, type PluginHandlerContext } from "@getpaseo/plugin/server";
-import { label, labelUsesData, laneClosureData, type LabelChange, type AgentConfiguration, type Goal, type Lane, type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode } from "../shared/contracts";
+import {
+  attachment, attachmentReadData, collaborationCapability, label, labelUsesData, laneClosureData,
+  type AttachmentReadData, type LabelChange, type AgentConfiguration, type Goal, type Lane,
+  type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode,
+} from "../shared/contracts";
 import {
   FULL_ACCESS_MODE, resolvePermissionMode, type ProviderPermissionMode,
 } from "../shared/permission-modes";
@@ -29,22 +33,27 @@ function errorText(error: unknown): string {
     : error instanceof Error ? error.message : String(error);
 }
 
-/** All Paseo projects with a Clips store, grouped by their Git common directory. */
+/** All Paseo projects with a Lanes store, grouped by their Git common directory. */
 export async function localProjects(paseo: Paseo): Promise<LocalProject[]> {
   const { projects } = await paseo.projects.list();
+  if (!projects.some((project) => project.projectKind === "git")) return [];
+  const cli = await findClips(paseo);
   const entries = await Promise.all(projects.map(async (p) => {
     if (p.projectKind !== "git") return null;
     try {
-      const git = await command("git", [
-        "-C", p.projectRootPath, "rev-parse", "--path-format=absolute", "--git-common-dir",
-      ]);
-      const commonDir = fs.realpathSync(git.stdout.trim());
-      const candidates = [path.dirname(commonDir), p.projectRootPath];
-      const root = candidates.find((candidate) => fs.existsSync(path.join(candidate, ".clips", "db")) ||
-        fs.existsSync(path.join(candidate, ".clips", "clips.config.json")));
-      if (!root) return null;
+      const result = await command(cli.bin, [...cli.prefix, "paths", "--json"], p.projectRootPath);
+      const paths: unknown = JSON.parse(result.stdout);
+      if (!paths || typeof paths !== "object" ||
+          !("repoRoot" in paths) || typeof paths.repoRoot !== "string" || !path.isAbsolute(paths.repoRoot) ||
+          !("storeDir" in paths) || typeof paths.storeDir !== "string" || !path.isAbsolute(paths.storeDir) ||
+          !("configPath" in paths) || typeof paths.configPath !== "string" || !path.isAbsolute(paths.configPath)) {
+        throw new Error("The matching Lanes CLI must return absolute repoRoot, storeDir and configPath from paths --json.");
+      }
+      if (!fs.existsSync(path.join(paths.storeDir, "db")) && !fs.existsSync(paths.configPath)) return null;
+      const root = paths.repoRoot;
       return { id: p.projectId, label: p.projectCustomName || p.projectDisplayName, root: fs.realpathSync(root) };
-    } catch {
+    } catch (error) {
+      console.warn(`Cannot discover Lanes project ${p.projectId}: ${errorText(error)}`);
       return null;
     }
   }));
@@ -73,11 +82,11 @@ export async function projectList(paseo: Paseo): Promise<{ projects: Project[] }
 
 async function findProject(paseo: Paseo, id: string): Promise<LocalProject> {
   const match = (await localProjects(paseo)).find((p) => p.projectIds.includes(id));
-  if (!match) throw new Error("That Clips project is no longer available on this Paseo host.");
+  if (!match) throw new Error("That Lanes project is no longer available on this Paseo host.");
   return match;
 }
 
-/** The CLI is the only interpreter of Clips journals. Never replay JSONL in the plugin. */
+/** The CLI is the only interpreter of Lanes journals. Never replay JSONL in the plugin. */
 async function laneManagerCommand(paseo: Paseo, root: string, action: "inspect" | "claim", ref: string, request?: unknown): Promise<ManagerClaim> {
   const cli = await findClips(paseo);
   const args = [...cli.prefix, "lane", "manager", action, ref];
@@ -93,14 +102,14 @@ async function clipsBoard(paseo: Paseo, root: string): Promise<any> {
   try {
     ({ stdout: output } = await command(cli.bin, [...cli.prefix, "board", "--json"], root));
   } catch (error) {
-    throw new Error(`Cannot read Clips planning data from ${root}: ${errorText(error)}. This integration requires the matching Clips CLI with 'board --json'.`);
+    throw new Error(`Cannot read Lanes planning data from ${root}: ${errorText(error)}. This integration requires the matching Lanes CLI with 'board --json'.`);
   }
   try {
     const board = JSON.parse(output);
     if (!Array.isArray(board.lanes) || !Array.isArray(board.goals)) throw new Error("missing lanes/goals");
     return board;
   } catch (error) {
-    throw new Error(`Clips returned an invalid board JSON response: ${errorText(error)}`);
+    throw new Error(`Lanes returned an invalid board JSON response: ${errorText(error)}`);
   }
 }
 
@@ -121,8 +130,22 @@ function fields(raw: any) {
     decisions: asText(raw.decisions),
     scope: asText(raw.scope),
     acceptanceCriteria: criteria(raw),
+    attachments: attachmentList(raw.attachments),
     labels: asItems(raw.labels).map((value) => label.parse(value)),
   };
+}
+
+function attachmentList(raw: unknown) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error("Lanes returned invalid attachment metadata.");
+  return raw.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("Lanes returned invalid attachment metadata.");
+    }
+    const display = { ...value };
+    delete display.path;
+    return attachment.parse(display);
+  });
 }
 
 export function normalizeBoard(board: any) {
@@ -140,11 +163,79 @@ export function normalizeBoard(board: any) {
     tasks: asItems(g.tasks).map((t): Task => ({ ...fields(t), kind: "task" })),
   }));
   const warnings = asItems(board.warnings).map((w) => asText(w?.message || w));
-  return { lanes, goals, warnings, labels: asItems(board.labels).map((value) => label.parse(value)) };
+  const collaboration = board.collaboration == null ? null : collaborationCapability.parse(board.collaboration);
+  return {
+    lanes, goals, warnings, labels: asItems(board.labels).map((value) => label.parse(value)),
+    collaboration, generatedAt: typeof board.generated_at === "string" ? board.generated_at : null,
+  };
 }
 
 export async function readProjectBoard(paseo: Paseo, projectId: string) {
   const project = await findProject(paseo, projectId);
+  return normalizeBoard(await clipsBoard(paseo, project.root));
+}
+
+function findBoardRecord(board: any, ref: string) {
+  if (typeof ref !== "string" || !/^#[\w.-]+(?:#[\w.-]+){0,2}$/.test(ref)) {
+    throw new Error("Provide an exact current Lane, Goal, or Task reference.");
+  }
+  const records = [
+    ...asItems(board.lanes),
+    ...asItems(board.goals),
+    ...asItems(board.goals).flatMap((goal) => asItems(goal.tasks)),
+  ];
+  const record = records.find((candidate) => candidate?.ref === ref);
+  if (!record) throw new Error(`Record ${ref} is not present in this project's current Lanes board.`);
+  return record;
+}
+
+export async function readProjectAttachment(
+  paseo: Paseo,
+  input: { projectId: string; ref: string; attachmentId: string },
+): Promise<AttachmentReadData> {
+  const project = await findProject(paseo, input.projectId);
+  const board = await clipsBoard(paseo, project.root);
+  const record = findBoardRecord(board, input.ref);
+  const attached = asItems(record.attachments).find((item) => item?.id === input.attachmentId);
+  if (!attached) throw new Error(`Attachment ${input.attachmentId} is not associated with ${record.ref}.`);
+  if (attached.type !== "markdown") throw new Error("Only Markdown attachments have readable file content.");
+  const cli = await findClips(paseo);
+  try {
+    const result = JSON.parse((await command(
+      cli.bin, [...cli.prefix, "attachment", "read", record.ref, attached.id], project.root,
+    )).stdout);
+    if (result?.ref !== record.ref || result?.attachment?.id !== attached.id) {
+      throw new Error("Lanes returned a different record or attachment than requested.");
+    }
+    const display = { ...result.attachment };
+    delete display.path;
+    return attachmentReadData.parse({
+      ref: record.ref,
+      revision: result.revision,
+      attachment: display,
+    });
+  } catch (error) {
+    throw new Error(`Cannot read current Markdown for ${record.ref}: ${errorText(error)}`);
+  }
+}
+
+export async function setProjectCollaboration(
+  paseo: Paseo,
+  input: { projectId: string; enabled: boolean },
+) {
+  if (typeof input.enabled !== "boolean") throw new Error("Collaboration must be explicitly enabled or disabled.");
+  const project = await findProject(paseo, input.projectId);
+  const board = await clipsBoard(paseo, project.root);
+  const capability = board.collaboration;
+  if (!capability || capability.enabled === null || capability.state === "invalid") {
+    throw new Error(capability?.error || "The current project's collaboration setting is unavailable.");
+  }
+  const cli = await findClips(paseo);
+  try {
+    await command(cli.bin, [...cli.prefix, "config", "collaboration", String(input.enabled)], project.root);
+  } catch (error) {
+    throw new Error(`Cannot update local collaboration configuration: ${errorText(error)}`);
+  }
   return normalizeBoard(await clipsBoard(paseo, project.root));
 }
 
@@ -161,7 +252,7 @@ export async function changeProjectLabels(paseo: Paseo, input: { projectId: stri
   try {
     await command(cli.bin, [...cli.prefix, "label", ...args], project.root);
   } catch (error) {
-    throw new Error(`Cannot change Clips labels: ${errorText(error)}`);
+    throw new Error(`Cannot change Lanes labels: ${errorText(error)}`);
   }
   return normalizeBoard(await clipsBoard(paseo, project.root));
 }
@@ -173,7 +264,7 @@ export async function readProjectLabelUses(paseo: Paseo, input: { projectId: str
     const result = await command(cli.bin, [...cli.prefix, "label", "uses", input.id, "--json"], project.root);
     return labelUsesData.parse(JSON.parse(result.stdout));
   } catch (error) {
-    throw new Error(`Cannot read Clips label uses: ${errorText(error)}`);
+    throw new Error(`Cannot read Lanes label uses: ${errorText(error)}`);
   }
 }
 
@@ -238,7 +329,7 @@ async function selectedProvider(paseo: Paseo, root: string, preference: string) 
   const { provider, model: modelId } = splitAgent(selected);
   const entry = entries.find((candidate) => candidate.provider === provider && candidate.status === "ready" && candidate.enabled !== false);
   const model = entry?.models?.find((candidate) => candidate.id === modelId && candidate.isSelectable !== false);
-  if (!entry || !model) throw new Error(`Configured Paseo agent ${selected} is unavailable. Choose a ready model in Clips settings.`);
+  if (!entry || !model) throw new Error(`Configured Paseo agent ${selected} is unavailable. Choose a ready model in Lanes settings.`);
   return { selected, provider, entry, model };
 }
 
@@ -362,7 +453,7 @@ const inFlight = new Set<string>();
 
 /**
  * Validate project + reference against a fresh board, then reuse or create an
- * isolated Paseo worktree. Starting an agent never accepts or closes Clips work.
+ * isolated Paseo worktree. Starting an agent never accepts or closes Lanes work.
  */
 export async function startWork(
   paseo: Paseo,
@@ -378,9 +469,9 @@ export async function startWork(
     const board = normalizeBoard(await clipsBoard(paseo, project.root));
     const targets: Work[] = [...board.lanes, ...board.goals, ...board.goals.flatMap((g) => g.tasks)];
     const target = targets.find((t) => t.ref === input.ref);
-    if (!target) throw new Error(`Clips reference ${input.ref} does not exist in this project.`);
+    if (!target) throw new Error(`Lanes reference ${input.ref} does not exist in this project.`);
     if (target.status === "closed" || target.status === "not_planned" || target.status === "duplicate") {
-      throw new Error(`${input.ref} is ${target.status}; reopen it in Clips before launching a new agent.`);
+      throw new Error(`${input.ref} is ${target.status}; reopen it in Lanes before launching a new agent.`);
     }
 
     // Inspect before workspace or agent creation. An unavailable claim store fails closed.
@@ -414,10 +505,10 @@ export async function startWork(
       throw new Error(`An agent for ${input.ref} needs input. Resolve it before starting another agent.`);
     }
     if (input.workspaceId) {
-      if (input.mode !== "agent") throw new Error("Select agent mode when running Clips work in an existing workspace.");
+      if (input.mode !== "agent") throw new Error("Select agent mode when running Lanes work in an existing workspace.");
       const workspace = workspaces.find((candidate) => candidate.id === input.workspaceId);
       if (!workspace || !project.projectIds.includes(workspace.projectId)) {
-        throw new Error("Choose a workspace that belongs to this Clips project.");
+        throw new Error("Choose a workspace that belongs to this Lanes project.");
       }
       const config = await agentConfiguration(paseo, project.root, prefs, input.agentConfig);
       const created = await createAgent(paseo.workspaces.ref(workspace.id), config);
@@ -457,7 +548,7 @@ export async function startWork(
     const base = await command("git", ["-C", project.root, "branch", "--show-current"]);
     const baseBranch = base.stdout.trim();
     if (!baseBranch) {
-      throw new Error("The selected Clips project checkout is detached from a Git branch. Check out a branch before starting work in Paseo.");
+      throw new Error("The selected Lanes project checkout is detached from a Git branch. Check out a branch before starting work in Paseo.");
     }
     const workspace = await paseo.workspaces.create({
       title: workspaceTitle(target),
@@ -466,7 +557,7 @@ export async function startWork(
           attachments: [{
             type: "text" as const,
             mimeType: "text/plain" as const,
-            title: `Clips ${target.kind} ${target.ref}`,
+            title: `Lanes ${target.kind} ${target.ref}`,
             contextKind: "clips",
             text: promptFor(target),
           }],
@@ -510,7 +601,7 @@ export async function closeWork(
   const lane = board.lanes.find((item) => item.ref === input.ref);
   const goal = board.goals.find((item) => item.ref === input.ref);
   const target = lane ?? goal;
-  if (!target) throw new Error(`Clips lane or goal ${input.ref} does not exist in this project.`);
+  if (!target) throw new Error(`Lanes lane or goal ${input.ref} does not exist in this project.`);
   if (target.status === "closed") throw new Error(`${input.ref} is already closed.`);
 
   const cli = await findClips(paseo);
@@ -536,7 +627,7 @@ export async function closeWork(
         const agent = await paseo.agents.create({
           config,
           cwd: os.tmpdir(),
-          title: `Clips lane closure ${lane.ref}`,
+          title: `Lanes lane closure ${lane.ref}`,
           prompt: laneClosurePrompt(lane, relatedGoals, data, missing),
           outputSchema: laneClosureOutputSchema,
           autoArchive: true,
@@ -606,7 +697,7 @@ function laneClosurePrompt(
     })),
   };
   return [
-    "Prepare missing retrospective fields for a Clips Lane that has already been closed.",
+    "Prepare missing retrospective fields for a Lanes Lane that has already been closed.",
     `Fill only these fields: ${missing.join(", ")}. For every other field, return an empty string or empty array.`,
     "Use only facts supported by the supplied lane and goal context. Do not invent outcomes or claim product goals were achieved without evidence from closed goals. If evidence is insufficient, leave that field empty.",
     "Do not inspect or modify files, run commands, or take any action. Return only JSON matching the requested schema.",

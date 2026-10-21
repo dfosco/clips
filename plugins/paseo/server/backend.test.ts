@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeBoard, readProjectBoard, startWork } from "./backend";
 import { branchName } from "../shared/work";
 
-describe("Clips JSON board projection", () => {
+describe("Lanes JSON board projection", () => {
   it("preserves Lane membership, namespaced Task refs, and acceptance criteria", () => {
     const data = normalizeBoard({
       lanes: [{ ref: "#l001", title: "Release quality", status: "open", description: "Frame", goal_refs: ["#alice#g001"] }],
@@ -46,21 +46,22 @@ describe("Clips JSON board projection", () => {
   });
 });
 
-it("reads a local Clips project through the checkout CLI", async () => {
+it("reads a local Lanes project through the checkout CLI", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "clips-paseo-board-"));
   const cli = fileURLToPath(new URL("../../../src/cli.js", import.meta.url));
-  const previousCli = process.env.CLIPS_CLI_PATH;
+  const previous = Object.fromEntries(["LANES_HOME", "CLIPS_HOME", "LANES_CLI_PATH", "CLIPS_CLI_PATH"].map(key => [key, process.env[key]]));
+  process.env.LANES_HOME = path.join(root, "home");
+  process.env.LANES_CLI_PATH = cli;
   try {
     execFileSync("git", ["init", "--quiet"], { cwd: root });
     const runClips = (...args: string[]) => execFileSync(process.execPath, [cli, ...args], {
       cwd: root,
-      env: { ...process.env, CLIPS_HOME: path.join(root, "home") },
+      env: { ...process.env, LANES_HOME: path.join(root, "home") },
     });
     runClips("init", "--skills-scope", "project");
     runClips("lane", "create", JSON.stringify({ title: "Local lane" }));
     runClips("goal", "create", JSON.stringify({ title: "Local goal", lane_id: "l1" }));
     runClips("task", "create", "g1", JSON.stringify({ title: "Local task" }));
-    process.env.CLIPS_CLI_PATH = cli;
 
     const paseo = {
       projects: { list: async () => ({ projects: [{
@@ -107,8 +108,9 @@ it("reads a local Clips project through the checkout CLI", async () => {
     const rejected = results.find((entry) => entry.status === "rejected") as PromiseRejectedResult;
     expect(rejected.reason.message).toContain("already in progress");
   } finally {
-    if (previousCli === undefined) delete process.env.CLIPS_CLI_PATH;
-    else process.env.CLIPS_CLI_PATH = previousCli;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30_000);

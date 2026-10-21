@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import { getRepositoryIdentity, listLaneClaims, mutateLaneClaim, readLaneClaim } from './lane-claims.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getRepositoryIdentity, listLaneClaims, mutateLaneClaim, readLaneClaim, validateLaneClaim } from './lane-claims.js';
 import { readBoardData } from './board.js';
 
 const roots = [];
@@ -17,6 +17,9 @@ const carol = { host: 'terminal-host-B', runtime: 'codex', session_id: 'carol-se
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-claims-'));
   roots.push(root);
+  vi.stubEnv('HOME', root);
+  vi.stubEnv('LANES_HOME', path.join(root, 'user-store'));
+  vi.stubEnv('CLIPS_HOME', path.join(root, 'user-store'));
   const projectPath = path.join(root, 'repo');
   fs.mkdirSync(projectPath);
   execFileSync('git', ['init', '--quiet'], { cwd: projectPath });
@@ -29,9 +32,35 @@ function mutate(options, action, revision, actor = alice, extra = {}, ref = '#l1
 function findJson(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? findJson(path.join(directory, entry.name)) : entry.name.endsWith('.json') ? [path.join(directory, entry.name)] : []);
 }
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.unstubAllEnvs();
+  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
 
 describe('durable Lane manager ownership', () => {
+  it('validates persisted claims offline with the same history and storage identity checks as reads', () => {
+    const { root, projectPath, options } = fixture();
+    mutate(options, 'claim', 0);
+    const state = mutate(options, 'share', 1, alice, { owner: bob });
+    const [file] = findJson(options.claimsDir);
+    state.extensions = { unknown: true };
+    const before = JSON.stringify(state);
+    fs.renameSync(projectPath, path.join(root, 'unavailable-repository'));
+    expect(validateLaneClaim(state)).toBe(state);
+    expect(validateLaneClaim(state, { file, laneId: '#l1', repositoryId: state.repository_id, namespace: '' })).toBe(state);
+    expect(JSON.stringify(state)).toBe(before);
+    expect(() => validateLaneClaim(state, { file: path.join(path.dirname(file), 'l002.json') })).toThrow('storage identity mismatch');
+    expect(() => validateLaneClaim(state, { file: path.join(root, 'wrong-repository', path.basename(path.dirname(file)), 'l001.json') })).toThrow('storage identity mismatch');
+    expect(() => validateLaneClaim(state, { repositoryId: '/another/repository/.git' })).toThrow('identity/version mismatch');
+    for (const invalid of [
+      null, [], { ...state, version: 2 }, { ...state, revision: 0 }, { ...state, repository_id: 'relative' },
+      { ...state, owners: [] },
+      { ...state, history: [state.history[0], { ...state.history[1], owners_before: [] }] },
+      { ...state, history: [state.history[0], { ...state.history[1], revision: 3 }] },
+      { ...state, history: [state.history[0], { ...state.history[1], action: 'handover' }] },
+    ]) expect(() => validateLaneClaim(invalid)).toThrow('Invalid Lane claim');
+  });
+
   it('shares across worktrees and symlinks, isolates repositories, and refuses username namespaces', () => {
     const { root, projectPath, options } = fixture();
     execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '--allow-empty', '-m', 'fixture', '--quiet'], { cwd: projectPath });
@@ -128,7 +157,10 @@ describe('durable Lane manager ownership', () => {
 
   it('CLI uses user storage, supports inspection and mutation JSON, and never syncs claims', () => {
     const { root, projectPath } = fixture();
-    const env = { ...process.env, CLIPS_HOME: path.join(root, 'user-clips'), CLIPS_SWITCH_INIT: '1' };
+    const env = {
+      ...process.env, HOME: root, CLIPS_HOME: path.join(root, 'user-clips'),
+      LANES_HOME: path.join(root, 'user-clips'), CLIPS_SWITCH_INIT: '1', LANES_SWITCH_INIT: '1',
+    };
     fs.mkdirSync(path.join(projectPath, '.clips', 'db'), { recursive: true });
     fs.writeFileSync(path.join(projectPath, '.clips', 'clips.config.json'), '{"collaboration":false}');
     const run = (...args) => JSON.parse(execFileSync(process.execPath, [cli, ...args], { cwd: projectPath, env, encoding: 'utf8' }));

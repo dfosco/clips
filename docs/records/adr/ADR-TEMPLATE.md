@@ -3,7 +3,7 @@
 > Optional independent or legacy decision record. Goals can keep their plan and
 > architectural decisions together. Use this template when the decision needs
 > a separate lifecycle; no goal or task requires a new ADR. Store instances under
-> `.clips/records/adr/`.
+> the resolved `.lanes/records/adr/`.
 
 **Status:** Draft | Proposed | In Review | Accepted | Deprecated | Archived
 **Date:** YYYY-MM-DD

@@ -1,9 +1,13 @@
 {
   "schemaVersion": 1,
   "exports": {
-    "skill:clips": "./.agents/skills/clips",
-    "skill:clips-dev": "./.agents/skills/clips-dev",
+    "skill:lanes": "./.agents/skills/lanes",
+    "skill:lane-dev": "./.agents/skills/lane-dev",
     "skill:lane-manager": "./.agents/skills/lane-manager",
-    "skill:loopz": "./.agents/skills/clips-dev"
+    "skill:lane-radar": "./.agents/skills/lane-radar",
+    "skill:lane-plugin": "./.agents/skills/lane-plugin",
+    "skill:clips": "./.agents/skills/lanes",
+    "skill:clips-dev": "./.agents/skills/lane-dev",
+    "skill:loopz": "./.agents/skills/lane-dev"
   }
 }

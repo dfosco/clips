@@ -5,13 +5,14 @@ import os from 'node:os';
 import { execFileSync, execSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-import { getClipsDbDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
-import { initConfig, readConfig, writeConfig } from '../lib/config.js';
+import { getClipsDir, appendEvent, goalExists, getRepoRoot } from '../lib/core.js';
+import { getConfigPath, initConfig, readConfig, writeConfig } from '../lib/config.js';
 import { pullAllIssues } from '../lib/sync.js';
 import { ensureProjectIdentity, getRegistryPath, registerProject } from '../lib/registry.js';
-import { importSkill, loadSkillLibrary } from 'skillshop/import';
-import { installUserSkill } from 'skillshop/user-install';
+import { loadSkillLibrary } from 'skillshop/import';
 import { isLiveSkill } from '../lib/lane-manager-install.js';
+import { migrateStorage } from '../lib/storage-migration.js';
+import { retireLegacySkillCopies, refreshManagedSkill, recordSkillInstallations } from '../lib/installation.js';
 
 const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -20,7 +21,6 @@ const CLIPS_LIBRARY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.u
  * without changing the repository's shared .gitignore.
  */
 export function setupGitExclude(cwd) {
-  try {
     const gitDir = execSync('git rev-parse --git-common-dir', {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -37,18 +37,13 @@ export function setupGitExclude(cwd) {
     let content = '';
     if (fs.existsSync(excludePath)) {
       content = fs.readFileSync(excludePath, 'utf8');
-      const lines = content.split('\n');
-      if (lines.some(line => line.trim() === '.clips' || line.trim() === '.clips/')) {
-        return false;
-      }
     }
-
-    const entry = content.endsWith('\n') || content === '' ? '.clips\n' : '\n.clips\n';
+    const lines = content.split('\n').map(line => line.trim().replace(/\/$/, ''));
+    const missing = ['.lanes', '.clips'].filter(name => !lines.includes(name));
+    if (!missing.length) return false;
+    const entry = `${content.endsWith('\n') || content === '' ? '' : '\n'}${missing.join('\n')}\n`;
     fs.appendFileSync(excludePath, entry);
     return true;
-  } catch (e) {
-    return false;
-  }
 }
 
 /**
@@ -105,8 +100,7 @@ function resolveAgentDir(cwd) {
   // 2. Check if skill file already exists somewhere
   const candidates = ['.agents', '.claude', '.github'];
   for (const dir of candidates) {
-    const skillPath = path.join(cwd, dir, 'skills', 'clips', 'SKILL.md');
-    if (fs.existsSync(skillPath)) {
+    if (['lanes', 'clips'].some(name => fs.existsSync(path.join(cwd, dir, 'skills', name, 'SKILL.md')))) {
       return path.join(cwd, dir);
     }
   }
@@ -127,7 +121,7 @@ export async function chooseSkillScope(args, { input = process.stdin, output = p
   if (args.length) {
     if (args.length === 1 && args[0] === '--global') return 'user';
     if (args.length !== 2 || args[0] !== '--skills-scope' || !['project', 'user'].includes(args[1])) {
-      throw new Error('Usage: clips init [--global | --skills-scope project|user]');
+      throw new Error('Usage: lanes init [--global | --skills-scope project|user]');
     }
     return args[1];
   }
@@ -137,7 +131,7 @@ export async function chooseSkillScope(args, { input = process.stdin, output = p
   const prompt = createInterface({ input, output });
   try {
     while (true) {
-      const answer = (await prompt.question('Install Clips skills in this project or your user account (replaces existing copies)? [project/user] ')).trim().toLowerCase();
+      const answer = (await prompt.question('Install Lanes skills in this project or your user account (preserves local edits)? [project/user] ')).trim().toLowerCase();
       if (answer === 'project' || answer === 'p') return 'project';
       if (answer === 'user' || answer === 'u') return 'user';
       output.write('Enter project or user.\n');
@@ -149,12 +143,14 @@ export async function chooseSkillScope(args, { input = process.stdin, output = p
 
 async function installSkills(cwd, scope) {
   const library = await loadSkillLibrary(CLIPS_LIBRARY_ROOT, { cwd });
-  const specifiers = Object.keys(library.skills).filter((name) => name.startsWith('skill:'));
+  const canonical = ['skill:lanes', 'skill:lane-manager', 'skill:lane-dev', 'skill:lane-radar', 'skill:lane-plugin'];
+  const specifiers = [...new Set([...canonical.filter(name => library.skills[name]), ...Object.keys(library.skills).filter(name => name.startsWith('skill:'))])];
   const agentDir = scope === 'project' ? resolveAgentDir(cwd) : null;
   const results = [];
   const sources = new Set();
+  const receipts = {};
   for (const specifier of specifiers) {
-    const source = library.skills[specifier];
+    const source = fs.realpathSync(fileURLToPath(library.skills[specifier]));
     if (sources.has(source)) continue;
     sources.add(source);
     const name = specifier.slice('skill:'.length);
@@ -165,19 +161,14 @@ async function installSkills(cwd, scope) {
       results.push({ specifier, targetDir, live: true });
       continue;
     }
-    const result = scope === 'user'
-      ? await installUserSkill({ library: CLIPS_LIBRARY_ROOT, specifier, cwd })
-      : await importSkill({
-        library: CLIPS_LIBRARY_ROOT,
-        specifier,
-        targetDir: path.join(agentDir, 'skills', name),
-        cwd,
-        merge: true,
-      });
-    results.push(result);
+    const result = refreshManagedSkill(source, targetDir, { project: cwd, agentDir: scope === 'project' ? path.relative(cwd, agentDir) : null });
+    receipts[targetDir] = { files: result.files };
+    results.push({ ...result, specifier });
   }
+  recordSkillInstallations(receipts);
 
   if (scope === 'project') {
+    retireLegacySkillCopies(cwd, path.relative(cwd, agentDir));
     const config = readConfig(cwd);
     if (!config.agent_dir) {
       config.agent_dir = path.relative(cwd, agentDir);
@@ -189,24 +180,16 @@ async function installSkills(cwd, scope) {
 
 export function initializeStore(directory) {
   const cwd = getRepoRoot(directory);
-  const clipsDir = path.join(cwd, '.clips');
-  if (fs.existsSync(clipsDir)) throw new Error('A Clips store already exists in this repository; it was not modified.');
-  const registryPath = getRegistryPath();
-  if (fs.existsSync(registryPath)) {
-    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
-    if (!registry || (registry.version !== undefined && registry.version !== 1) || !Array.isArray(registry.projects)) {
-      throw new Error('The Clips project registry is invalid; repair it before initializing.');
-    }
-  }
-  fs.mkdirSync(clipsDir);
-  fs.mkdirSync(path.join(clipsDir, 'db'));
+  const { projectDir: clipsDir, migrated } = migrateStorage(cwd);
+  fs.mkdirSync(clipsDir, { recursive: true });
+  fs.mkdirSync(path.join(clipsDir, 'db'), { recursive: true });
   for (const type of ['cr', 'adr']) fs.mkdirSync(path.join(clipsDir, 'records', type, 'archived'), { recursive: true });
   initConfig({}, cwd);
   setupGitExclude(cwd);
-  execFileSync('git', ['check-ignore', '--quiet', '.clips'], { cwd, stdio: 'pipe' });
+  execFileSync('git', ['check-ignore', '--quiet', '.lanes'], { cwd, stdio: 'pipe' });
   ensureProjectIdentity(cwd);
   const project = registerProject(cwd);
-  return { initialized: true, projectPath: cwd, projectId: project.id, warnings: project.warnings };
+  return { initialized: true, migrated, projectPath: cwd, projectId: project.id, warnings: project.warnings };
 }
 
 export async function runInitCommand(args) {
@@ -217,52 +200,52 @@ export async function runInitCommand(args) {
   }
   const skillScope = await chooseSkillScope(args);
   if (!skillScope) {
-    console.log('Usage: clips init [--global | --skills-scope project|user | --store-only]');
+    console.log('Usage: lanes init [--global | --skills-scope project|user | --store-only]');
     return;
   }
   const cwd = getRepoRoot(process.cwd());
-  const clipsDir = path.join(cwd, '.clips');
-  const clipsDbDir = path.join(cwd, '.clips', 'db');
+  const { projectDir: clipsDir } = migrateStorage(cwd);
+  const clipsDbDir = path.join(clipsDir, 'db');
   const clipsRecordDirs = ['cr', 'adr'].flatMap((type) => [
-    path.join(cwd, '.clips', 'records', type),
-    path.join(cwd, '.clips', 'records', type, 'archived'),
+    path.join(clipsDir, 'records', type),
+    path.join(clipsDir, 'records', type, 'archived'),
   ]);
 
   const alreadyInitialized = fs.existsSync(clipsDir);
 
   if (alreadyInitialized) {
-    console.log('🔄 clips already initialized.\n');
+    console.log('🔄 Lanes already initialized.\n');
   } else {
-    console.log('🎯 Initializing clips...\n');
+    console.log('🎯 Initializing Lanes...\n');
   }
 
   // Create .clips directory structure
   if (!fs.existsSync(clipsDir)) {
     fs.mkdirSync(clipsDir, { recursive: true });
-    console.log('✓ Created .clips/ directory');
+    console.log('✓ Created .lanes/ directory');
   } else {
-    console.log('• .clips/ directory already exists');
+    console.log('• .lanes/ directory already exists');
   }
 
-  // Create .clips/db directory
+  // Create .lanes/db directory
   if (!fs.existsSync(clipsDbDir)) {
     fs.mkdirSync(clipsDbDir, { recursive: true });
-    console.log('✓ Created .clips/db/ directory');
+    console.log('✓ Created .lanes/db/ directory');
   } else {
-    console.log('• .clips/db/ directory already exists');
+    console.log('• .lanes/db/ directory already exists');
   }
 
   // Create local record directories
   for (const recordDir of clipsRecordDirs) {
     if (!fs.existsSync(recordDir)) fs.mkdirSync(recordDir, { recursive: true });
   }
-  console.log('✓ Ensured .clips/records/{cr,adr}/archived/ directories');
+  console.log('✓ Ensured .lanes/records/{cr,adr}/archived/ directories');
 
   // Set up .git/info/exclude with .clips
   if (setupGitExclude(cwd)) {
-    console.log('✓ Added .clips to .git/info/exclude');
+    console.log('✓ Added .lanes and .clips to .git/info/exclude');
   } else {
-    console.log('• .clips already in .git/info/exclude');
+    console.log('• .lanes and .clips already in .git/info/exclude');
   }
 
   // Set up .vscode/settings.json to show .git folder
@@ -273,15 +256,15 @@ export async function runInitCommand(args) {
   }
 
   // Create local-only default config (only if not exists)
-  const configPath = path.join(clipsDir, 'clips.config.json');
+  const configPath = getConfigPath(cwd);
   let config;
 
   if (!fs.existsSync(configPath)) {
     config = initConfig({}, cwd);
-    console.log('✓ Created .clips/clips.config.json (collaboration: disabled)');
+    console.log('✓ Created .lanes/lanes.config.json (collaboration: disabled)');
   } else {
     config = readConfig(cwd);
-    console.log('• .clips/clips.config.json already exists');
+    console.log('• .lanes/lanes.config.json already exists');
   }
 
   const projectId = ensureProjectIdentity(cwd);
@@ -335,15 +318,15 @@ export async function runInitCommand(args) {
 
   if (!alreadyInitialized) {
     console.log(`
-✅ clips initialized!
+✅ lanes initialized!
 
 Usage:
-  clips view              # List all goals
-  clips view #g001        # View a goal
-  clips goal create '{"title":"My Goal","description":"..."}'
-  clips task create-batch g001 '[{"title":"Task 1"}]'
-  clips config collaboration true  # Explicitly enable GitHub sync
-  clips sync              # Sync only after collaboration is enabled
+  lanes view              # List all goals
+  lanes view #g001        # View a goal
+  lanes goal create '{"title":"My Goal","description":"..."}'
+  lanes task create-batch g001 '[{"title":"Task 1"}]'
+  lanes config collaboration true  # Explicitly enable GitHub sync
+  lanes sync              # Sync only after collaboration is enabled
 `);
   }
 

@@ -1,9 +1,9 @@
-# Clips Copilot integration contract
+# Lanes Copilot integration contract
 
 This integration adds a user-scoped GitHub Copilot App canvas extension while
-using the existing Clips CLI, record store, and Lane claim library as the
+using the existing Lanes CLI, record store, and Lane claim library as the
 authoritative work state. It does not create a second board database or
-reimplement Clips lifecycle rules.
+reimplement Lanes lifecycle rules.
 
 ## Supported Copilot surfaces
 
@@ -60,15 +60,15 @@ type ClipsRuntime = {
 };
 ```
 
-`recordCommand` is constrained to supported `node src/cli.js`/`clips` commands
-and validates allowed command families. It must not write `.clips` journals
+`recordCommand` is constrained to supported `node src/cli.js`/`lanes` commands
+and validates allowed command families. It must not write workflow journals
 directly. The canvas currently needs the supported `lane create`, `lane update`,
 `lane status`, `<lane> add <goal...>`, `label list/create/edit/recolor/delete`,
 and `label add/remove` commands as well as Goal/Task create/update/status/accept
 and Lane manager operations. Keep the allowlist and canvas dispatch aligned
 with `node src/cli.js lane --help`, `label --help`, `goal --help`, and
 `task --help`; do not use near-synonym commands such as `label attach/detach`.
-Optional Lane claims use `clips lane manager` commands with observed actor
+Optional Lane claims use `lanes lane manager` commands with observed actor
 identities and revision checks. They do not authorize or block ordinary planning,
 record mutations or sends. No host identity is fabricated to create metadata.
 
@@ -84,7 +84,7 @@ sessions/projects cannot share focus merely because their instance IDs match.
 Legacy instance-only files are not imported because their owner is ambiguous.
 An explicit project input or saved user selection takes precedence over the
 host working directory. A missing store produces an actionable error for that
-project; it never substitutes the Clips source checkout or initializes a store.
+project; it never substitutes the Lanes source checkout or initializes a store.
 
 Agent callers use `list_clips_projects` to read the same canonical local-user
 catalog as the UI chooser, then pass an exact returned `projectId` to
@@ -100,15 +100,16 @@ claim, exclusive role, idle status or previous binding. Existing-session
 navigation remains available alongside Send/Run. No automatic claim mutation or
 durable exclusive launch lock occurs. One adapter orders metadata/send operations;
 the service suppresses duplicate Task clicks only while that request is pending.
-Binding to a Goal/Task patches only Clips client-metadata keys and reads them
+Binding to a Goal/Task patches only Lanes client-metadata keys and reads them
 back where supported. Historical per-record associations remain available.
 Model/mode settings remain untouched. Canonical journal locks, atomic storage,
 stale-revision conflict checks, authentication and exact action-target validation
 are data-integrity protections and remain enforced.
 
-JavaScript Clips entry points use a verified Node 18+ executable, not the
-packaged Copilot process executable. `CLIPS_NODE_PATH` can select an installed
-interpreter; `CLIPS_CLI_PATH` selects a CLI entry point. The optional catalog
+JavaScript Lanes entry points use a verified Node 18+ executable, not the
+packaged Copilot process executable. `LANES_NODE_PATH` (legacy `CLIPS_NODE_PATH`)
+can select an installed interpreter; `LANES_CLI_PATH` (legacy `CLIPS_CLI_PATH`)
+selects a CLI entry point. The optional catalog
 runtime uses the locked extension-relative platform executable through public
 `RuntimeConnection.forStdio({path})`, including Linux musl package selection.
 The installer verifies its wrapper and runtime.node before and after linking.
@@ -116,7 +117,7 @@ The installer verifies its wrapper and runtime.node before and after linking.
 After source changes, use `extensions_reload` from the same Copilot session,
 or `session.rpc.extensions.reload()` through its actual joined host connection.
 A separate SDK resume is a separate runtime and cannot stand in for that host.
-Then reopen the same canvas instance to load its compiled React/Primer renderer. The closed app.js/style.css asset pair has independently authenticated URLs and source/build hashes verified by the installer. Project tabs replace the original Board strip and are the sole selector, without a chooser modal. They read canonical local-user registry entries, accept exact discovered IDs and revalidate the selected common Git/worktree store without substituting a stale selection. Initial defaults prefer the registered current repository, otherwise the first available project. A separate Initialize action targets only the actual session Git root with no store, using minimal `clips init --store-only`, never a selected tab's directory. The canvas's
+Then reopen the same canvas instance to load its compiled React/Primer renderer. The closed app.js/style.css asset pair has independently authenticated URLs and source/build hashes verified by the installer. Project tabs replace the original Board strip and are the sole selector, without a chooser modal. They read canonical local-user registry entries, accept exact discovered IDs and revalidate the selected common Git/worktree store without substituting a stale selection. Initial defaults prefer the registered current repository, otherwise the first available project. A separate Initialize action targets only the actual session Git root with no store, using minimal `lanes init --store-only`, never a selected tab's directory. The canvas's
 Refresh button rereads data only; it does not reload provider modules.
 `inspect_clips_runtime` reports hashes captured when the runtime/service modules
 loaded, actual process/interpreter paths and joined-session readback. Inspect
@@ -127,13 +128,13 @@ read-only and does not verify App visibility by assertion.
 
 - t01: this contract, official API and local installation evidence.
 - t02: `plugins/copilot/runtime/**` and `plugins/copilot/package.json`; canonical
-  Clips command adapter, actual Copilot SDK session operations, and tests.
+  Lanes command adapter, actual Copilot SDK session operations, and tests.
 - t03: `plugins/copilot/extension.mjs` and `plugins/copilot/canvas/**`; canvas
   UI, actions, bridge, per-instance navigation, and tests. It consumes t02's
   exports and does not change its package manifest.
 - t04: `plugins/copilot/skills/**`, `scripts/install-copilot.js`,
   `src/lib/copilot-install.js`, and installer tests. It links existing
-  canonical Clips/Lane Manager skills rather than copying their policy.
+  canonical Lanes/Lane Manager skills rather than copying their policy.
 - t05: independent review/tests only; it does not edit product sources.
 - t06: sole integrated verifier, Git/index/reload coordinator, and record
   writer. It exclusively owns the released Git/index/install/reload

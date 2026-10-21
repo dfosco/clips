@@ -3,16 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const cliPath = path.resolve(process.cwd(), 'src', 'cli.js');
 const syncModuleUrl = pathToFileURL(path.resolve(process.cwd(), 'src', 'lib', 'sync.js')).href;
+const coreModuleUrl = pathToFileURL(path.resolve(process.cwd(), 'src', 'lib', 'core.js')).href;
 const tempDirs = [];
 
 function createWorkspace() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-sync-type-'));
   tempDirs.push(cwd);
   execFileSync('git', ['init', '--quiet'], { cwd });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/app.git'], { cwd });
+  vi.stubEnv('HOME', path.join(cwd, 'home'));
+  vi.stubEnv('LANES_HOME', path.join(cwd, 'home', '.lanes'));
+  vi.stubEnv('CLIPS_HOME', path.join(cwd, 'home', '.clips'));
+  fs.mkdirSync(path.join(cwd, 'home'), { recursive: true });
   fs.mkdirSync(path.join(cwd, '.clips', 'db'), { recursive: true });
   fs.mkdirSync(path.join(cwd, '.clips', 'records', 'adr'), { recursive: true });
   fs.writeFileSync(path.join(cwd, '.clips', 'clips.config.json'), `${JSON.stringify({ collaboration: false })}\n`);
@@ -31,7 +37,13 @@ function showGoal(cwd, goalId) {
   return JSON.parse(execFileSync(process.execPath, [cliPath, 'goal', 'show', goalId], { cwd, encoding: 'utf8' }));
 }
 
+function readGoal(cwd, goalId, options = {}) {
+  const source = `import { readGoalWithTasks } from ${JSON.stringify(coreModuleUrl)}; console.log(JSON.stringify(readGoalWithTasks(${JSON.stringify(goalId)}, null, ${JSON.stringify(options)})));`;
+  return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '--eval', source], { cwd, encoding: 'utf8' }));
+}
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const cwd of tempDirs.splice(0)) fs.rmSync(cwd, { recursive: true, force: true });
 });
 
@@ -106,7 +118,7 @@ describe('typed goal issue import', () => {
     const markerPath = path.join(cwd, 'gh-calls');
     fs.mkdirSync(binDir);
     const ghPath = path.join(binDir, 'gh');
-    fs.writeFileSync(ghPath, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$MARKER_PATH"\nif [ "$1" = "issue" ] && [ "$2" = "view" ]; then printf "{\\"state\\":\\"CLOSED\\"}\\n"; fi\n');
+    fs.writeFileSync(ghPath, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$MARKER_PATH"\ncase "$*" in\n  "api repos/acme/app/issues/7") printf \'{"id":7,"state":"CLOSED"}\\n\';;\n  "api repos/acme/app/issues/7/parent") echo "gh: Not Found (HTTP 404)" >&2; exit 1;;\nesac\n');
     fs.chmodSync(ghPath, 0o755);
 
     execFileSync(process.execPath, [
@@ -119,5 +131,61 @@ describe('typed goal issue import', () => {
     });
 
     expect(fs.readFileSync(markerPath, 'utf8')).toContain('issue reopen 7');
+  });
+
+  it('preserves remote repository identity in current and historical Goal and Task replay', () => {
+    const cwd = createWorkspace();
+    const file = path.join(cwd, '.clips', 'db', 'g001.jsonl');
+    fs.writeFileSync(file, [
+      { event: 'goal_created', goal_id: 'g001', title: 'Goal', status: 'open' },
+      { event: 'github_synced', goal_id: 'g001', issue_number: 7, issue_url: 'https://git.example.test/acme/app/issues/7', repository: 'acme/app', remote_host: 'git.example.test' },
+      { event: 'task_created', goal_id: 'g001', task_id: 't01', title: 'Task', status: 'open' },
+      { event: 'task_github_synced', goal_id: 'g001', task_id: 't01', issue_number: 8, issue_url: 'https://git.example.test/acme/app/issues/8', repository: 'acme/app', remote_host: 'git.example.test' },
+    ].map(JSON.stringify).join('\n') + '\n');
+
+    const current = readGoal(cwd, 'g001');
+    expect(current).toMatchObject({ repository: 'acme/app', remote_host: 'git.example.test' });
+    expect(current.tasks.t01).toMatchObject({ repository: 'acme/app', remote_host: 'git.example.test' });
+    expect(readGoal(cwd, 'g001', { revision: 2 })).toMatchObject({
+      repository: 'acme/app', remote_host: 'git.example.test',
+    });
+    expect(readGoal(cwd, 'g001', { taskId: 't01', taskRevision: 2 }).tasks.t01).toMatchObject({
+      repository: 'acme/app', remote_host: 'git.example.test',
+    });
+
+    fs.writeFileSync(path.join(cwd, '.clips', 'db', 'g002.jsonl'), [
+      { event: 'goal_created', goal_id: 'g002', title: 'Legacy', status: 'open' },
+      { event: 'github_synced', goal_id: 'g002', issue_number: 9, issue_url: '' },
+    ].map(JSON.stringify).join('\n') + '\n');
+    const legacyGoal = readGoal(cwd, 'g002');
+    expect(legacyGoal.issue_number).toBe(9);
+    expect(legacyGoal.repository).toBeUndefined();
+    expect(legacyGoal.remote_host).toBeUndefined();
+  });
+
+  it('replays same-number pull requests from separate hosts without collapsing them', () => {
+    const cwd = createWorkspace();
+    const events = [
+      { event: 'goal_created', goal_id: 'g001', title: 'Goal', status: 'open' },
+      {
+        event: 'github_pr_synced',
+        repository: 'acme/app',
+        remote_host: 'github.com',
+        pr_number: 12,
+        title: 'Public',
+        url: 'https://github.com/acme/app/pull/12',
+      },
+      {
+        event: 'github_pr_synced',
+        repository: 'acme/app',
+        remote_host: 'git.example.test',
+        pr_number: 12,
+        title: 'Enterprise',
+        url: 'https://git.example.test/acme/app/pull/12',
+      },
+    ];
+    fs.writeFileSync(path.join(cwd, '.clips', 'db', 'g001.jsonl'), `${events.map(JSON.stringify).join('\n')}\n`);
+
+    expect(Object.values(readGoal(cwd, 'g001').github_prs).map((pr) => pr.title).sort()).toEqual(['Enterprise', 'Public']);
   });
 });

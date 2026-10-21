@@ -1,14 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { getSystemClipsDir } from './registry.js';
 import { findLiveSkill, isLiveSkill } from './lane-manager-install.js';
 import { getRepoRoot } from './core.js';
+import { readConfig } from './config.js';
+import { readJsonObject } from './storage-paths.js';
+import { migrateStorage } from './storage-migration.js';
+import { withRecordLock } from './journal.js';
 
-const PACKAGE_NAME = '@dfosco/clips';
+const PACKAGE_NAME = '@dfosco/lanes';
+const LEGACY_PACKAGE_NAME = '@dfosco/clips';
 const CHECKOUT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function statePath() {
@@ -16,8 +20,8 @@ function statePath() {
 }
 
 function readState() {
-  try { return JSON.parse(fs.readFileSync(statePath(), 'utf8')); }
-  catch { return {}; }
+  try { return readJsonObject(statePath()); }
+  catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
 }
 
 function writeState(state) {
@@ -39,9 +43,73 @@ function run(command, args, options = {}) {
 function packageAt(root) {
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-    if (manifest.name !== PACKAGE_NAME || !fs.existsSync(path.join(root, 'src', 'cli.js'))) return null;
-    return { root: fs.realpathSync(root), version: manifest.version };
+    if (![PACKAGE_NAME, LEGACY_PACKAGE_NAME].includes(manifest.name) || !fs.existsSync(path.join(root, 'src', 'cli.js'))) return null;
+    return { root: fs.realpathSync(root), version: manifest.version, name: manifest.name };
   } catch { return null; }
+}
+
+function fileDigests(root) {
+  const files = {};
+  const walk = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.isFile()) files[path.relative(root, file)] = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      else throw new Error(`Unsupported skill source entry: ${file}`);
+    }
+  };
+  walk(root);
+  return files;
+}
+
+export function refreshManagedSkill(source, target, { project, agentDir } = {}) {
+  const state = readState();
+  const previous = state.skill_installations?.[target]?.files || {};
+  const projectReceipt = state.projects?.[project];
+  const prefix = `${path.basename(target)}${path.sep}`;
+  const switched = (projectReceipt?.agent_dir || '.agents') === agentDir
+    ? Object.fromEntries(Object.entries(projectReceipt?.files || {}).filter(([file]) => file.startsWith(prefix)).map(([file, digest]) => [file.slice(prefix.length), digest]))
+    : {};
+  const selected = fileDigests(source);
+  const files = { ...previous };
+  let installed = false;
+  let updated = false;
+  for (const [relative, digest] of Object.entries(selected)) {
+    const file = path.join(target, relative);
+    let cursor = target;
+    let linked = false;
+    for (const segment of relative.split(path.sep)) {
+      cursor = path.join(cursor, segment);
+      try { if (fs.lstatSync(cursor).isSymbolicLink()) { linked = true; break; } }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    if (linked) {
+      console.error(`Retained linked skill file: ${file}`);
+      continue;
+    }
+    if (fs.existsSync(file)) {
+      if (!fs.statSync(file).isFile()) throw new Error(`Skill target is not a file: ${file}`);
+      const actual = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+      if (actual === digest) { files[relative] = digest; continue; }
+      if (actual !== previous[relative] && actual !== switched[relative]) {
+        console.error(`Retained modified or unmanaged skill file: ${file}`);
+        continue;
+      }
+      updated = true;
+    } else installed = true;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.copyFileSync(path.join(source, relative), file);
+    files[relative] = digest;
+  }
+  return { targetDir: target, installed, updated, files };
+}
+
+export function recordSkillInstallations(receipts) {
+  if (!Object.keys(receipts).length) return;
+  return withRecordLock(statePath(), () => {
+    const state = readState();
+    writeState({ ...state, skill_installations: { ...state.skill_installations, ...receipts } });
+  });
 }
 
 function skillFiles(packageRoot) {
@@ -73,9 +141,20 @@ export function reconcileSkills(project, previous = {}, selected = {}, agentDir 
   if (!root.startsWith(`${project}${path.sep}`)) throw new Error(`Agent directory is outside project: ${agentDir}`);
   for (const [relative, digest] of Object.entries(previous)) {
     if (Object.hasOwn(selected, relative)) continue;
+    if (path.isAbsolute(relative) || relative.split(/[/\\]/).includes('..')) throw new Error(`Invalid managed skill path: ${relative}`);
     if (isLiveSkill(path.join(root, relative.split(path.sep)[0]))) continue;
     const file = path.join(root, relative);
     if (!file.startsWith(`${root}${path.sep}`) || !fs.existsSync(file) || !fs.lstatSync(file).isFile()) continue;
+    let parent = path.dirname(file);
+    let linked = false;
+    while (parent !== root) {
+      if (fs.lstatSync(parent).isSymbolicLink()) { linked = true; break; }
+      parent = path.dirname(parent);
+    }
+    if (linked) {
+      console.error(`Retained linked skill file: ${file}`);
+      continue;
+    }
     const actual = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
     if (actual !== digest) {
       console.error(`Retained modified skill file: ${file}`);
@@ -90,15 +169,30 @@ export function reconcileSkills(project, previous = {}, selected = {}, agentDir 
   }
 }
 
-function globalPackagePath() {
-  return path.join(run('npm', ['root', '-g']), '@dfosco', 'clips');
+export function retireLegacySkillCopies(project, agentDir = '.agents') {
+  const receipt = readState().projects?.[fs.realpathSync(project)];
+  if ((receipt?.agent_dir || '.agents') !== agentDir) return;
+  const previous = receipt?.files || {};
+  const legacy = Object.fromEntries(Object.entries(previous).filter(([file]) => ['clips', 'clips-dev'].includes(file.split(path.sep)[0])));
+  reconcileSkills(project, legacy, {}, agentDir);
+}
+
+function globalPackagePaths() {
+  const root = run('npm', ['root', '-g']);
+  return ['lanes', 'clips'].map(name => path.join(root, '@dfosco', name));
 }
 
 function saveInstalledPackage(globalPath, state) {
   if (!fs.existsSync(globalPath) || fs.lstatSync(globalPath).isSymbolicLink()) return state;
   const installed = packageAt(globalPath);
   if (!installed) throw new Error(`Global ${PACKAGE_NAME} installation is incomplete: ${globalPath}`);
-  const destination = path.join(getSystemClipsDir(), 'installations', 'prod', installed.version);
+  const destination = path.join(getSystemClipsDir(), 'installations', 'prod', installed.name === LEGACY_PACKAGE_NAME ? 'clips' : 'lanes', installed.version);
+  if (fs.existsSync(destination)) {
+    const saved = packageAt(destination);
+    if (!saved || saved.name !== installed.name || saved.version !== installed.version) {
+      throw new Error(`Saved package conflicts with ${installed.name}@${installed.version}: ${destination}. Repair it explicitly before switching.`);
+    }
+  }
   if (!fs.existsSync(destination)) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const temporary = `${destination}.${process.pid}.tmp`;
@@ -109,11 +203,11 @@ function saveInstalledPackage(globalPath, state) {
 }
 
 function devCheckout(args, state) {
-  const requested = args.checkout || process.env.CLIPS_DEV_PATH || state.dev_checkout || CHECKOUT_ROOT;
+  const requested = args.checkout || process.env.LANES_DEV_PATH || process.env.CLIPS_DEV_PATH || state.dev_checkout || CHECKOUT_ROOT;
   const root = fs.realpathSync(path.resolve(requested));
   const manifest = packageAt(root);
-  if (!manifest || !fs.existsSync(path.join(root, '.git'))) {
-    throw new Error(`Clips development checkout not found: ${root}. Pass --checkout <path>.`);
+  if (!manifest || manifest.name !== PACKAGE_NAME || !fs.existsSync(path.join(root, '.git'))) {
+    throw new Error(`Lanes development checkout not found: ${root}. Pass --checkout <path>.`);
   }
   return root;
 }
@@ -134,27 +228,28 @@ function parseSwitchArgs(argv) {
 export function switchInstallation(mode, argv = []) {
   const args = parseSwitchArgs(argv);
   if (args.help) {
-    console.log(`Usage: clips ${mode} [--project <repo>]${mode === 'dev' ? ' [--checkout <clips-repo>]' : ''}`);
+    console.log(`Usage: lanes ${mode} [--project <repo>]${mode === 'dev' ? ' [--checkout <lanes-repo>]' : ''}`);
     return;
   }
   // init writes to the common repository root, including from nested worktrees.
   const project = fs.realpathSync(getRepoRoot(path.resolve(args.project || process.cwd())));
-  const agentDir = (() => {
-    try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
-    catch { return '.agents'; }
-  })();
+  const agentDir = readConfig(project, { strict: true }).agent_dir || '.agents';
   // A saved older CLI may not understand live links. Refuse before invoking it.
   const liveProject = findLiveSkill(path.resolve(project, agentDir, 'skills'));
   if (mode === 'prod' && liveProject) {
-    const title = liveProject === 'lane-manager' ? 'Lane Manager' : 'Clips';
+    const title = liveProject === 'lane-manager' ? 'Lane Manager' : 'Lanes';
     throw new Error(`Cannot refresh production skills over a live ${title} source. Keep the live installation or choose a project without that source link.`);
   }
-  const globalPath = globalPackagePath();
-  let state = saveInstalledPackage(globalPath, readState());
+  migrateStorage(project);
+  const [globalPath, legacyGlobalPath] = globalPackagePaths();
+  let state = saveInstalledPackage(fs.existsSync(globalPath) ? globalPath : legacyGlobalPath, readState());
   const checkout = devCheckout(args, state);
   const devCli = path.join(checkout, 'src', 'cli.js');
   const prod = state.prod_package && packageAt(state.prod_package);
-  if (!prod) throw new Error('No locally installed npm package was found. Install @dfosco/clips once before switching modes.');
+  if (!prod) throw new Error('No locally installed npm package was found. Install @dfosco/lanes once before switching modes.');
+  if (mode === 'prod' && prod.name === LEGACY_PACKAGE_NAME) {
+    throw new Error('The saved Clips release cannot safely use Lanes stores. Install @dfosco/lanes before switching to production; the legacy package has been preserved.');
+  }
   if (!fs.existsSync(globalPath) || fs.realpathSync(globalPath) !== checkout) {
     run('npm', ['link'], { cwd: checkout });
     if (!fs.existsSync(globalPath) || fs.realpathSync(globalPath) !== checkout) {
@@ -162,41 +257,30 @@ export function switchInstallation(mode, argv = []) {
     }
   }
   const activeCli = mode === 'dev' ? devCli : path.join(prod.root, 'src', 'cli.js');
-  run(process.execPath, [activeCli, 'init', '--skills-scope', 'project'], { cwd: project, stdio: 'inherit', env: { ...process.env, CLIPS_SWITCH_INIT: '1' } });
+  run(process.execPath, [activeCli, 'init', '--skills-scope', 'project'], { cwd: project, stdio: 'inherit', env: { ...process.env, LANES_SWITCH_INIT: '1', CLIPS_SWITCH_INIT: '1' } });
   const selectedRoot = mode === 'dev' ? checkout : prod.root;
   const selectedFiles = skillFiles(selectedRoot);
   reconcileSkills(project, state.projects?.[project]?.files, selectedFiles, agentDir);
-  state = { ...state, mode, dev_checkout: checkout, projects: { ...state.projects, [project]: { files: selectedFiles } } };
+  const refreshed = readState();
+  state = { ...refreshed, ...state, skill_installations: refreshed.skill_installations, mode, dev_checkout: checkout,
+    projects: { ...state.projects, [project]: { files: selectedFiles, agent_dir: agentDir } } };
   writeState(state);
-  console.log(`Clips ${mode}: ${mode === 'dev' ? checkout : `${prod.root} (${prod.version})`}`);
+  console.log(`Lanes ${mode}: ${mode === 'dev' ? checkout : `${prod.root} (${prod.version})`}`);
 }
 
 export function dispatchProd(argv) {
-  if (process.env.CLIPS_SWITCH_INIT === '1') return null;
+  // Migration and path discovery must use this runtime, not an older saved CLI.
+  if (['init', 'paths'].includes(argv[0]) || process.env.LANES_SWITCH_INIT === '1' || process.env.CLIPS_SWITCH_INIT === '1') return null;
   const state = readState();
   if (state.mode !== 'prod') return null;
   try {
     if (!state.dev_checkout || fs.realpathSync(state.dev_checkout) !== fs.realpathSync(CHECKOUT_ROOT)) return null;
   } catch { return null; }
-  if (argv[0] === 'init') {
-    const scopeIndex = argv.indexOf('--skills-scope');
-    const userScope = argv.includes('--global') || (scopeIndex !== -1 && argv[scopeIndex + 1] === 'user');
-    const projectScope = scopeIndex !== -1 && argv[scopeIndex + 1] === 'project';
-    const project = fs.realpathSync(getRepoRoot());
-    const agentDir = (() => {
-      try { return JSON.parse(fs.readFileSync(path.join(project, '.clips', 'clips.config.json'), 'utf8')).agent_dir || '.agents'; }
-      catch { return '.agents'; }
-    })();
-    const liveUser = findLiveSkill(path.join(os.homedir(), '.agents', 'skills'));
-    const liveProject = findLiveSkill(path.resolve(project, agentDir, 'skills'));
-    const live = userScope ? liveUser : projectScope ? liveProject : liveUser || liveProject;
-    if (live) {
-      const title = live === 'lane-manager' ? 'Lane Manager' : 'Clips';
-      throw new Error(`Cannot run saved production init over a live ${title} source. Use the checkout CLI in development mode to preserve it.`);
-    }
-  }
   const prod = state.prod_package && packageAt(state.prod_package);
-  if (!prod) throw new Error('Saved npm installation is missing. Run clips dev to repair the installation.');
+  if (!prod) throw new Error('Saved npm installation is missing. Run lanes dev to repair the installation.');
+  if (prod.name === LEGACY_PACKAGE_NAME) {
+    throw new Error('The saved Clips release cannot safely use Lanes stores. Run lanes dev or install @dfosco/lanes before using production mode.');
+  }
   const result = spawnSync(process.execPath, [path.join(prod.root, 'src', 'cli.js'), ...argv], { stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;

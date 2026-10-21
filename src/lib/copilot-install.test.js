@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import { canvasBuildManifest } from '../../plugins/copilot/src/canvas-build.js';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { copilotSdkPlatform, installCopilot, rollbackCopilotInstall, verifyCopilotPrerequisites } from './copilot-install.js';
 
 const roots = [];
+const coreSkills = ['lanes', 'lane-manager', 'lane-dev', 'lane-radar', 'lane-plugin'];
 function writeRootRuntime(root) {
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: '@dfosco/clips', version: '1.8.0', type: 'module', dependencies: { 'fixture-runtime': '1.0.0' } }));
@@ -59,13 +60,16 @@ function fixture() {
   const home = path.join(root, 'home');
   const copilotHome = path.join(home, '.copilot');
   const clipsHome = path.join(home, '.clips');
+  vi.stubEnv('LANES_HOME', clipsHome);
+  vi.stubEnv('CLIPS_HOME', clipsHome);
+  vi.stubEnv('HOME', home);
   const pluginRoot = path.join(repositoryRoot, 'plugins', 'copilot');
   writeRootRuntime(repositoryRoot);
   writePackage(pluginRoot);
   fs.writeFileSync(path.join(pluginRoot, 'extension.mjs'), 'export {}\n');
-  fs.mkdirSync(path.join(repositoryRoot, 'plugins', 'copilot', 'skills', 'clips-copilot'), { recursive: true });
-  fs.writeFileSync(path.join(repositoryRoot, 'plugins', 'copilot', 'skills', 'clips-copilot', 'SKILL.md'), 'host adapter guidance\n');
-  for (const skill of ['clips', 'lane-manager', 'clips-dev']) {
+  fs.mkdirSync(path.join(repositoryRoot, 'plugins', 'copilot', 'skills', 'lanes-copilot'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryRoot, 'plugins', 'copilot', 'skills', 'lanes-copilot', 'SKILL.md'), 'host adapter guidance\n');
+  for (const skill of coreSkills) {
     const dir = path.join(repositoryRoot, '.agents', 'skills', skill);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'SKILL.md'), `canonical ${skill}\n`);
@@ -84,14 +88,73 @@ function install(f, extra = {}) {
     ...extra,
   });
 }
-afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
 describe('local Copilot extension installation', () => {
+  function legacyReceipt(f) {
+    const source = path.join(f.root, 'old-source');
+    const target = path.join(f.copilotHome, 'skills', 'clips-copilot');
+    const backup = path.join(f.clipsHome, 'copilot-backups', 'original');
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'SKILL.md'), 'old source');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync(source, target);
+    fs.mkdirSync(backup, { recursive: true });
+    fs.writeFileSync(path.join(backup, 'notes.md'), 'prior local content');
+    const stateFile = path.join(f.clipsHome, 'copilot-workspaces-install.json');
+    fs.writeFileSync(stateFile, JSON.stringify({ version: 1, repository: f.repositoryRoot, custom: true, targets: [{ target, source, backup, created: true }] }));
+    return { target, source, backup, stateFile };
+  }
+
+  it('retires an unchanged legacy managed link and restores its original local backup', () => {
+    const f = fixture();
+    const previous = legacyReceipt(f);
+    const result = install(f);
+    expect(result.retired).toEqual([previous.target]);
+    expect(fs.lstatSync(previous.target).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(previous.target, 'notes.md'), 'utf8')).toBe('prior local content');
+    expect(fs.readFileSync(path.join(previous.source, 'SKILL.md'), 'utf8')).toBe('old source');
+    expect(JSON.parse(fs.readFileSync(previous.stateFile))).toMatchObject({ custom: true });
+    expect(install(f).retired).toEqual([]);
+  });
+
+  it('preserves unknown legacy sources and changed links instead of inferring ownership', () => {
+    const f = fixture();
+    const previous = legacyReceipt(f);
+    fs.unlinkSync(previous.target);
+    const changed = path.join(f.root, 'changed-source');
+    fs.mkdirSync(changed);
+    fs.symlinkSync(changed, previous.target);
+    const unknown = path.join(f.copilotHome, 'skills', 'clips');
+    fs.mkdirSync(unknown);
+    fs.writeFileSync(path.join(unknown, 'SKILL.md'), 'unmanaged');
+    expect(install(f).retired).toEqual([]);
+    expect(fs.realpathSync(previous.target)).toBe(fs.realpathSync(changed));
+    expect(fs.readFileSync(path.join(unknown, 'SKILL.md'), 'utf8')).toBe('unmanaged');
+    expect(fs.existsSync(previous.backup)).toBe(true);
+  });
+
+  it('restores retired links and backups if saving the new receipt fails', () => {
+    const f = fixture();
+    const previous = legacyReceipt(f);
+    const before = fs.readFileSync(previous.stateFile, 'utf8');
+    const rename = fs.renameSync;
+    vi.spyOn(fs, 'renameSync').mockImplementation((source, target) => {
+      if (target === previous.stateFile) throw new Error('receipt write failure');
+      return rename(source, target);
+    });
+    expect(() => install(f)).toThrow('receipt write failure');
+    expect(fs.readFileSync(previous.stateFile, 'utf8')).toBe(before);
+    expect(fs.realpathSync(previous.target)).toBe(fs.realpathSync(previous.source));
+    expect(fs.readFileSync(path.join(previous.backup, 'notes.md'), 'utf8')).toBe('prior local content');
+    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'lanes'))).toBe(false);
+  });
+
   it('links the extension and canonical skills, preserves settings, and repeats without replacing links', () => {
     const f = fixture();
     const options = { repositoryRoot: f.repositoryRoot, home: f.home, copilotHome: f.copilotHome, clipsHome: f.clipsHome, runNpm: (_command, args) => installFakePlatformPackage(args.at(-1)) };
     const first = installCopilot(options);
-    expect(first.results).toHaveLength(5);
+    expect(first.results).toHaveLength(coreSkills.length + 2);
     expect(first.dependencies.installedPlatformPackage.packageName).toBe(`@github/copilot-sdk-${copilotSdkPlatform()}`);
     expect(fs.existsSync(first.dependencies.installedPlatformPackage.runtimeNode)).toBe(true);
     for (const { target, source, changed } of first.results) {
@@ -101,24 +164,25 @@ describe('local Copilot extension installation', () => {
     }
     expect(fs.realpathSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces')))
       .toBe(fs.realpathSync(path.join(f.repositoryRoot, 'plugins', 'copilot')));
-    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe('canonical clips\n');
+    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'lanes', 'SKILL.md'), 'utf8')).toBe('canonical lanes\n');
     expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'lane-manager', 'SKILL.md'), 'utf8')).toBe('canonical lane-manager\n');
-    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'clips-copilot', 'SKILL.md'), 'utf8')).toBe('host adapter guidance\n');
+    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'lanes-copilot', 'SKILL.md'), 'utf8')).toBe('host adapter guidance\n');
+    expect(fs.readdirSync(path.join(f.copilotHome, 'skills')).sort()).toEqual([...coreSkills, 'lanes-copilot'].sort());
     expect(fs.readFileSync(path.join(f.copilotHome, 'settings.json'), 'utf8')).toBe('{"keep":true}\n');
 
     const second = installCopilot(options);
     expect(second.results.every(result => !result.changed)).toBe(true);
     expect(second.results.map(result => result.target)).toEqual(first.results.map(result => result.target));
-    fs.writeFileSync(path.join(f.repositoryRoot, '.agents', 'skills', 'clips', 'SKILL.md'), 'updated canonical clips\n');
-    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'clips', 'SKILL.md'), 'utf8')).toBe('updated canonical clips\n');
+    fs.writeFileSync(path.join(f.repositoryRoot, '.agents', 'skills', 'lanes', 'SKILL.md'), 'updated canonical lanes\n');
+    expect(fs.readFileSync(path.join(f.copilotHome, 'skills', 'lanes', 'SKILL.md'), 'utf8')).toBe('updated canonical lanes\n');
   });
 
-  it('backs up existing local content and restores it on rollback', () => {
+  it.each(['lanes', 'lane-plugin'])('backs up existing %s content and restores it on rollback', name => {
     const f = fixture();
     const extension = path.join(f.copilotHome, 'extensions', 'clips-workspaces');
     fs.mkdirSync(extension, { recursive: true });
     fs.writeFileSync(path.join(extension, 'local-note.txt'), 'keep me\n');
-    const skill = path.join(f.copilotHome, 'skills', 'clips');
+    const skill = path.join(f.copilotHome, 'skills', name);
     fs.mkdirSync(skill, { recursive: true });
     fs.writeFileSync(path.join(skill, 'SKILL.md'), 'previous local guidance\n');
 
@@ -181,9 +245,9 @@ describe('local Copilot extension installation', () => {
     writeRootRuntime(secondCheckout);
     writePackage(secondPlugin);
     fs.writeFileSync(path.join(secondPlugin, 'extension.mjs'), 'export const changed = true\n');
-    fs.mkdirSync(path.join(secondCheckout, 'plugins', 'copilot', 'skills', 'clips-copilot'), { recursive: true });
-    fs.writeFileSync(path.join(secondCheckout, 'plugins', 'copilot', 'skills', 'clips-copilot', 'SKILL.md'), 'second host guidance\n');
-    for (const skill of ['clips', 'lane-manager', 'clips-dev']) {
+    fs.mkdirSync(path.join(secondCheckout, 'plugins', 'copilot', 'skills', 'lanes-copilot'), { recursive: true });
+    fs.writeFileSync(path.join(secondCheckout, 'plugins', 'copilot', 'skills', 'lanes-copilot', 'SKILL.md'), 'second host guidance\n');
+    for (const skill of coreSkills) {
       fs.mkdirSync(path.join(secondCheckout, '.agents', 'skills', skill), { recursive: true });
       fs.writeFileSync(path.join(secondCheckout, '.agents', 'skills', skill, 'SKILL.md'), `second ${skill}\n`);
     }
@@ -213,7 +277,7 @@ describe('local Copilot extension installation', () => {
     const result = install(f, { runNpm: (command, args, options) => {
       invocation = { command, args, options };
       expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
-      expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'clips'))).toBe(false);
+      expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'lanes'))).toBe(false);
       installFakePlatformPackage(f.pluginRoot);
     } });
     expect(invocation.command).toBe('npm');
@@ -243,7 +307,7 @@ describe('local Copilot extension installation', () => {
     let npmCalled = false;
     const runNpm = () => { npmCalled = true; };
     fs.appendFileSync(path.join(f.repositoryRoot, 'src/cli.js'), "import './missing-module.js';\n");
-    expect(() => install(f, { runNpm })).toThrow(/complete Clips checkout/);
+    expect(() => install(f, { runNpm })).toThrow(/complete Lanes checkout/);
     writeRootRuntime(f.repositoryRoot);
     fs.writeFileSync(path.join(f.repositoryRoot, 'node_modules/fixture-runtime/package.json'), '{"version":"0.9.0"}');
     expect(() => install(f, { runNpm })).toThrow(/does not match package-lock.json/);
@@ -274,6 +338,17 @@ describe('local Copilot extension installation', () => {
     expect(() => install(f, { runNpm: () => { npmCalled = true; } })).toThrow(/canvas build is missing or stale/);
     expect(npmCalled).toBe(false);
     expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
+  });
+
+  it('rejects a missing lane-plugin source before provisioning or exposing any targets', () => {
+    const f = fixture();
+    fs.unlinkSync(path.join(f.repositoryRoot, '.agents', 'skills', 'lane-plugin', 'SKILL.md'));
+    const runNpm = vi.fn();
+    expect(() => install(f, { runNpm })).toThrow();
+    expect(runNpm).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
+    expect(fs.existsSync(path.join(f.copilotHome, 'skills'))).toBe(false);
+    expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
   });
 
   it('leaves local targets untouched if dependency installation fails', () => {
@@ -318,8 +393,8 @@ describe('local Copilot extension installation', () => {
     } })).toThrow(/simulated link failure/);
     expect(count).toBe(4);
     expect(fs.existsSync(path.join(f.copilotHome, 'extensions', 'clips-workspaces'))).toBe(false);
-    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'clips-copilot'))).toBe(false);
-    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'clips'))).toBe(false);
+    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'lanes-copilot'))).toBe(false);
+    expect(fs.existsSync(path.join(f.copilotHome, 'skills', 'lanes'))).toBe(false);
     expect(fs.existsSync(path.join(f.clipsHome, 'copilot-workspaces-install.json'))).toBe(false);
   });
 });

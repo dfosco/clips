@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // These live skills are maintained by their checkout, never by a refresh.
-export const LIVE_SKILL_NAMES = ['clips', 'lane-manager', 'clips-dev'];
+export const LIVE_SKILL_NAMES = ['lanes', 'lane-manager', 'lane-dev', 'lane-radar', 'lane-plugin'];
+const PROTECTED_SKILL_NAMES = [...LIVE_SKILL_NAMES, 'clips', 'clips-dev'];
 
 export function isLiveSkill(target) {
   const name = path.basename(target);
-  if (!LIVE_SKILL_NAMES.includes(name)) return false;
+  if (!PROTECTED_SKILL_NAMES.includes(name)) return false;
   let current = path.resolve(target);
   // Inspect only the skill hierarchy, not OS aliases such as /var -> /private/var.
   for (let depth = 0; depth < 3; depth += 1) {
@@ -19,13 +20,13 @@ export function isLiveSkill(target) {
   const root = path.resolve(target, '../../..');
   try {
     return fs.existsSync(path.join(root, '.git')) &&
-      JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).name === '@dfosco/clips' &&
+      ['@dfosco/lanes', '@dfosco/clips'].includes(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).name) &&
       path.resolve(target) === path.join(root, '.agents', 'skills', name);
   } catch { return false; }
 }
 
 export function findLiveSkill(skillsRoot) {
-  return LIVE_SKILL_NAMES.find(name => isLiveSkill(path.join(skillsRoot, name)));
+  return PROTECTED_SKILL_NAMES.find(name => isLiveSkill(path.join(skillsRoot, name)));
 }
 
 // Preserve the original helper for existing callers.

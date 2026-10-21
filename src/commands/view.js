@@ -314,7 +314,7 @@ function viewLane(ref) {
 function listAllGoals(showAll = false, showAllUsers = false) {
   const clipsDbDir = getClipsDbDir();
   if (!fs.existsSync(clipsDbDir)) {
-    console.log(`${DIM}No goals yet. Create one with: clips goal create '{"title":"..."}'${RESET}`);
+    console.log(`${DIM}No goals yet. Create one with: lanes goal create '{"title":"..."}'${RESET}`);
     return;
   }
   
@@ -331,7 +331,7 @@ function listAllGoals(showAll = false, showAllUsers = false) {
       }
       console.log();
     }
-    console.log(`${DIM}No goals yet. Create one with: clips goal create '{"title":"..."}'${RESET}`);
+    console.log(`${DIM}No goals yet. Create one with: lanes goal create '{"title":"..."}'${RESET}`);
     return;
   }
   
@@ -456,10 +456,10 @@ function listAllGoals(showAll = false, showAllUsers = false) {
   
   // Show hints
   if (!showAll && !showAllUsers) {
-    console.log(`${DIM}Run \`clips view all\` to see hidden entries, \`clips view --all-users\` for all users${RESET}`);
+    console.log(`${DIM}Run \`lanes view all\` to see hidden entries, \`lanes view --all-users\` for all users${RESET}`);
     console.log();
   } else if (!showAll) {
-    console.log(`${DIM}Run \`clips view all\` to see entries hidden by clips.config.json${RESET}`);
+    console.log(`${DIM}Run \`lanes view all\` to see entries hidden by the project configuration${RESET}`);
     console.log();
   }
 }

@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { effectiveProjectId, ensureProjectIdentity, readProjectRegistry, registerProject, validateProjectId } from './registry.js';
 import { setConfigValue } from './config.js';
 
 const tempDirs = [];
 const originalClipsHome = process.env.CLIPS_HOME;
+beforeEach(() => vi.stubEnv('LANES_HOME', ''));
 
 function tempDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -22,6 +23,7 @@ function makeProject(parent, name) {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalClipsHome === undefined) delete process.env.CLIPS_HOME;
   else process.env.CLIPS_HOME = originalClipsHome;
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });

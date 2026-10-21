@@ -62,19 +62,19 @@ export function runComponentCommand([action, ...args]) {
       return;
     }
     case 'status': {
-      if (args.length !== 2) throw new Error('Usage: clips component status <ref> <active|retired>');
+      if (args.length !== 2) throw new Error('Usage: lanes component status <ref> <active|retired>');
       const ref = componentRef(args[0], { mutable: true });
       const component = changeComponentStatus(ref.componentId, args[1], { username: ref.username });
       console.log(JSON.stringify({ success: true, component_id: component.component_id, ref: component.ref, revision: component.revision, status: component.status }));
       return;
     }
     case 'show': {
-      if (args.length !== 1) throw new Error('Usage: clips component show <ref>');
+      if (args.length !== 1) throw new Error('Usage: lanes component show <ref>');
       console.log(JSON.stringify(readRequired(componentRef(args[0])), null, 2));
       return;
     }
     case 'history': {
-      if (args.length !== 1) throw new Error('Usage: clips component history <ref>');
+      if (args.length !== 1) throw new Error('Usage: lanes component history <ref>');
       const ref = componentRef(args[0]);
       readRequired(ref);
       console.log(JSON.stringify(readComponentHistory(ref.componentId, ref.username, { revision: ref.revision ?? undefined }), null, 2));
@@ -82,12 +82,12 @@ export function runComponentCommand([action, ...args]) {
     }
     case 'list': {
       const options = namespaceArgs(args);
-      if (options.args.length) throw new Error('Usage: clips component list [--namespace name]');
+      if (options.args.length) throw new Error('Usage: lanes component list [--namespace name]');
       console.log(JSON.stringify(listComponents(Object.hasOwn(options, 'username') ? { username: options.username } : {}), null, 2));
       return;
     }
     default:
-      console.log(`Usage: clips component <command> [args]
+      console.log(`Usage: lanes component <command> [args]
 
 Commands:
   create <json> [--namespace name]  Create a system component

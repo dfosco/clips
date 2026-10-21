@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { LIVE_SKILL_NAMES } from '../src/lib/lane-manager-install.js';
 import { installLiveSkill } from './install-lane-manager.js';
 
-export function installClipsSkills({
+export function installLanesSkills({
   sourceRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.agents/skills'),
   ...options
 } = {}) {
@@ -18,6 +18,8 @@ export function installClipsSkills({
   return sources.flatMap(({ name, source }) => installLiveSkill({ ...options, name, source }));
 }
 
+export const installClipsSkills = installLanesSkills;
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log(JSON.stringify(installClipsSkills(), null, 2));
+  console.log(JSON.stringify(installLanesSkills(), null, 2));
 }

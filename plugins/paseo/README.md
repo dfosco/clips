@@ -1,11 +1,11 @@
 
-# Clips Workspaces for Paseo
+# Lanes Workspaces for Paseo
 
-A Paseo-native, local-first UI for [@dfosco/clips](https://github.com/dfosco/clips).
+A Paseo-native, local-first UI for [@dfosco/lanes](https://github.com/dfosco/lanes).
 Browse **Lanes → Goals → Tasks** and start work in an isolated Paseo Git worktree,
 with or without an agent. Inspired by
 [ajma/paseo-issues-workspaces](https://github.com/ajma/paseo-issues-workspaces),
-but **Clips is the work system**, not GitHub Issues.
+but **Lanes is the work system**, not GitHub Issues.
 
 ## What it does
 
@@ -14,31 +14,41 @@ but **Clips is the work system**, not GitHub Issues.
   a label with a name and palette color. Each label's Edit action opens rename,
   recolor, and deletion controls. Catalog edits affect this project; deleting an
   assigned label is refused with the record refs that still use it. Labels are
-  independent of Clips status, acceptance, and Paseo runtime activity. The picker
+  independent of Lanes status, acceptance, and Paseo runtime activity. The picker
   uses Paseo's dialog on wide layouts and bottom sheet on compact layouts.
 
 - **Project selector:** Finds Git projects on the connected Paseo daemon whose
-  main checkout has an initialized `.clips/` store. Linked worktrees are grouped
+  main checkout has an initialized `.lanes/` or compatible `.clips/` store. Linked worktrees are grouped
   with the main project.
 - **Planning hierarchy:** Lane strategic framing, Goal engineering outcome,
   and each Task's work request. Expand records for scope, plan, decisions,
   and acceptance criteria. Search by title, ref, and description.
+- **Attachments:** Lane, Goal, and Task rows retain attachment titles and types.
+  Safe HTTP(S) links open only when selected. Markdown content is read on demand
+  through the exact record and attachment reference, so edits and missing files
+  stay visible without storing snapshots. Rendering treats content as text;
+  HTML is not executed and remote content is not fetched.
+- **GitHub collaboration:** A project-local On/Off control changes only the
+  selected project's configuration. Toggling does not publish. When enabled,
+  later supported Lanes record mutations may sync automatically.
 - **Run in Paseo:** Starts an agent in a new Git worktree branch for that exact
-  Clips reference. **Workspace only** creates the worktree without starting
+  Lanes reference. **Workspace only** creates the worktree without starting
   an agent. **Open workspace** returns to an existing one; **Start agent** starts
   another agent there when none is actively running or waiting for input.
-- **Running now:** Reads the actual Paseo agent directory, not the Clips
+- **Running now:** Reads the actual Paseo agent directory, not the Lanes
   `in_progress` field. Running and initializing agents count as active.
   A task with an idle agent shows **Workspace idle**, while permission
   requests show **Needs input**. The **Running** filter includes Lanes,
   Goals, or Tasks with active agents, plus parent groupings for active children.
-- **Safe identity:** Workspace titles embed the complete Clips ref; worktree
+- **Safe identity:** Workspace titles embed the complete Lanes ref; worktree
   branches carry a stable namespace-aware identity even when titles change.
   Agent labels provide a second identity path if a workspace is renamed.
   Creation checks the live workspace list, preexisting branches, and an
   in-flight guard before launching.
-- **Preserves ownership:** Clips journals and acceptance remain under
-  `.clips/`; no automatic status updates, closures, approvals, or GitHub writes.
+- **Preserves ownership:** Lanes journals and acceptance remain under
+  the resolved Lanes store; the collaboration toggle does not publish and
+  there are no automatic status updates, closures, or approvals. With
+  collaboration enabled, supported Lanes record mutations may sync to GitHub.
   Paseo owns agent sessions, workspace lifecycle, and worktree creation.
 
 ## Install
@@ -49,16 +59,16 @@ before installing. A ready provider is needed to start agents, but not to browse
 planning records. Plugins and their preparation commands run with the daemon
 user's filesystem and process privileges.
 
-Install this plugin directly from the Clips monorepo:
+Install this plugin directly from the Lanes monorepo:
 
 ```sh
-paseo plugin add git:dfosco/clips:plugins/paseo --ref main
+paseo plugin add git:dfosco/lanes:plugins/paseo --ref main
 paseo plugin ls clips-workspaces --json
 ```
 
 The runtime ID is `clips-workspaces`. The explicit `git:` prefix selects the
 repository rather than a registry listing. Paseo keeps the full monorepo checkout,
-including the canonical Clips CLI and skills. Preparation runs these exact commands
+including the canonical Lanes CLI and skills. Preparation runs these exact commands
 from `plugins/paseo` before Paseo moves and activates the candidate:
 
 ```sh
@@ -69,15 +79,15 @@ npm ci --omit=dev --ignore-scripts
 The root lock installs the canonical CLI's dependencies, including `skillshop`;
 the plugin lock installs `@getpaseo/client` and its transitive dependencies for
 the standalone session CLI. Paseo supplies the plugin SDK, React and Zod to its
-compiled entries. No global Clips installation, npm publication, `npm link`,
+compiled entries. No global Lanes installation, npm publication, `npm link`,
 web-board build, or developer-specific path is needed for the native plugin.
 
 For a local directory install, prepare the **full checkout** yourself first.
 Directory install/reload does not run the Git preparation commands:
 
 ```sh
-git clone https://github.com/dfosco/clips.git
-cd clips/plugins/paseo
+git clone https://github.com/dfosco/lanes.git
+cd lanes/plugins/paseo
 npm ci --prefix ../.. --omit=dev --ignore-scripts
 npm ci --omit=dev --ignore-scripts
 paseo plugin install "$PWD"
@@ -90,7 +100,7 @@ or your own full checkout:
 
 ```sh
 cd /path/to/planning-repository
-node /path/to/clips/src/cli.js init --skills-scope project
+node /path/to/lanes/src/cli.js init --skills-scope project
 ```
 
 With a remote daemon, put `--host <target>` before `plugin` and ensure Git, npm,
@@ -127,35 +137,38 @@ An existing runtime ID is rejected by install. Switching an existing directory
 installation to a Git source requires an explicit remove and add; do not use that
 as an update or discard a development checkout unintentionally.
 
-The native Paseo integration does not need `dist/web`. The separate `clips web`
-command requires a root development install and `npm run web:build`. These
-distribution checks do not claim native UI rendering or agent-provider parity.
+The native Paseo integration does not need retired web-board assets. Distribution
+checks do not claim native UI rendering or agent-provider parity.
 
-Run **Clips** from the Paseo sidebar or Command Center. Configure a ready
-provider in Paseo to start agents. **Clips settings** selects launch defaults.
+Run **Lanes** from the Paseo sidebar or Command Center. Configure a ready
+provider in Paseo to start agents. **Lanes settings** selects launch defaults.
 
 **CLI resolution:** The backend reads public `paseo.config.get()` plugin sources.
 It selects the single enabled source whose manifest ID is exactly
 `clips-workspaces`, then runs that full checkout's `src/cli.js` with the server's
 Node executable. It uses the final installed path, including after staging moves.
 A missing or ambiguous source fails with guidance instead of choosing an arbitrary
-`clips` from `PATH`. Multiple enabled copies need an explicit `CLIPS_CLI_PATH`
+`lanes` from `PATH`. Multiple enabled copies need an explicit `LANES_CLI_PATH`
 in the **daemon host's environment**. That override takes precedence and may name
 a JavaScript CLI file or executable. It must implement the matching board, labels,
 Lane manager and work-contract commands. A broken checkout/dependency install is
-reported without falling back to an older global CLI.
+reported without falling back to an older global CLI. `CLIPS_CLI_PATH` remains a
+fallback when `LANES_CLI_PATH` is unset.
 
 The same checkout's CLI can be invoked from external shells and agent sessions
-with `node /path/to/clips/src/cli.js`; the plugin does not alter their `PATH`.
+with `node /path/to/lanes/src/cli.js`; the plugin does not alter their `PATH`.
 
-The plugin's server process reads Clips data by invoking
-`clips board --json` in the selected Git repository. No extra database,
-GitHub authentication, or issue sync is required.
+The plugin's server process reads Lanes data by invoking
+`lanes paths --json` and `lanes board --json` in the selected Git repository.
+Project directories, config filenames and user directories can independently use
+old or new naming. Conflicting populated stores are reported, not silently
+selected. No extra database, GitHub authentication, or issue sync is required.
+The `clips-workspaces` runtime ID and persisted record/session keys remain stable.
 
 ## CLI for configured sessions
 
 The plugin includes a small CLI for Lane Managers and other callers that need
-to start an agent with explicit settings. From a Clips checkout with the
+to start an agent with explicit settings. From a Lanes checkout with the
 Paseo plugin production dependencies installed:
 
 ```sh
@@ -180,13 +193,13 @@ Permission modes vary by provider. If the requested access level is not
 available, session creation reports that instead of silently falling back to
 the provider's default mode.
 
-`--dry-run` prints the target, workspace action, full Clips context prompt and
+`--dry-run` prints the target, workspace action, full Lanes context prompt and
 resolved Paseo config without creating a workspace or agent. Remove it to
-create the session. If more than one Clips workspace matches the ref, pass
+create the session. If more than one Lanes workspace matches the ref, pass
 `--workspace <id>`. With no match, the CLI creates an isolated worktree from
 the current branch, or from `--base <branch>` when provided. The project must
 be registered in Paseo. `--url`, `PASEO_WS_URL` and `PASEO_PASSWORD` select an
-alternate or authenticated daemon. `CLIPS_CLI_PATH` can select the Clips CLI
+alternate or authenticated daemon. `LANES_CLI_PATH` (legacy `CLIPS_CLI_PATH`) can select the Lanes CLI
 explicitly. The checkout-local CLI is the default; a plugin-only copy is unsupported.
 
 The CLI runs on Node.js 22.18 or later. From `plugins/paseo`, install
@@ -194,8 +207,8 @@ locked production dependencies with `npm ci --omit=dev --ignore-scripts`
 and the root preparation command above; then use:
 
 ```sh
-npm run clips-paseo -- options --project ../.. --provider codex
-npm run clips-paseo -- start --project ../.. --ref '#g001#t01' \
+npm run lanes-paseo -- options --project ../.. --provider codex
+npm run lanes-paseo -- start --project ../.. --ref '#g001#t01' \
   --provider codex/gpt-6.1-sol --thinking high --speed fast \
   --permission full-access --dry-run --json
 ```
@@ -214,15 +227,15 @@ The worktree branches from the selected checkout's current `HEAD`, **not**
 necessarily the remote's latest default branch. Update the checkout's
 base before launching when you need the newest upstream revision.
 
-An agent receives a prompt to read `AGENTS.md`, the Clips record,
+An agent receives a prompt to read `AGENTS.md`, the Lanes record,
 the associated skill, and the relevant source; then it works within
 that record's contract. A Lane prompt emphasizes strategic coordination,
 a Goal prompt emphasizes outcomes and Tasks, and a Task prompt emphasizes
 bounded change, tests, and evidence. No agent can self-grant human approval
 merely by setting status to closed.
 
-Because worktrees share the same Clips store through Git's common root,
-**concurrent agents can touch the same journals**. Clips recommends one
+Because worktrees share the same Lanes store through Git's common root,
+**concurrent agents can touch the same journals**. Lanes recommends one
 coordinator for shared records and separately owned source changes;
 short file locks do not implement a distributed task lease.
 
@@ -231,7 +244,7 @@ short file locks do not implement a distributed task lease.
 Status is derived from the current Paseo host's workspace and agent
 directories (with subscriptions and a 15-second backstop refresh).
 **Running** means a matching agent is `running` or `initializing`;
-it is not inferred from Clips planning status. **Needs input** means an
+it is not inferred from Lanes planning status. **Needs input** means an
 agent requires a response. **Idle** means the work has a workspace but
 no active agent. The counts for Goals and Lanes are for agents started
 *on those specific records*; a Running filter also displays ancestor
@@ -239,7 +252,7 @@ groups around directly running Task records.
 
 Workspaces on other Paseo hosts are not read by this first integration:
 install the plugin on each relevant daemon host to view its local
-Clips projects and executions. Do not interpret a missing local
+Lanes projects and executions. Do not interpret a missing local
 workspace as proof no work is running on another host.
 
 ## Development
@@ -258,10 +271,10 @@ paseo plugin logs clips-workspaces
 
 Paseo supplies host SDK, React and Zod modules to compiled entries and compiles the
 TypeScript source itself. The plugin never requires bundling a second
-React, a daemon, or a Clips journal parser.
+React, a daemon, or a Lanes journal parser.
 
 - `shared/`: RPC contracts, stable work identity, running-state mapping.
-- `server/`: Clips CLI adapter, safe project/worktree lookup, agent launch.
+- `server/`: Lanes CLI adapter, safe project/worktree lookup, agent launch.
 - `client/`: React Native-compatible hierarchy, live directory observation,
   project selection, filters, launch/open actions and agent settings.
 

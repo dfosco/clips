@@ -207,9 +207,9 @@ Print:
    Track progress: https://github.com/dfosco/storyboard/actions/workflows/release-publish.yml
 ```
 
-### Step 14: Create clips task
+### Step 14: Create Lanes task
 
-If clips is available, create a task under a relevant goal (or create a new goal) to track the release, and close it immediately.
+If lanes is available, create a task under a relevant goal (or create a new goal) to track the release, and close it immediately.
 
 ---
 

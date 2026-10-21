@@ -1,20 +1,22 @@
 {
-  "name": "@dfosco/clips",
+  "name": "@dfosco/lanes",
   "version": "2.0.0",
   "description": "Local-first planning and change-record workflow CLI",
   "type": "module",
   "bin": {
+    "lanes": "src/cli.js",
     "clips": "src/cli.js"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.js",
     "test:all": "npm test && npm run test:package",
     "test:package": "node scripts/package-smoke.js",
+    "lanes": "node src/cli.js",
     "clips": "node src/cli.js",
     "prepublishOnly": "npm run test:all",
     "preversion": "npm test",
     "publish:npm": "npm publish --access public",
-    "update": "npm install -g @dfosco/clips && npm list -g @dfosco/clips --depth=0",
+    "update": "npm install -g @dfosco/lanes && npm list -g @dfosco/lanes --depth=0",
     "version": "node -e \"import('fs').then(fs => { const v = JSON.parse(fs.readFileSync('package.json','utf8')).version; fs.writeFileSync('src/version.js', 'export const version = \\'' + v + '\\';\\n'); })\" && git add src/version.js",
     "postversion": "git push && git push --tags && gh release create v$(node -p \"require('./package.json').version\") --generate-notes",
     "release": "npm version patch",
@@ -23,16 +25,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dfosco/clips.git"
+    "url": "git+https://github.com/dfosco/lanes.git"
   },
   "author": "dfosco",
   "license": "MIT",
   "files": [
     "src/**/*.js",
     "!src/**/*.test.js",
-    ".agents/skills/clips",
+    ".agents/skills/lanes",
     ".agents/skills/lane-manager",
-    ".agents/skills/clips-dev",
+    ".agents/skills/lane-dev",
+    ".agents/skills/lane-radar",
+    ".agents/skills/lane-plugin",
     "skillshop.manifest.mjs",
     "npm-shrinkwrap.json",
     "README.md",
@@ -64,9 +68,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "homepage": "https://github.com/dfosco/clips#readme",
+  "homepage": "https://github.com/dfosco/lanes#readme",
   "bugs": {
-    "url": "https://github.com/dfosco/clips/issues"
+    "url": "https://github.com/dfosco/lanes/issues"
   },
   "devDependencies": {
     "vitest": "^4.1.10"

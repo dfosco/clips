@@ -122,7 +122,7 @@ describe("opening lane workspace panels", () => {
     expect(await openLanePanel(undefined, "w1", open)).toBeNull();
     expect(open).not.toHaveBeenCalled();
     const error = await openLanePanel(lane, "w1", () => { throw new Error("offline"); });
-    expect(error).toBe("Workspace is ready, but the Clips panel could not open: offline");
+    expect(error).toBe("Workspace is ready, but the Lanes panel could not open: offline");
   });
 
   it("refreshes before navigating, publishing focus, and opening the returned workspace panel", async () => {

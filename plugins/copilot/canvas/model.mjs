@@ -35,8 +35,8 @@ export function recordPrompt(record, context = {}) {
     parent.trim(),
     description ? `Description:\n${description}` : '',
     context.lane ? `Strategic Lane: ${context.lane.ref} — ${context.lane.title}` : '',
-    'Use the canonical Clips CLI and record store. Read the record and blockers before acting. This message uses the current joined Copilot session; joining does not prove native App visibility or top-level parentage. Report concrete results and checks without claiming unperformed runtime or visual verification.',
-    kind === 'lane' ? 'Coordinate the Lane and delegate complete outcomes to actual user-visible, steerable App sessions. Coordinated child sessions are supported through the native App tools; keep them attached and maintain parent communication. Host identity, claims and earlier work associations are advisory, not permission gates. Do not create a claim merely to begin planning.' : 'Own the requested engineering outcome and its verification. Follow the current user authorization and the canonical Clips task contracts.',
+    'Use the canonical Lanes CLI and record store. Read the record and blockers before acting. This message uses the current joined Copilot session; joining does not prove native App visibility or top-level parentage. Report concrete results and checks without claiming unperformed runtime or visual verification.',
+    kind === 'lane' ? 'Coordinate the Lane and delegate complete outcomes to actual user-visible, steerable App sessions. Coordinated child sessions are supported through the native App tools; keep them attached and maintain parent communication. Host identity, claims and earlier work associations are advisory, not permission gates. Do not create a claim merely to begin planning.' : 'Own the requested engineering outcome and its verification. Follow the current user authorization and the canonical Lanes task contracts.',
   ].filter(Boolean).join('\n\n');
 }
 

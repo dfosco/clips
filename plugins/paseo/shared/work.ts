@@ -51,14 +51,14 @@ export function branchName(target: WorkTarget): string {
 }
 
 export function workspaceTitle(target: WorkTarget): string {
-  return `Clips ${target.ref} · ${target.title}`;
+  return `Lanes ${target.ref} · ${target.title}`;
 }
 
 export function matchesWorkspace(workspace: WorkspaceInfo, target: WorkTarget, projectIds: readonly string[]): boolean {
   if (!projectIds.includes(workspace.projectId)) return false;
   const prefix = branchPrefix(target);
-  return workspace.name === `Clips ${target.ref}` ||
-    workspace.name.startsWith(`Clips ${target.ref} · `) ||
+  return workspace.name === `Lanes ${target.ref}` ||
+    workspace.name.startsWith(`Lanes ${target.ref} · `) ||
     workspace.branch === prefix ||
     workspace.branch.startsWith(`${prefix}-`);
 }
@@ -159,16 +159,16 @@ export function promptFor(target: WorkTarget): string {
       ? "Work toward this Goal's engineering outcome. Read the plan and its Tasks, respect blockers, and favor independently reviewable changes with tests."
       : "Implement this Task's bounded request, meet its stated acceptance criteria, test the actual changes, and document the result and evidence without self-approving human-owned acceptance. A Task assignment does not authorize sibling scope.";
   const executionGuidance = target.kind === "lane"
-    ? "In every handoff, instruct the top-level dev owner to follow the Clips skill's 'Plan and execute parallel Tasks' guidance: plan concurrency in identified Task contracts before assignment, pass dependencies and source/write boundaries, and use sub-agents for as much useful feasible Task work as possible. Require dependency-ready, non-conflicting Tasks to run concurrently, prerequisites and conflicting writes to be sequenced, and one dev coordinator for integration, verification and workflow-record writes, with Task-ID-scoped results and actual candidate evidence. No filler Tasks or worker quota. Do not create or direct the owner's sub-agents yourself."
-    : "Follow the Clips skill's 'Plan and execute parallel Tasks' guidance. Before execution or separate assignment, reuse or amend agreed contracts or create independently reviewable identified Clips Tasks within authorized scope. Plan useful concurrency up front: blocked_by prerequisites, source/write boundaries, and integration/verification obligations. Use sub-agents for as much useful feasible work as possible, assigning each worker Task IDs and contracts. Run dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and conflicting writes. Keep one dev coordinator for integration, verification and workflow-record writes. Return results and checks mapped to Task IDs and the actual source/artifact checked; verify the integrated candidate and recheck affected evidence after changes. Record concrete constraints when serial execution is needed; no filler Tasks or worker quota.";
-  return `Work on Clips ${target.kind} ${target.ref}: ${target.title}
+    ? "In every handoff, instruct the top-level dev owner to follow the Lanes skill's 'Plan and execute parallel Tasks' guidance: plan concurrency in identified Task contracts before assignment, pass dependencies and source/write boundaries, and use sub-agents for as much useful feasible Task work as possible. Require dependency-ready, non-conflicting Tasks to run concurrently, prerequisites and conflicting writes to be sequenced, and one dev coordinator for integration, verification and workflow-record writes, with Task-ID-scoped results and actual candidate evidence. No filler Tasks or worker quota. Do not create or direct the owner's sub-agents yourself."
+    : "Follow the Lanes skill's 'Plan and execute parallel Tasks' guidance. Before execution or separate assignment, reuse or amend agreed contracts or create independently reviewable identified Lanes Tasks within authorized scope. Plan useful concurrency up front: blocked_by prerequisites, source/write boundaries, and integration/verification obligations. Use sub-agents for as much useful feasible work as possible, assigning each worker Task IDs and contracts. Run dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and conflicting writes. Keep one dev coordinator for integration, verification and workflow-record writes. Return results and checks mapped to Task IDs and the actual source/artifact checked; verify the integrated candidate and recheck affected evidence after changes. Record concrete constraints when serial execution is needed; no filler Tasks or worker quota.";
+  return `Work on Lanes ${target.kind} ${target.ref}: ${target.title}
 
-Start by reading AGENTS.md and the Clips skill if present. Read the complete Clips record for ${target.ref} using the local Clips CLI (clips view '${target.ref}' --json), then inspect linked records, blockers, and relevant source files.
+Start by reading AGENTS.md and the Lanes skill if present. Read the complete Lanes record for ${target.ref} using the local Lanes CLI (clips view '${target.ref}' --json), then inspect linked records, blockers, and relevant source files.
 ${instructions}
 
 ${executionGuidance}
 
-Follow the Clips skill's shared Paseo integration procedure for work-record updates and actual session/project/workspace binding readback when Paseo is available. Keep owner, status, blockers, results and acceptance evidence current through supported commands. An ordinary Goal/Task dev agent does not need Lane Manager role or a Lane management claim to contribute. Without Paseo, continue authorized local Clips work and report runtime association as unavailable.
+Follow the Lanes skill's shared Paseo integration procedure for work-record updates and actual session/project/workspace binding readback when Paseo is available. Keep owner, status, blockers, results and acceptance evidence current through supported commands. An ordinary Goal/Task dev agent does not need Lane Manager role or a Lane management claim to contribute. Without Paseo, continue authorized local Lanes work and report runtime association as unavailable.
 
-The worktree shares the repository's Clips store through the common Git directory. Preserve workflow record history; distinguish completed implementation from accepted work. Summarize changed files, checks, and unresolved issues. Do not create GitHub Issues or assume Clips status means a Paseo agent is running.`;
+The worktree shares the repository's Lanes store through the common Git directory. Preserve workflow record history; distinguish completed implementation from accepted work. Summarize changed files, checks, and unresolved issues. Do not create GitHub Issues or assume Lanes status means a Paseo agent is running.`;
 }

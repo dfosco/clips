@@ -19,14 +19,14 @@ function register() {
   return client;
 }
 
-describe("Clips workspace contributions", () => {
+describe("Lanes workspace contributions", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("makes the same board available in workspace tabs and Explorer with settings intact", () => {
     const client = register();
     const panel = client.addWorkspacePanel.mock.calls[0][0];
     expect(panel).toMatchObject({
-      id: "work", title: "Clips", context: "workspace", locations: ["workspace", "explorer"],
+      id: "work", title: "Lanes", context: "workspace", locations: ["workspace", "explorer"],
     });
     const element = panel.Component({ workspaceId: "workspace-1" });
     expect(element.type).toBe(WorkspaceWorkScreen);
@@ -44,8 +44,8 @@ describe("Clips workspace contributions", () => {
     const openPanel = vi.fn();
     command.onSelect({ openPanel });
     expect(openPanel).toHaveBeenCalledWith("work", { location: "workspace" });
-    expect(client.addScreen.mock.calls[0][0]).toMatchObject({ id: "work", title: "Clips" });
-    expect(client.addSidebarHeaderItem.mock.calls[0][0]).toMatchObject({ id: "clips", title: "Clips" });
+    expect(client.addScreen.mock.calls[0][0]).toMatchObject({ id: "work", title: "Lanes" });
+    expect(client.addSidebarHeaderItem.mock.calls[0][0]).toMatchObject({ id: "clips", title: "Lanes" });
   });
 
   it("reads the panel's workspace project from cached state and passes host navigation through", () => {

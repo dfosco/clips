@@ -1,4 +1,4 @@
-/** Transient navigation requests only. Workspace ownership stays in Paseo/Clips identity. */
+/** Transient navigation requests only. Workspace ownership stays in Paseo/Lanes identity. */
 export type FocusIntent = { laneRef: string; version: number };
 export type WorkspaceFocusIntent = FocusIntent & { projectId: string };
 const intents = new Map<string, FocusIntent>();

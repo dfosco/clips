@@ -56,7 +56,7 @@ export function SettingsScreen({ theme, host }: PluginSurfaceProps) {
   const settings = useSettings(preferences);
   if (settings.status === "loading") return <ActivityIndicator color={theme.colors.foregroundMuted} />;
   if (settings.status === "error" || settings.status === "invalid") {
-    return <Text style={{ color: theme.colors.statusDanger }}>Clips settings unavailable: {settings.error}</Text>;
+    return <Text style={{ color: theme.colors.statusDanger }}>Lanes settings unavailable: {settings.error}</Text>;
   }
   return (
     <SettingsForm

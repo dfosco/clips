@@ -4,13 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LIVE_SKILL_NAMES } from '../src/lib/lane-manager-install.js';
+import { getSystemClipsDir } from '../src/lib/registry.js';
 
 export function installLiveSkill({
   name,
   source,
   home = os.homedir(),
   codexHome = process.env.CODEX_HOME || path.join(home, '.codex'),
-  backupRoot = path.join(process.env.CLIPS_HOME || path.join(home, '.clips'), 'skill-backups'),
+  backupRoot = path.join(getSystemClipsDir({ home }), 'skill-backups'),
 } = {}) {
   if (!LIVE_SKILL_NAMES.includes(name)) throw new Error(`Unsupported live skill: ${name}`);
   source = fs.realpathSync(source);

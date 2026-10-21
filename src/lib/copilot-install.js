@@ -5,14 +5,15 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { getSystemClipsDir } from './registry.js';
 
-export const COPILOT_SKILL_NAMES = ['clips', 'lane-manager', 'clips-dev'];
+export const COPILOT_SKILL_NAMES = ['lanes', 'lane-manager', 'lane-dev', 'lane-radar', 'lane-plugin'];
 const STATE_VERSION = 1;
 
 export function verifyCopilotPrerequisites(repositoryRoot, {
   nodeVersion = process.versions.node,
   runNode = execFileSync,
-  clipsHome = process.env.CLIPS_HOME || path.join(os.homedir(), '.clips'),
+  clipsHome = getSystemClipsDir(),
 } = {}) {
   const [major, minor] = nodeVersion.split('.').map(Number);
   if (!(major > 22 || (major === 22 && minor >= 18))) {
@@ -24,8 +25,8 @@ export function verifyCopilotPrerequisites(repositoryRoot, {
     const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const lockName = fs.existsSync(path.join(root, 'npm-shrinkwrap.json')) ? 'npm-shrinkwrap.json' : 'package-lock.json';
     const lock = JSON.parse(fs.readFileSync(path.join(root, lockName), 'utf8'));
-    if (manifest.name !== '@dfosco/clips' || !manifest.version || !fs.statSync(cliPath).isFile()) {
-      throw new Error('The canonical Clips CLI is missing.');
+    if (!['@dfosco/lanes', '@dfosco/clips'].includes(manifest.name) || !manifest.version || !fs.statSync(cliPath).isFile()) {
+      throw new Error('The canonical Lanes CLI is missing.');
     }
     // Require checkout-local, locked production dependencies. Node's normal
     // ancestor lookup must not make an incomplete checkout appear installable.
@@ -40,13 +41,13 @@ export function verifyCopilotPrerequisites(repositoryRoot, {
     // user's saved production-mode dispatch while checking this exact checkout.
     const version = runNode(process.execPath, [cliPath, '--version'], {
       cwd: root, encoding: 'utf8', timeout: 15000,
-      env: { ...process.env, CLIPS_HOME: clipsHome, CLIPS_SWITCH_INIT: '1' },
+      env: { ...process.env, LANES_HOME: clipsHome, CLIPS_HOME: clipsHome, LANES_SWITCH_INIT: '1', CLIPS_SWITCH_INIT: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
-    if (version !== `clips v${manifest.version}`) throw new Error(`Unexpected canonical CLI version: ${version}`);
-    return { nodeVersion, nodePath: process.execPath, cliPath, clipsVersion: manifest.version };
+    if (![ `lanes v${manifest.version}`, `clips v${manifest.version}` ].includes(version)) throw new Error(`Unexpected canonical CLI version: ${version}`);
+    return { nodeVersion, nodePath: process.execPath, cliPath, lanesVersion: manifest.version, clipsVersion: manifest.version };
   } catch (error) {
-    throw new Error(`Copilot installation requires the complete Clips checkout and its locked root runtime dependencies. Run npm ci --omit=dev --ignore-scripts at the repository root before retrying. ${error.message}`, { cause: error });
+    throw new Error(`Copilot installation requires the complete Lanes checkout and its locked root runtime dependencies. Run npm ci --omit=dev --ignore-scripts at the repository root before retrying. ${error.message}`, { cause: error });
   }
 }
 
@@ -138,6 +139,11 @@ function pointsTo(target, source) {
   catch { return false; }
 }
 
+function recordedLink(target, source) {
+  return targetEntry(target)?.isSymbolicLink() &&
+    (path.resolve(path.dirname(target), fs.readlinkSync(target)) === source || pointsTo(target, source));
+}
+
 function targetIdentity(target) {
   // Match equivalent home paths (for example /var and /private/var on macOS)
   // without following the installed leaf link into the source checkout.
@@ -213,9 +219,9 @@ export function copilotInstallPaths({
   const extensionTarget = path.join(copilotHome, 'extensions', 'clips-workspaces');
   const skillsRoot = path.join(copilotHome, 'skills');
   const targets = [{ name: 'clips-workspaces', target: extensionTarget, source: extensionSource }];
-  const hostSkill = fs.realpathSync(path.join(extensionSource, 'skills', 'clips-copilot'));
+  const hostSkill = fs.realpathSync(path.join(extensionSource, 'skills', 'lanes-copilot'));
   if (!fs.statSync(path.join(hostSkill, 'SKILL.md')).isFile()) throw new Error('Copilot host skill is missing SKILL.md');
-  targets.push({ name: 'skill-clips-copilot', target: path.join(skillsRoot, 'clips-copilot'), source: hostSkill });
+  targets.push({ name: 'skill-lanes-copilot', target: path.join(skillsRoot, 'lanes-copilot'), source: hostSkill });
   for (const name of COPILOT_SKILL_NAMES) {
     const source = fs.realpathSync(path.join(root, '.agents', 'skills', name));
     if (!fs.statSync(path.join(source, 'SKILL.md')).isFile()) throw new Error(`Canonical ${name} skill is missing SKILL.md`);
@@ -228,7 +234,8 @@ export function installCopilot({
   repositoryRoot,
   home = os.homedir(),
   copilotHome = process.env.COPILOT_HOME || path.join(home, '.copilot'),
-  clipsHome = process.env.CLIPS_HOME || path.join(home, '.clips'),
+  lanesHome,
+  clipsHome = lanesHome || getSystemClipsDir({ home }),
   runNpm = execFileSync,
   installLink = replaceWithLink,
 } = {}) {
@@ -238,6 +245,8 @@ export function installCopilot({
   const previousByTarget = new Map((previous?.targets || []).map(item => [targetIdentity(item.target), item]));
   const backupRoot = path.join(clipsHome, 'copilot-backups');
   const applied = [];
+  const retired = [];
+  let committed = false;
 
   try {
     const prerequisites = verifyCopilotPrerequisites(root, { clipsHome });
@@ -261,17 +270,50 @@ export function installCopilot({
       copilotSdkPlatform(),
     );
     verifyCanvasBuild(path.join(copilotHome, 'extensions', 'clips-workspaces'));
+    const legacyTargets = new Set(['clips', 'clips-dev', 'clips-copilot'].map(name => targetIdentity(path.join(copilotHome, 'skills', name))));
+    const retained = [];
+    const currentTargets = new Set(results.map(entry => targetIdentity(entry.target)));
+    for (const prior of previous?.targets || []) {
+      if (currentTargets.has(targetIdentity(prior.target))) continue;
+      if (!legacyTargets.has(targetIdentity(prior.target)) || !prior.created || !recordedLink(prior.target, prior.source)) {
+        retained.push(prior);
+        continue;
+      }
+      fs.mkdirSync(backupRoot, { recursive: true });
+      const staged = path.join(fs.mkdtempSync(path.join(backupRoot, 'retired-')), 'link');
+      fs.renameSync(prior.target, staged);
+      const retirement = { ...prior, staged, restored: false };
+      retired.push(retirement);
+      if (prior.backup && targetEntry(prior.backup)) {
+        fs.renameSync(prior.backup, prior.target);
+        retirement.restored = true;
+      }
+    }
     const state = {
+      ...previous,
       canvasBuild,
       version: STATE_VERSION,
       repository: root,
       installed_at: new Date().toISOString(),
-      targets: results.map(({ target, source, created, backup }) => ({ target, source, created, backup })),
+      targets: [...results.map(({ target, source, created, backup }) => ({ target, source, created, backup })), ...retained],
     };
     atomicJson(stateFile, state);
-    return { stateFile, prerequisites, dependencies: { ...dependencies, installedPlatformPackage }, results };
+    committed = true;
+    for (const entry of retired) {
+      fs.unlinkSync(entry.staged);
+      fs.rmdirSync(path.dirname(entry.staged));
+    }
+    return { stateFile, prerequisites, dependencies: { ...dependencies, installedPlatformPackage }, results, retired: retired.map(entry => entry.target) };
   } catch (error) {
-    try { rollbackApplied(applied); }
+    if (committed) throw new Error(`Copilot installation was saved, but retired-link cleanup failed: ${error.message}`, { cause: error });
+    try {
+      for (const entry of retired.reverse()) {
+        if (entry.restored) fs.renameSync(entry.target, entry.backup);
+        fs.renameSync(entry.staged, entry.target);
+        fs.rmdirSync(path.dirname(entry.staged));
+      }
+      rollbackApplied(applied);
+    }
     catch (rollbackError) { error.message += `; rollback also failed: ${rollbackError.message}`; }
     throw error;
   }
@@ -279,7 +321,8 @@ export function installCopilot({
 
 export function rollbackCopilotInstall({
   home = os.homedir(),
-  clipsHome = process.env.CLIPS_HOME || path.join(home, '.clips'),
+  lanesHome,
+  clipsHome = lanesHome || getSystemClipsDir({ home }),
 } = {}) {
   const stateFile = path.join(clipsHome, 'copilot-workspaces-install.json');
   const state = readState(stateFile);

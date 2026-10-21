@@ -1,12 +1,13 @@
 import { appendTrackEvent, listTracks, nextTrackId, normalizeTrackId, readTrack } from '../lib/tracks.js';
 import { discoverGoals } from '../lib/goal-discovery.js';
 import { appendEvent, readGoalWithTasks } from '../lib/core.js';
-import { pushGoal, pushTrack } from '../lib/sync.js';
+import { autoSyncGoal, autoSyncTrack } from '../lib/sync.js';
+import { reportAutoSyncResult } from './sync-output.js';
 
 const STATUSES = new Set(['open', 'in_progress', 'closed', 'not_planned', 'duplicate']);
 function syncTrack(id) {
-  try { pushTrack(id); }
-  catch (error) { console.error(`sync: track push failed for ${id}: ${error.message}`); }
+  const result = autoSyncTrack(id, { kind: 'track' });
+  reportAutoSyncResult(result, `#${id}`);
 }
 
 function requireTrack(ref) {
@@ -24,7 +25,7 @@ function trackWithGoals(track) {
 
 function addGoals(trackRef, refs) {
   const trackId = requireTrack(trackRef);
-  if (!refs.length) throw new Error('Add at least one goal: clips track <track> add <goal...>');
+  if (!refs.length) throw new Error('Add at least one goal: lanes track <track> add <goal...>');
 
   const goals = [];
   const seen = new Set();
@@ -57,8 +58,8 @@ function addGoals(trackRef, refs) {
     if (goal.track_id) moved.push({ goal_id: goal.goal_id, from_track_id: goal.track_id });
   }
   for (const goalId of added) {
-    try { pushGoal(goalId); }
-    catch (error) { console.error(`sync: goal push failed for ${goalId}: ${error.message}`); }
+    const result = autoSyncGoal(goalId);
+    reportAutoSyncResult(result, `#${goalId}`);
   }
   console.log(JSON.stringify({ success: true, track_id: trackId, added, moved, unchanged }));
 }
@@ -105,5 +106,5 @@ export function runTrackCommand([action, ...args]) {
     console.log(JSON.stringify({ success: true, track_id: id, status: args[1] }));
     return;
   }
-  console.log('Usage: clips track <create JSON|update REF JSON|status REF STATUS|show REF|list|REF add GOAL...>');
+  console.log('Usage: lanes track <create JSON|update REF JSON|status REF STATUS|show REF|list|REF add GOAL...>');
 }

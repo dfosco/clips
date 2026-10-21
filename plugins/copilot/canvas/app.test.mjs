@@ -212,7 +212,7 @@ test('empty associations and unavailable activity leave no placeholder footer or
 test('session sub-cards never display kickoff prompts or stale UUID-only associations as titles', async (t) => {
   const s = { ...state(), focus: task.ref };
   const stale = 'd9d34afd-3cdd-48ea-919c-a6f8b34edbeb';
-  const summary = 'You are the ordinary dev execution owner for canonical Clips Goal #g001. Read the persisted instructions before acting.';
+  const summary = 'You are the ordinary dev execution owner for canonical Lanes Goal #g001. Read the persisted instructions before acting.';
   s.workBindings = { [goal.ref]: [stale, 'named', 'prompt-only'] };
   s.projectSessions.push(
     { id: 'named', name: 'Security migration plans', summary, status: 'unknown' },
@@ -267,6 +267,76 @@ test('actual built Primer UI preserves Lane focus, unified full-card expansion a
   await f.click('[data-menu="#l001"]'); await f.click('[data-closed="#l001"]'); assert.ok(f.query('[data-record="#alice#g002"]'));
   assert.equal(f.query('button button'), null);
 });
+test('focused Lane header keeps Back above an intrinsic status/title row and bounds its description', async (t) => {
+  const s = state();
+  const description = 'Readable focused Lane context. '.repeat(18);
+  s.lanes[0] = { ...s.lanes[0], title: 'A deliberately long focused Lane title that must wrap cleanly', status: 'in_progress', description };
+  let releaseFocus;
+  let blockFocus = false;
+  const focusGate = new Promise(resolve => { releaseFocus = resolve; });
+  t.after(() => releaseFocus());
+  const f = await mount(t, s, async ({ action }) => {
+    if (action === 'focus' && blockFocus) await focusGate;
+  }, { colorMode: 'light', loadStyles: true, viewportWidth: 360 });
+  await focusLane(f);
+
+  const heading = f.query('.clips-board-project-heading-focused');
+  const back = f.query('[data-back]');
+  const title = heading.querySelector('h1');
+  const status = heading.querySelector('[data-record-status="#l001"]');
+  assert.equal(back.textContent.trim(), '← Back');
+  assert.ok(back.compareDocumentPosition(title) & f.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  assert.equal(title.nextElementSibling, status, 'status immediately follows the title');
+  assert.equal(status.textContent, 'In progress');
+  assert.equal(f.window.document.querySelectorAll('[data-record-status="#l001"]').length, 1);
+  assert.equal(back.tagName, 'BUTTON');
+  assert.equal(back.type, 'button');
+  assert.notEqual(back.getAttribute('data-component'), 'Button', 'Back uses no Primer Button chrome');
+
+  const rules = [...f.window.document.styleSheets].flatMap(sheet => [...sheet.cssRules]);
+  const rule = selector => rules.find(candidate => candidate.selectorText === selector)?.style;
+  const backStyle = rule('.clips-board-back');
+  assert.ok(backStyle);
+  assert.equal(backStyle.getPropertyValue('color'), 'var(--fgColor-default)');
+  assert.equal(backStyle.getPropertyValue('text-decoration'), 'none');
+  assert.equal(backStyle.getPropertyValue('appearance'), 'none');
+  assert.match(backStyle.getPropertyValue('padding'), /^0(?:px)?$/);
+  assert.match(backStyle.getPropertyValue('min-height'), /^0(?:px)?$/);
+  assert.equal(backStyle.getPropertyValue('background-color'), 'rgba(0, 0, 0, 0)');
+  const hoverBack = rules.find(candidate => {
+    const selectors = candidate.selectorText?.split(',').map(value => value.trim()) || [];
+    return selectors.includes('.clips-board-back:hover') && selectors.includes('.clips-board-back:active');
+  });
+  assert.equal(hoverBack?.style.getPropertyValue('background-color'), 'rgba(0, 0, 0, 0)');
+  assert.equal(rule('.clips-board-back:hover')?.getPropertyValue('text-decoration'), 'underline');
+  const focusBack = rule('.clips-board-back:focus-visible');
+  assert.equal(focusBack?.getPropertyValue('text-decoration'), 'underline');
+  assert.equal(focusBack?.getPropertyValue('outline'), 'var(--borderWidth-thick) solid var(--focus-outlineColor)');
+  assert.equal(rule('.clips-board-back:disabled')?.getPropertyValue('cursor'), 'not-allowed');
+
+  assert.equal(rule('.clips-board-focused-title-row')?.getPropertyValue('flex-wrap'), 'wrap');
+  const statusStyle = rule('.clips-board-focused-title-row [data-record-status]');
+  assert.equal(statusStyle?.getPropertyValue('flex'), '0 0 auto');
+  assert.notEqual(statusStyle?.getPropertyValue('width'), '100%');
+  assert.equal(rule('.clips-board-lane-context .clips-board-description')?.getPropertyValue('max-width'), '72ch');
+  assert.equal(f.query('.clips-board-lane-context .clips-board-description').textContent, description.slice(0, 240).trimEnd() + '…');
+
+  blockFocus = true;
+  await f.click('[data-menu="#l001"]');
+  const focusAction = selectMenu(f, 'Focus Lane');
+  await f.wait(() => f.query('[data-back]').disabled);
+  releaseFocus();
+  await focusAction;
+  await f.wait(() => !f.query('[data-back]').disabled);
+
+  const currentBack = f.query('[data-back]');
+  currentBack.focus();
+  assert.equal(f.window.document.activeElement, currentBack, 'Back remains keyboard focusable');
+  await f.click('[data-back]');
+  await f.wait(() => f.getServer().focus === null);
+  assert.equal(f.getServer().projectPath, '/A');
+  assert.equal(f.getServer().selectedProject.id, 'A', 'returning home preserves project selection');
+});
 test('built UI hierarchical search, observed Running and explicit terminal focus remain correct across refresh', async (t) => {
   const f = await mount(t);
   await f.input('#work-search', 'needle'); assert.ok(f.query('[data-record="#alice#g001#t01"]'));
@@ -309,10 +379,10 @@ test('old-project refresh is discarded after actual built tab selection; next mu
 });
 test('failed selected-store refresh clears old board; inline empty discovery never substitutes a project', async (t) => {
   let fail = false;
-  const f = await mount(t, state(), ({ action }) => fail && action === 'refresh' ? { error: 'Selected Clips store unavailable' } : action === 'list_projects' ? { result: { projects: [], diagnostics: [{ code: 'invalid_registry', message: 'Registry is invalid.' }], userScope: 'local' } } : null);
+  const f = await mount(t, state(), ({ action }) => fail && action === 'refresh' ? { error: 'Selected Lanes store unavailable' } : action === 'list_projects' ? { result: { projects: [], diagnostics: [{ code: 'invalid_registry', message: 'Registry is invalid.' }], userScope: 'local' } } : null);
   fail = true; await f.click('[data-command="refresh"]'); assert.equal(f.query('[data-record]'), null); assert.match(f.window.document.body.textContent, /store unavailable/);
   await f.wait(() => f.window.document.body.textContent.includes('Registry is invalid'));
-  assert.match(f.window.document.body.textContent, /No available Clips projects/);
+  assert.match(f.window.document.body.textContent, /No available Lanes projects/);
   assert.equal(f.query('[role="dialog"]'), null); assert.equal(f.query('[data-project-tab]'), null);
   assert.equal(f.calls.some((c) => c.action === 'set_project'), false);
 });
@@ -741,7 +811,7 @@ test('in-card actions use small Primer controls while outside and form controls 
 
 test('actual emitted title cascade wraps plain semantic headings without title controls or chevrons', async (t) => {
   const s = { ...state(), focus: task.ref };
-  const title = 'Make Clips Work feel like GitHub Projects using Primer';
+  const title = 'Make Lanes feel like GitHub Projects using Primer components';
   s.lanes[0].title = title; s.goals[0].title = title; s.goals[0].tasks[0].title = 'Unbroken' + 'abcdefghij'.repeat(30);
   s.lanes[0].description = 'Long Lane context '.repeat(30);
   s.goals[0].tasks[0].description = 'Long Task context '.repeat(30);
@@ -808,11 +878,11 @@ test('real available project tabs select exact IDs and restore tab focus across 
   assert.ok(f.query('.clips-board-project-header [data-back]'));
 });
 
-test('overview uses the larger Clips title without a brand icon or project-name heading and preserves paths actions tabs and Lane focus', async (t) => {
+test('overview uses the larger Lanes title without a brand icon or project-name heading and preserves paths actions tabs and Lane focus', async (t) => {
   const f = await mount(t, state(), undefined, { loadStyles: true });
   const check = (path) => {
     const heading = f.query('.clips-board-project-heading');
-    assert.equal(heading.querySelector('h1').textContent, 'Clips');
+    assert.equal(heading.querySelector('h1').textContent, 'Lanes');
     assert.equal(f.window.getComputedStyle(heading.querySelector('h1')).fontSize, 'var(--text-title-size-medium)');
     assert.equal(heading.querySelector('svg'), null);
     assert.equal(heading.querySelector('.clips-board-brand'), null);
@@ -876,7 +946,7 @@ test('compact custom project tabs retain raised borders, single-row labels and n
   }, { loadStyles: true });
   await f.wait(() => f.query('[data-project-tab="B"]'));
   const strip = f.query('.clips-board-view-bar .clips-board-project-tabs');
-  assert.equal(strip.tagName, 'NAV'); assert.equal(strip.getAttribute('aria-label'), 'Clips projects');
+  assert.equal(strip.tagName, 'NAV'); assert.equal(strip.getAttribute('aria-label'), 'Lanes projects');
   assert.equal(strip.querySelectorAll('ul > li > button').length, projects.length);
   const active = f.query('[data-project-tab="A"]');
   const other = f.query('[data-project-tab="B"]');
@@ -1124,7 +1194,7 @@ test('failed project choice and failed refresh never silently select a fallback 
   assert.equal(f.calls.filter(call => call.action === 'set_project').length, 1);
 });
 
-test('delayed first load keeps one Clips recovery heading and right-side Refresh with an accessible spinner until loaded empty or error settles', async (t) => {
+test('delayed first load keeps one Lanes recovery heading and right-side Refresh with an accessible spinner until loaded empty or error settles', async (t) => {
   for (const outcome of ['loaded', 'empty', 'error']) {
     let release;
     const gate = new Promise(resolve => { release = resolve; });
@@ -1133,12 +1203,12 @@ test('delayed first load keeps one Clips recovery heading and right-side Refresh
       if (action === 'list_projects' && outcome === 'empty') return { result: { projects: [], currentDirectory: '/actual-current', canInitializeCurrentDirectory: false } };
       if (action === 'refresh') {
         await gate;
-        if (outcome !== 'loaded') return { error: outcome === 'empty' ? 'No available registered Clips projects' : 'Registry cannot be read' };
+        if (outcome !== 'loaded') return { error: outcome === 'empty' ? 'No available registered Lanes projects' : 'Registry cannot be read' };
       }
     }, { waitForReady: false, loadStyles: true });
     await f.wait(() => f.query('.clips-app-loading-state'));
     const header = f.query('.clips-app-recovery-header');
-    assert.equal(header.querySelector('h1').textContent, 'Clips');
+    assert.equal(header.querySelector('h1').textContent, 'Lanes');
     assert.equal(f.window.document.querySelectorAll('h1').length, 1);
     const refresh = f.query('[data-command="refresh"]');
     assert.ok(header.contains(refresh));
@@ -1163,13 +1233,13 @@ test('delayed first load keeps one Clips recovery heading and right-side Refresh
     if (outcome === 'loaded') {
       assert.ok(f.query('.clips-board'));
       assert.equal(f.query('.clips-app-recovery-header'), null, 'loaded Board owns its single header');
-      assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Clips');
+      assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lanes');
     } else {
-      assert.equal(f.query('.clips-app-recovery-header h1').textContent, 'Clips');
+      assert.equal(f.query('.clips-app-recovery-header h1').textContent, 'Lanes');
       assert.ok(f.query('.clips-app-empty-title'));
       assert.equal(f.query('.clips-app-start').getAttribute('aria-busy'), 'false');
       assert.equal(disabled(f.query('[data-command="refresh"]')), false);
-      assert.match(f.window.document.body.textContent, outcome === 'empty' ? /No available Clips projects/ : /Registry cannot be read/);
+      assert.match(f.window.document.body.textContent, outcome === 'empty' ? /No available Lanes projects/ : /Registry cannot be read/);
     }
   }
 });
@@ -1289,7 +1359,7 @@ test('failed recovery retry shows a fresh loading spinner then settles to one lo
   }, { loadStyles: true });
   assert.match(f.window.document.body.textContent, /Temporary registry failure/);
   assert.equal(f.query('.clips-app-loading-state'), null);
-  assert.equal(f.query('.clips-app-recovery-header h1').textContent, 'Clips');
+  assert.equal(f.query('.clips-app-recovery-header h1').textContent, 'Lanes');
   retry = true;
   await f.click('[data-command="refresh"]');
   await f.wait(() => f.query('.clips-app-loading-state'));
@@ -1298,7 +1368,7 @@ test('failed recovery retry shows a fresh loading spinner then settles to one lo
   await f.wait(() => f.query('.clips-board') && !f.query('.clips-app-loading-state'));
   assert.equal(f.query('.clips-app-recovery-header'), null);
   assert.equal(f.window.document.querySelectorAll('h1').length, 1);
-  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Clips');
+  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lanes');
   assert.equal(f.query('[data-project-tab="A"]').getAttribute('aria-current'), 'page');
 });
 
@@ -1325,7 +1395,7 @@ test('an older recovery refresh completion cannot clear the newer request loadin
   releaseNew();
   await f.wait(() => f.query('.clips-board') && !f.query('.clips-app-loading-state'));
   assert.equal(f.window.document.querySelectorAll('h1').length, 1);
-  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Clips');
+  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lanes');
   assert.doesNotMatch(f.window.document.body.textContent, /Older refresh failed/);
 });
 
@@ -1336,7 +1406,7 @@ test('no-board recovery initializes actual current directory once and selects it
   t.after(() => release());
   const next = { ...state(), projectPath: '/current', selectedProject: { id: 'C', name: 'Current' } };
   const f = await mount(t, state(), async ({ action, setServer }) => {
-    if (action === 'refresh' && !initialized) return { error: 'No available registered Clips projects' };
+    if (action === 'refresh' && !initialized) return { error: 'No available registered Lanes projects' };
     if (action === 'list_projects') return { result: { projects: initialized ? [{ id: 'C', name: 'Current', projectRoot: '/current' }] : [], userScope: 'local', diagnostics: [], currentDirectory: '/current', currentProjectId: initialized ? 'C' : null, canInitializeCurrentDirectory: !initialized } };
     if (action === 'initialize_current_directory') {
       entered(); await gate; initialized = true; setServer(next);
@@ -1362,7 +1432,7 @@ test('registry help and its inline current-directory code use official small typ
   const directory = '/Users/dfosco/workspace/clips-copilot';
   const f = await mount(t, state(), ({ action }) => action === 'refresh' ? { error: 'Choose a project' } : action === 'list_projects' ? { result: { projects: [], currentDirectory: directory } } : null, { loadStyles: true });
   const help = f.query('.clips-app-empty > .clips-app-muted');
-  assert.equal(help.textContent, `Boards come from your local Clips project registry.Current session directory: ${directory}`);
+  assert.equal(help.textContent, `Boards come from your local Lanes project registry.Current session directory: ${directory}`);
   assert.equal(help.querySelectorAll('br').length, 1);
   const code = help.querySelector('code');
   assert.equal(code.textContent, directory);
@@ -1374,7 +1444,7 @@ test('registry help and its inline current-directory code use official small typ
   assert.match(css, /--text-body-size-small:var\(--base-text-size-xs\)/);
   assert.match(css, /--base-text-size-xs:0?\.75rem/);
   assert.match(css, /\.clips-app-muted\{[^}]*font-size:var\(--text-body-size-medium\)/, 'other muted surfaces retain medium type');
-  assert.equal(f.query('.clips-app-empty-title').textContent, 'No available Clips projects');
+  assert.equal(f.query('.clips-app-empty-title').textContent, 'No available Lanes projects');
 });
 
 test('init eligibility comes from actual directory even with another tab selected and errors remain visible', async (t) => {
@@ -1385,4 +1455,89 @@ test('init eligibility comes from actual directory even with another tab selecte
   assert.equal(f.getServer().projectPath, '/A');
   assert.deepEqual(f.calls.find(call => call.action === 'initialize_current_directory').input, {});
   await f.wait(() => !f.query('[data-command="initialize"]').disabled);
+});
+
+test('Lane, Goal and Task attachments expose safe metadata and only current record-scoped Markdown', async (t) => {
+  const s = state();
+  s.lanes[0].attachments = [{
+    id: 'lane-md', type: 'markdown', title: 'Lane runbook', status: 'available',
+    path: '/private/lane.md', content: 'stale projection must not render',
+  }];
+  s.goals[0].attachments = [{
+    id: 'github-issue', type: 'github_issue', title: 'Related issue',
+    url: 'https://github.com/dfosco/clips/issues/1', status: 'remote',
+  }, {
+    id: 'unsafe-link', type: 'url', title: 'Unsafe link',
+    url: 'javascript:alert(1)', status: 'remote',
+  }, {
+    id: 'unreadable-md', type: 'markdown', title: 'Unreadable note', status: 'unreadable',
+  }];
+  s.goals[0].tasks[0].attachments = [{
+    id: 'missing-md', type: 'markdown', title: 'Missing task file', status: 'missing',
+  }];
+  let reads = 0;
+  const f = await mount(t, s, ({ action, input }) => {
+    if (action !== 'read_attachment') return null;
+    reads++;
+    return { result: {
+      ref: input.ref, revision: reads,
+      attachment: reads === 1
+        ? { id: input.attachmentId, type: 'markdown', title: 'Lane runbook', status: 'available', content: '# \n## Current runbook\n- \n- Marker successor\n  - \n  - Nested marker successor\n[docs](https://example.com/docs) [bad](javascript:alert(1))\n<script>window.pwned=1</script>' }
+        : { id: input.attachmentId, type: 'markdown', title: 'Lane runbook', status: 'missing', content: null, error: 'File no longer exists.' },
+    } };
+  });
+
+  assert.ok(f.query('[data-attachments-for="#l001"]'));
+  assert.ok(f.query('[data-attachments-for="#alice#g001"]'));
+  assert.equal(f.query('[data-attachments-for="#alice#g001"] a[href="https://github.com/dfosco/clips/issues/1"]').textContent, 'Related issue');
+  assert.equal(f.query('[data-attachments-for="#alice#g001"] a[href^="javascript:"]'), null);
+  assert.match(f.query('[data-attachments-for="#alice#g001"]').textContent, /Unsafe link omitted/);
+  assert.match(f.query('[data-attachments-for="#alice#g001"]').textContent, /Unreadable/);
+  assert.doesNotMatch(f.window.document.body.textContent, /stale projection|private\/lane\.md/);
+
+  await f.click('[data-expand="#alice#g001"][data-expand-position="collapsed"]');
+  assert.ok(f.query('[data-attachments-for="#alice#g001#t01"]'));
+  assert.match(f.query('[data-attachments-for="#alice#g001#t01"]').textContent, /Missing task file.*Missing/);
+
+  await focusLane(f);
+  assert.ok(f.query('.clips-board-lane-context [data-attachments-for="#l001"]'), 'focused Lane retains its attachment list');
+  await f.click('[data-attachment-read="lane-md"]');
+  assert.deepEqual(f.calls.find((call) => call.action === 'read_attachment').input, {
+    ref: '#l001', attachmentId: 'lane-md', expectedProjectPath: '/A',
+  });
+  const content = f.query('.clips-board-lane-context .clips-attachment-markdown');
+  assert.match(content.textContent, /Current runbook/);
+  assert.deepEqual([...content.querySelectorAll('p')].slice(0, 3).map((paragraph) => paragraph.textContent), ['# ', '- ', '  - ']);
+  assert.deepEqual([...content.querySelectorAll('ul')].map((list) => list.textContent), ['Marker successor', 'Nested marker successor']);
+  assert.equal(content.querySelector('script'), null, 'Markdown HTML is displayed as text, never executed');
+  assert.equal(content.querySelector('a[href^="javascript:"]'), null);
+  assert.equal(content.querySelector('a[href="https://example.com/docs"]').getAttribute('rel'), 'noopener noreferrer');
+  await f.click('[data-attachment-read="lane-md"]');
+  assert.equal(f.query('.clips-board-lane-context .clips-attachment-markdown'), null, 'refresh does not leave a stale content copy');
+  assert.match(f.query('.clips-board-lane-context').textContent, /File no longer exists/);
+});
+
+test('collaboration control toggles only local project config and keeps focus with visible errors', async (t) => {
+  const s = state();
+  s.collaboration = { enabled: false, state: 'disabled', scope: 'project', automatic_mutation_sync: false };
+  const f = await mount(t, s, ({ action, input }) => action === 'set_collaboration' && input.enabled === false
+    ? { error: 'local config write failed' }
+    : null);
+  await focusLane(f);
+  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lane one');
+  assert.equal(f.query('[data-collaboration-state="false"] [data-collaboration-status]').textContent, 'Off');
+  await f.click('[data-collaboration-toggle]');
+  await f.wait(() => f.query('[data-collaboration-state="true"]'));
+  assert.deepEqual(f.calls.find((call) => call.action === 'set_collaboration').input, {
+    enabled: true, expectedProjectPath: '/A',
+  });
+  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lane one');
+  assert.equal(f.getServer().selectedProject.id, 'A', 'the collaboration toggle retains the selected project');
+  assert.match(f.query('.clips-board-collaboration-note').textContent, /later supported record changes may sync while on/);
+  assert.equal(f.calls.some((call) => call.action === 'sync' || call.action === 'publish'), false);
+
+  await f.click('[data-collaboration-toggle]');
+  await f.wait(() => f.window.document.body.textContent.includes('local config write failed'));
+  assert.equal(f.query('.clips-board-project-heading h1').textContent, 'Lane one');
+  assert.equal(f.calls.filter((call) => call.action === 'set_collaboration').length, 2);
 });

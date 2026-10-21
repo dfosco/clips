@@ -2,8 +2,10 @@ import { discoverGoals } from '../lib/goal-discovery.js';
 import { appendEvent, formatRef, readGoalWithTasks } from '../lib/core.js';
 import { readJsonInput } from '../lib/json-input.js';
 import { appendLaneEvent, laneToTrackId, listLanes, nextLaneId, normalizeLaneId, readLane, readLaneHistory, validateLane } from '../lib/lanes.js';
-import { pushGoal, pushTrack } from '../lib/sync.js';
+import { autoSyncGoal, autoSyncTrack } from '../lib/sync.js';
+import { reportAutoSyncResult } from './sync-output.js';
 import { listLaneClaims, mutateLaneClaim, readLaneClaim } from '../lib/lane-claims.js';
+import { inspectManagerRegistrations, listManagerRegistrations, mutateManagerRegistration } from '../lib/lane-registrations.js';
 
 const STATUSES = new Set(['open', 'in_progress', 'not_planned', 'duplicate']);
 
@@ -14,8 +16,8 @@ function parseLaneRef(ref) {
 }
 
 function syncLane(laneId) {
-  try { pushTrack(laneToTrackId(laneId)); }
-  catch (error) { console.error(`sync: lane push failed for ${laneId}: ${error.message}`); }
+  const result = autoSyncTrack(laneToTrackId(laneId));
+  reportAutoSyncResult(result, `#${laneId}`);
 }
 
 function goalsForLane(laneId) {
@@ -89,7 +91,7 @@ function laneFields(data, { creating = false } = {}) {
 
 function addGoals(laneRef, refs) {
   const laneId = requireLane(laneRef);
-  if (!refs.length) throw new Error('Add at least one goal: clips lane <lane> add <goal...>');
+  if (!refs.length) throw new Error('Add at least one goal: lanes lane <lane> add <goal...>');
   const goals = [];
   const seen = new Set();
   for (const ref of refs) {
@@ -120,8 +122,8 @@ function addGoals(laneRef, refs) {
     if (goal.lane_id) moved.push({ goal_id: goal.goal_id, from_lane_id: goal.lane_id });
   }
   for (const goalId of added) {
-    try { pushGoal(goalId); }
-    catch (error) { console.error(`sync: goal push failed for ${goalId}: ${error.message}`); }
+    const result = autoSyncGoal(goalId);
+    reportAutoSyncResult(result, `#${goalId}`);
   }
   console.log(JSON.stringify({ success: true, lane_id: laneId, added, moved, unchanged }));
 }
@@ -189,37 +191,78 @@ function fillLaneClosure(ref, data) {
 function runManagerCommand([action, ...rawArgs]) {
   const options = {};
   const args = [];
+  let all = false;
   for (let index = 0; index < rawArgs.length; index++) {
     if (rawArgs[index] === '--json') continue;
+    if (rawArgs[index] === '--all') {
+      if (all) throw new Error('--all may only be specified once');
+      all = true;
+      continue;
+    }
+    if (rawArgs[index] === '--project') {
+      if (options.project || !rawArgs[index + 1] || rawArgs[index + 1].startsWith('--')) throw new Error('--project requires one project ID or explicit path');
+      options.project = rawArgs[++index];
+      continue;
+    }
     args.push(rawArgs[index]);
   }
+  if (all && (action !== 'list' || options.project)) throw new Error('--all is only supported by list, without --project');
   if (action === 'list') {
-    if (args.length) throw new Error('Usage: clips lane manager list [--json]');
-    console.log(JSON.stringify(listLaneClaims(options), null, 2));
+    if (args.length) throw new Error('Usage: lanes lane manager list [--all | --project <id-or-path>] [--json]');
+    console.log(JSON.stringify(all || options.project ? listManagerRegistrations(options) : listLaneClaims(), null, 2));
     return;
   }
   if (action === 'inspect') {
-    if (args.length !== 1) throw new Error('Usage: clips lane manager inspect <lane> [--json]');
+    if (args.length !== 1) throw new Error('Usage: lanes lane manager inspect <lane> [--project <id-or-path>] [--json]');
+    if (options.project) {
+      console.log(JSON.stringify(inspectManagerRegistrations(args[0], options), null, 2));
+      return;
+    }
     const laneId = requireLane(args[0]);
-    console.log(JSON.stringify(readLaneClaim(laneId, options), null, 2));
+    console.log(JSON.stringify(readLaneClaim(laneId), null, 2));
+    return;
+  }
+  if (['register', 'unregister'].includes(action)) {
+    if (!options.project) throw new Error(`${action} requires --project <id-or-path> and an explicit Lane`);
+    console.log(JSON.stringify(mutateManagerRegistration(args[0], action, readJsonInput(args.slice(1)), options), null, 2));
     return;
   }
   if (['claim', 'share', 'release', 'handover'].includes(action)) {
+    if (options.project) throw new Error('--project selects advisory registrations, not ownership mutations; run ownership commands in the target repository');
     const laneId = requireLane(args[0]);
-    console.log(JSON.stringify(mutateLaneClaim(laneId, action, readJsonInput(args.slice(1)), options), null, 2));
+    console.log(JSON.stringify(mutateLaneClaim(laneId, action, readJsonInput(args.slice(1))), null, 2));
     return;
   }
-  console.log(`Usage: clips lane manager <command>
+  console.log(`Usage: lanes lane manager <command>
 
 Commands (JSON output):
   list                      List this repository's Lane ownership and history
+  list --all                Discover central working associations from any cwd
+  list --project <target>   List one project's working associations
+  inspect <lane> --project <target>
+                            Inspect Lane, ownership, registrations and warnings
+  register <lane> --project <target> <json>
+                            Create, refresh or reactivate your working association
+  unregister <lane> --project <target> <json>
+                            Stop only your association; retain its history
   inspect <lane>            Read ownership and revision (unclaimed starts at 0)
   claim <lane> <json>       Claim only an unowned Lane; never displaces a manager
   share <lane> <json>       Existing manager explicitly adds another owner
   release <lane> <json>     Release only the calling manager's own claim
   handover <lane> <json>    Replace one owner with explicit user authorization
 
-All mutations require expected_revision and actor {host,runtime,session_id}.
+Registration targets are project IDs or absolute/explicit relative paths.
+Register/unregister require expected_revision and actor {runtime,session_id};
+optional actor fields: host, workspace_id, contact. Supply observed values only.
+Registration revision is per actor, repository and Lane; absent starts at 0.
+Register accepts optional runtime_observation {status,observed_at,source}.
+Stored status working/stopped is not live status. Native live_status is unknown;
+timestamps describe saved observations, not a lease, heartbeat or scheduler.
+Global reads retain stale associations and report unavailable/corrupt state.
+Registration never claims, releases, or replaces ownership.
+Actor identity is asserted by the caller, not authenticated by this CLI.
+
+Ownership mutations require expected_revision and actor {host,runtime,session_id}.
 Optional actor fields: workspace_id, contact. Use observed identities, not labels.
 share/handover also require owner {host,runtime,session_id,...}.
 handover requires authorization {by,reason}; optional from identifies an owner
@@ -284,14 +327,14 @@ export function runLaneCommand([action, ...args]) {
   if (action === 'status') {
     const laneId = requireLane(args[0]);
     const status = args[1];
-    if (status === 'closed') throw new Error('Use clips lane close <lane> <json> so closure captures the strategic retrospective');
+    if (status === 'closed') throw new Error('Use lanes lane close <lane> <json> so closure captures the strategic retrospective');
     if (!STATUSES.has(status)) throw new Error(`Invalid lane status: ${status}`);
     appendLaneEvent(laneId, { event: 'lane_status_changed', status });
     syncLane(laneId);
     console.log(JSON.stringify({ success: true, lane_id: laneId, status }));
     return;
   }
-  console.log(`Usage: clips lane <command>
+  console.log(`Usage: lanes lane <command>
 
 Commands:
   create <json>              Create a strategic lane
@@ -299,7 +342,7 @@ Commands:
   <lane> add <goal...>       Add or move goals into the lane
   show <lane[#rN]>           Show the lane and its goals
   history <lane[#rN]>        Show lane history
-  manager <command>         Inspect, claim, share, release, or hand over management
+  manager <command>         Discover/register working managers or manage ownership
   status <lane> <status>     Set open, in_progress, not_planned, or duplicate
   close <lane> <json>        Close with optional summary, decision log, system overview,
                              product_goals_achieved, and optional media/components

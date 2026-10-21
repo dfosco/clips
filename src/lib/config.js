@@ -7,8 +7,10 @@ import { getClipsDir, getRepoRoot } from './core.js';
 import { assertProjectIdAvailable, validateProjectId } from './registry.js';
 import { withRecordLock } from './journal.js';
 import { randomUUID } from 'node:crypto';
+import { configPathIn, getUserStoreDir, projectConfigPath } from './storage-paths.js';
 
-export const CONFIG_FILE = 'clips.config.json';
+export const CONFIG_FILE = 'lanes.config.json';
+export const LEGACY_CONFIG_FILE = 'clips.config.json';
 
 // Default configuration values
 export const DEFAULT_CONFIG = {
@@ -27,11 +29,110 @@ export const DEFAULT_CONFIG = {
   }
 };
 
+export const MODEL_PREFERENCE_DEFAULTS = {
+  lane_manager_model: 'gpt-6.1-sol',
+  lane_manager_reasoning_effort: 'high',
+  lane_dev_model: 'gpt-6-luna',
+  lane_dev_reasoning_effort: 'high',
+};
+
+export const MODEL_PREFERENCE_KEYS = Object.keys(MODEL_PREFERENCE_DEFAULTS);
+
+function modelPreferencePath(scope, repoRoot) {
+  if (scope === 'user') return configPathIn(getUserStoreDir());
+  if (scope === 'project') return projectConfigPath(repoRoot);
+  throw new Error(`Unknown config scope: ${scope}`);
+}
+
+function readStoredConfig(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const config = JSON.parse(content);
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      throw new Error('Configuration must be a JSON object');
+    }
+    for (const key of MODEL_PREFERENCE_KEYS) {
+      if (Object.hasOwn(config, key)) validateModelPreference(key, config[key]);
+    }
+    return config;
+  } catch (error) {
+    if (error.code === 'ENOENT') return {};
+    throw new Error(`Could not read config file: ${error.message}`, { cause: error });
+  }
+}
+
+function validateModelPreference(key, value) {
+  if (!MODEL_PREFERENCE_KEYS.includes(key)) throw new Error(`Unknown model preference: ${key}`);
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`${key} must be a nonempty string`);
+  }
+  return value.trim();
+}
+
+function writeStoredConfig(filePath, config, { createMode = 0o600 } = {}) {
+  writeConfigFile(filePath, `${JSON.stringify(config, null, 2)}\n`, { createMode });
+}
+
+function writeConfigFile(filePath, content, { createMode = 0o666 } = {}) {
+  let existingMode;
+  try {
+    existingMode = fs.statSync(filePath).mode & 0o7777;
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, content, { mode: existingMode ?? createMode });
+    if (existingMode !== undefined) fs.chmodSync(temporary, existingMode);
+    fs.renameSync(temporary, filePath);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
+}
+
+export function getModelPreference(key, repoRoot = getRepoRoot()) {
+  if (!MODEL_PREFERENCE_KEYS.includes(key)) throw new Error(`Unknown model preference: ${key}`);
+  const project = readStoredConfig(modelPreferencePath('project', repoRoot));
+  if (Object.hasOwn(project, key)) return validateModelPreference(key, project[key]);
+  const user = readStoredConfig(modelPreferencePath('user'));
+  if (Object.hasOwn(user, key)) return validateModelPreference(key, user[key]);
+  return MODEL_PREFERENCE_DEFAULTS[key];
+}
+
+export function getUserModelPreference(key) {
+  if (!MODEL_PREFERENCE_KEYS.includes(key)) throw new Error(`Unknown model preference: ${key}`);
+  const config = readStoredConfig(modelPreferencePath('user'));
+  return Object.hasOwn(config, key) ? validateModelPreference(key, config[key]) : null;
+}
+
+export function setModelPreference(key, value, { scope = 'project', repoRoot } = {}) {
+  const normalized = validateModelPreference(key, value);
+  const filePath = modelPreferencePath(scope, repoRoot ?? (scope === 'project' ? getRepoRoot() : undefined));
+  return withRecordLock(filePath, () => {
+    const config = readStoredConfig(filePath);
+    config[key] = normalized;
+    writeStoredConfig(filePath, config, { createMode: scope === 'user' ? 0o600 : 0o666 });
+    return normalized;
+  });
+}
+
+export function unsetModelPreference(key, { scope = 'project', repoRoot } = {}) {
+  if (!MODEL_PREFERENCE_KEYS.includes(key)) throw new Error(`Unknown model preference: ${key}`);
+  const filePath = modelPreferencePath(scope, repoRoot ?? (scope === 'project' ? getRepoRoot() : undefined));
+  return withRecordLock(filePath, () => {
+    const config = readStoredConfig(filePath);
+    delete config[key];
+    if (fs.existsSync(filePath)) {
+      writeStoredConfig(filePath, config, { createMode: scope === 'user' ? 0o600 : 0o666 });
+    }
+  });
+}
+
 /**
  * Get the path to the config file
  */
-export function getConfigPath(repoRoot) {
-  return path.join(getClipsDir(repoRoot), CONFIG_FILE);
+export function getConfigPath(repoRoot = getRepoRoot()) {
+  return projectConfigPath(repoRoot);
 }
 
 /**
@@ -66,13 +167,8 @@ export function writeConfig(config, repoRoot) {
     validateLaneLimit(config.lane_max_active_agents);
   }
   const configPath = getConfigPath(repoRoot);
-  const temporary = `${configPath}.${randomUUID()}.tmp`;
-  try {
-    fs.writeFileSync(temporary, JSON.stringify(config, null, 2) + '\n');
-    fs.renameSync(temporary, configPath);
-  } finally {
-    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
-  }
+  if (fs.existsSync(configPath)) readConfig(repoRoot, { strict: true });
+  writeConfigFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 }
 
 /**
@@ -98,7 +194,7 @@ export function setConfigValue(key, value, repoRoot = getRepoRoot()) {
 }
 
 function setConfigValueLocked(key, value, repoRoot) {
-  const config = readConfig(repoRoot, { strict: key === 'lane_max_active_agents' });
+  const config = readConfig(repoRoot, { strict: true });
 
   // Validate key
   if (!(key in DEFAULT_CONFIG)) {

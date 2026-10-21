@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { discoverClipsProjects, resolveClipsProject } from '../src/project-discovery.js';
 import { readCurrentBoard } from '../../../src/commands/board.js';
 
@@ -16,12 +17,12 @@ async function fixture(t) {
   const clipsHome = path.join(root, 'home');
   await fs.mkdir(clipsHome);
   const registry = path.join(clipsHome, 'projects.json');
-  async function project(name, config = {}) {
+  async function project(name, config = {}, store = '.clips', configName = 'clips.config.json') {
     const dir = path.join(root, name);
     await fs.mkdir(dir, { recursive: true });
     execFileSync('git', ['init', '-q', dir]);
-    await fs.mkdir(path.join(dir, '.clips', 'db'), { recursive: true });
-    await fs.writeFile(path.join(dir, '.clips', 'clips.config.json'), JSON.stringify(config));
+    await fs.mkdir(path.join(dir, store, 'db'), { recursive: true });
+    await fs.writeFile(path.join(dir, store, configName), JSON.stringify(config));
     return dir;
   }
   async function register(entries) {
@@ -35,10 +36,17 @@ async function snapshot(file) {
   return { sha256: digest(content), mtimeMs: stat.mtimeMs, mode: stat.mode, size: stat.size };
 }
 
-function discoverInProcess(env) {
+function discoverInProcess(env, projectId) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e',
-    `import {discoverClipsProjects} from ${JSON.stringify(new URL('../src/project-discovery.js', import.meta.url).href)}; console.log(JSON.stringify(await discoverClipsProjects()));`],
+    `import {discoverClipsProjects,resolveClipsProject} from ${JSON.stringify(new URL('../src/project-discovery.js', import.meta.url).href)}; console.log(JSON.stringify(await ${projectId ? `resolveClipsProject(${JSON.stringify(projectId)})` : 'discoverClipsProjects()'}));`],
   { env, encoding: 'utf8' }));
+}
+
+function isolatedEnv(home) {
+  const env = { ...process.env, HOME: home, LANES_SWITCH_INIT: '1', CLIPS_SWITCH_INIT: '1' };
+  delete env.LANES_HOME;
+  delete env.CLIPS_HOME;
+  return env;
 }
 
 test('discovers only registered real projects, preserves nullable/configured identity, never prunes', async (t) => {
@@ -174,7 +182,7 @@ test('uses canonical CLIPS_HOME/default semantics and isolates scope by actual r
   const p = await f.project('registered');
   await f.register([p]);
   const explicit = await discoverClipsProjects(f.options);
-  const envResult = discoverInProcess({ ...process.env, CLIPS_HOME: f.clipsHome });
+  const envResult = discoverInProcess({ ...isolatedEnv(f.root), CLIPS_HOME: f.clipsHome });
   assert.deepEqual(envResult, explicit);
   const homeAlias = path.join(f.root, 'home-alias');
   await fs.symlink(f.clipsHome, homeAlias, 'dir');
@@ -182,8 +190,7 @@ test('uses canonical CLIPS_HOME/default semantics and isolates scope by actual r
   const defaultHome = path.join(f.root, 'default-user');
   await fs.mkdir(defaultHome);
   await fs.rename(f.clipsHome, path.join(defaultHome, '.clips'));
-  const env = { ...process.env, HOME: defaultHome };
-  delete env.CLIPS_HOME;
+  const env = isolatedEnv(defaultHome);
   const defaultResult = discoverInProcess(env);
   assert.equal(defaultResult.projects[0].id, explicit.projects[0].id);
   assert.notEqual(defaultResult.userScope, explicit.userScope);
@@ -202,4 +209,99 @@ test('reads supported legacy string entries without creating or rewriting regist
   assert.equal((await discoverClipsProjects(f.options)).projects[0].projectRoot, p);
   assert.deepEqual(await snapshot(f.registry), before);
   await assert.rejects(discoverClipsProjects({ clipsHome: '' }), /clipsHome/);
+});
+
+test('all project/config/default-user name combinations resolve explicitly without migration', async (t) => {
+  const f = await fixture(t);
+  for (const userStore of ['.clips', '.lanes']) {
+    const home = path.join(f.root, `user-${userStore}`);
+    await fs.mkdir(path.join(home, userStore), { recursive: true });
+    for (const store of ['.clips', '.lanes']) {
+      for (const configName of ['clips.config.json', 'lanes.config.json']) {
+        const repo = await f.project(`${userStore}-${store}-${configName}`, { project_id: 'mixed-layout' }, store, configName);
+        const registry = path.join(home, userStore, 'projects.json');
+        await fs.writeFile(registry, JSON.stringify({ version: 1, projects: [{ path: repo }] }));
+        const config = path.join(repo, store, configName);
+        const before = await Promise.all([snapshot(registry), snapshot(config)]);
+        const env = isolatedEnv(home);
+        const found = discoverInProcess(env);
+        assert.deepEqual(found.diagnostics, []);
+        assert.equal(found.projects[0].storeRoot, path.join(repo, store));
+        assert.equal(discoverInProcess(env, found.projects[0].id).projectRoot, repo);
+        assert.deepEqual(await Promise.all([snapshot(registry), snapshot(config)]), before);
+        assert.deepEqual((await fs.readdir(repo)).sort(), ['.git', store].sort());
+      }
+    }
+  }
+});
+
+test('canonical env and option precedence isolate custom homes and deduplicate their aliases', async (t) => {
+  const f = await fixture(t);
+  const old = await f.project('old');
+  const current = await f.project('current', {}, '.lanes', 'lanes.config.json');
+  await f.register([old]);
+  const canonicalHome = path.join(f.root, 'canonical-home');
+  await fs.mkdir(canonicalHome);
+  await fs.writeFile(path.join(canonicalHome, 'projects.json'), JSON.stringify({ projects: [{ path: current }] }));
+  const selected = discoverInProcess({ ...isolatedEnv(f.root), CLIPS_HOME: f.clipsHome, LANES_HOME: canonicalHome });
+  assert.equal(selected.projects[0].projectRoot, current);
+  assert.notEqual(selected.userScope, (await discoverClipsProjects(f.options)).userScope);
+  assert.deepEqual(await discoverClipsProjects({ lanesHome: canonicalHome, clipsHome: f.clipsHome }), selected);
+  const alias = path.join(f.root, 'canonical-alias');
+  await fs.symlink(canonicalHome, alias);
+  assert.deepEqual(await discoverClipsProjects({ lanesHome: alias }), selected);
+});
+
+test('explicit init migration preserves project and user selection identity including paired aliases', async (t) => {
+  const f = await fixture(t);
+  for (const pairedAlias of [false, true]) {
+    const home = path.join(f.root, `migration-home-${pairedAlias}`);
+    await fs.mkdir(path.join(home, '.clips'), { recursive: true });
+    const repo = await f.project(`migration-${pairedAlias}`);
+    await fs.writeFile(path.join(home, '.clips', 'projects.json'), JSON.stringify({ version: 1, projects: [{ path: repo }] }));
+    if (pairedAlias) {
+      await fs.symlink(path.join(repo, '.clips'), path.join(repo, '.lanes'));
+      await fs.symlink(path.join(home, '.clips'), path.join(home, '.lanes'));
+    }
+    const env = isolatedEnv(home);
+    const before = discoverInProcess(env);
+    execFileSync(process.execPath, [fileURLToPath(new URL('../../../src/cli.js', import.meta.url)),
+      'init', '--skills-scope', 'project'], { cwd: repo, env, stdio: 'pipe' });
+    const after = discoverInProcess(env);
+    assert.equal(after.userScope, before.userScope);
+    assert.equal(after.projects[0].id, before.projects[0].id);
+    assert.equal(after.projects[0].storeRoot, path.join(repo, '.lanes'));
+    assert.equal(discoverInProcess(env, before.projects[0].id).projectRoot, repo);
+    assert.deepEqual(after.diagnostics, []);
+  }
+});
+
+test('conflicting stores/configs are unavailable and external-root symlink migration is non-destructive', async (t) => {
+  const f = await fixture(t);
+  const repo = await f.project('conflict');
+  await f.register([repo]);
+  const selected = (await discoverClipsProjects(f.options)).projects[0];
+  await fs.mkdir(path.join(repo, '.lanes'));
+  await fs.writeFile(path.join(repo, '.lanes', 'lanes.config.json'), '{}');
+  assert.equal((await discoverClipsProjects(f.options)).projects.length, 0);
+  await assert.rejects(resolveClipsProject(selected.id, f.options), /no longer available/);
+  await fs.rm(path.join(repo, '.lanes'), { recursive: true });
+  await fs.writeFile(path.join(repo, '.clips', 'lanes.config.json'), '{}');
+  assert.equal((await discoverClipsProjects(f.options)).projects.length, 0);
+  await fs.unlink(path.join(repo, '.clips', 'lanes.config.json'));
+  const external = path.join(f.root, 'external-store');
+  await fs.rename(path.join(repo, '.clips'), external);
+  await fs.symlink(external, path.join(repo, '.clips'));
+  const before = await discoverClipsProjects(f.options);
+  assert.equal(before.projects[0].storeRoot, external);
+  const config = path.join(external, 'clips.config.json');
+  const unchanged = await snapshot(config);
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../../../src/cli.js', import.meta.url)),
+    'init', '--skills-scope', 'project'], {
+    cwd: repo, env: { ...isolatedEnv(f.root), LANES_HOME: f.clipsHome }, encoding: 'utf8',
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Cannot migrate linked store safely/);
+  assert.deepEqual(await snapshot(config), unchanged);
+  assert.deepEqual(await discoverClipsProjects(f.options), before);
 });

@@ -8,10 +8,16 @@ import { normalizeGoalType } from './goal-type.js';
 import { isDeepStrictEqual } from 'node:util';
 import { appendJsonEvent, assertExpectedRevision, readJsonEvents, withRecordLock } from './journal.js';
 import { invalidateAcceptanceFields, normalizeAcceptanceCriteria, workRequestChanged } from './work-fields.js';
+import { attachmentsForRecord, replayAttachmentEvent } from './attachments.js';
+import { getProjectStoreDir } from './storage-paths.js';
+import { githubPullRequestKey } from './github-identity.js';
 
 export const CLIPS_DIR = '.clips';
 export const CLIPS_DB_DIR = '.clips/db';
 export const CLIPS_RECORDS_DIR = '.clips/records';
+export const LANES_DIR = '.lanes';
+export const LANES_DB_DIR = '.lanes/db';
+export const LANES_RECORDS_DIR = '.lanes/records';
 
 /**
  * Get the current username from config
@@ -219,7 +225,7 @@ export function getRepoRoot(cwd = process.cwd()) {
 export function tryGetRepoRoot(cwd = process.cwd(), { requireClips = false } = {}) {
   try {
     const repoRoot = getRepoRoot(cwd);
-    if (requireClips && !fs.existsSync(path.join(repoRoot, CLIPS_DIR))) return null;
+    if (requireClips && !fs.existsSync(getClipsDir(repoRoot))) return null;
     return repoRoot;
   } catch {
     return null;
@@ -240,17 +246,21 @@ export function getCurrentCommitSha() {
 }
 
 export function getClipsDir(repoRoot = getRepoRoot()) {
-  return path.join(repoRoot, CLIPS_DIR);
+  return getProjectStoreDir(repoRoot);
 }
 
 export function getClipsDbDir(repoRoot = getRepoRoot()) {
-  return path.join(repoRoot, CLIPS_DB_DIR);
+  return path.join(getClipsDir(repoRoot), 'db');
 }
 
 export function getClipsRecordsDir(recordType = null, repoRoot = getRepoRoot()) {
-  const recordsDir = path.join(repoRoot, CLIPS_RECORDS_DIR);
+  const recordsDir = path.join(getClipsDir(repoRoot), 'records');
   return recordType ? path.join(recordsDir, recordType) : recordsDir;
 }
+
+export const getLanesDir = getClipsDir;
+export const getLanesDbDir = getClipsDbDir;
+export const getLanesRecordsDir = getClipsRecordsDir;
 
 /**
  * Get the file path for a goal, supporting namespaced and legacy locations
@@ -399,28 +409,52 @@ export function replayGoalEvents(events, goalId, { revision, taskId, taskRevisio
       case 'github_synced':
         goal.issue_number = event.issue_number;
         goal.issue_url = event.issue_url;
+        if (Object.hasOwn(event, 'repository')) goal.repository = event.repository;
+        if (Object.hasOwn(event, 'remote_host')) goal.remote_host = event.remote_host;
+        delete goal.github_create_pending;
         goal.github_unlinked = false;
+        break;
+      case 'github_create_pending':
+        goal.github_create_pending = { marker: event.marker, created_at: event.timestamp };
+        break;
+      case 'github_create_cancelled':
+        delete goal.github_create_pending;
         break;
       case 'github_unlinked':
         delete goal.issue_number;
         delete goal.issue_url;
+        delete goal.github_create_pending;
         goal.github_unlinked = true;
         for (const [id, task] of Object.entries(goal.tasks)) {
           const updated = { ...task };
           delete updated.issue_number;
           delete updated.issue_url;
+          delete updated.github_create_pending;
           goal.tasks[id] = updated;
           affectedTasks.add(id);
         }
         break;
       case 'github_pr_synced':
-        goal.github_prs = { ...(goal.github_prs || {}), [`${event.repository || ''}#${event.pr_number}`]: event };
+        goal.github_prs = { ...(goal.github_prs || {}), [githubPullRequestKey(event)]: event };
         break;
       case 'adr_attached':
         goal.adr_id = event.adr_id;
         break;
       case 'adr_detached':
         delete goal.adr_id;
+        break;
+      case 'attachment_added':
+      case 'attachment_removed':
+        if (event.task_id) {
+          if (!previousTask) throw new Error(`Corrupt attachment history: task ${event.task_id} not found`);
+          goal.tasks[event.task_id] = {
+            ...previousTask,
+            attachments: replayAttachmentEvent(previousTask.attachments, event),
+          };
+          affectedTasks.add(event.task_id);
+        } else {
+          goal.attachments = replayAttachmentEvent(goal.attachments, event);
+        }
         break;
       case 'task_created':
         goal.tasks[event.task_id] = { ...event, description: event.description || '', status: event.status || 'open' };
@@ -443,7 +477,34 @@ export function replayGoalEvents(events, goalId, { revision, taskId, taskRevisio
         break;
       case 'task_github_synced':
         if (previousTask) {
-          if (!goal.github_unlinked) goal.tasks[event.task_id] = { ...previousTask, issue_number: event.issue_number, issue_url: event.issue_url };
+          if (!goal.github_unlinked) {
+            const updated = {
+              ...previousTask,
+              issue_number: event.issue_number,
+              issue_url: event.issue_url,
+              ...(Object.hasOwn(event, 'repository') ? { repository: event.repository } : {}),
+              ...(Object.hasOwn(event, 'remote_host') ? { remote_host: event.remote_host } : {}),
+            };
+            delete updated.github_create_pending;
+            goal.tasks[event.task_id] = updated;
+          }
+          affectedTasks.add(event.task_id);
+        }
+        break;
+      case 'task_github_create_pending':
+        if (previousTask) {
+          goal.tasks[event.task_id] = {
+            ...previousTask,
+            github_create_pending: { marker: event.marker, created_at: event.timestamp },
+          };
+          affectedTasks.add(event.task_id);
+        }
+        break;
+      case 'task_github_create_cancelled':
+        if (previousTask) {
+          const updated = { ...previousTask };
+          delete updated.github_create_pending;
+          goal.tasks[event.task_id] = updated;
           affectedTasks.add(event.task_id);
         }
         break;
@@ -505,6 +566,13 @@ export function replayGoalEvents(events, goalId, { revision, taskId, taskRevisio
   }
   if (taskRevision !== undefined && !foundTaskRevision) throw new Error(`Revision r${taskRevision} not found for #${goalId}#${taskId}`);
   goal.lane_id = goal.track_id ? `l${String(goal.track_id).replace(/^r/i, '')}` : (goal.lane_id ?? null);
+  const goalAttachments = attachmentsForRecord(goal);
+  if (goalAttachments.length || Object.hasOwn(goal, 'attachments')) goal.attachments = goalAttachments;
+  for (const [id, task] of Object.entries(goal.tasks)) {
+    const taskAttachments = attachmentsForRecord(task);
+    if (taskAttachments.length || Object.hasOwn(task, 'attachments')) task.attachments = taskAttachments;
+    goal.tasks[id] = task;
+  }
   return goal;
 }
 

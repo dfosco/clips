@@ -4,7 +4,7 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 export const task = { ref: '#alice#g001#t01', title: 'Exact needle task', description: 'Task description', status: 'open', labels: [{ id: 'urgent', name: 'Urgent' }] };
 export const goal = { ref: '#alice#g001', title: 'Goal one', status: 'open', description: 'Goal description', plan: 'Concrete plan', decisions: 'Concrete decision', acceptance_criteria: [{ id: 'A1', description: 'Observable result' }], tasks: [task], labels: [] };
 export const lane = { ref: '#l001', title: 'Lane one', status: 'open', goal_refs: [goal.ref, '#alice#g002'], manager_claim: { owners: [] } };
-export const state = () => ({ projectPath: '/A', selectedProject: { id: 'A', name: 'Alpha' }, lanes: [structuredClone(lane)], goals: [structuredClone(goal), { ...structuredClone(goal), ref: '#alice#g002', title: 'Closed Goal', status: 'closed', tasks: [] }], labels: [{ id: 'urgent', name: 'Urgent' }], projectSessions: [{ id: 'joined', joined: true, steerable: true, status: 'idle' }], hostCapabilities: { canSendToCurrentSession: true, currentSessionId: 'joined' }, focus: null });
+export const state = () => ({ projectPath: '/A', boardGeneratedAt: '2026-10-20T12:00:00.000Z', collaboration: { enabled: false, state: 'disabled', scope: 'project', automatic_mutation_sync: false }, selectedProject: { id: 'A', name: 'Alpha' }, lanes: [structuredClone(lane)], goals: [structuredClone(goal), { ...structuredClone(goal), ref: '#alice#g002', title: 'Closed Goal', status: 'closed', tasks: [] }], labels: [{ id: 'urgent', name: 'Urgent' }], projectSessions: [{ id: 'joined', joined: true, steerable: true, status: 'idle' }], hostCapabilities: { canSendToCurrentSession: true, currentSessionId: 'joined' }, focus: null });
 export async function mount(t, initial = state(), intercept, { colorMode, prefersDark = false, loadStyles = false, viewportWidth = 1024, projectLayout, waitForReady = true } = {}) {
   let server = structuredClone(initial); const calls = []; const errors = [];
   const vc = new VirtualConsole(); vc.on('jsdomError', (e) => errors.push(e));
@@ -85,6 +85,13 @@ export async function mount(t, initial = state(), intercept, { colorMode, prefer
     if (custom) return { ok: !custom.error, json: async () => custom.error ? { error: custom.error } : { result: custom.result } };
     if (action === 'list_projects') return { ok: true, json: async () => ({ result: { projects: [{ id: 'A', name: 'Alpha', projectRoot: '/A' }, { id: 'B', name: 'Beta', projectRoot: '/B' }], userScope: 'local', diagnostics: [] } }) };
     if (action === 'set_project') { server = { ...server, projectPath: input.projectId === 'B' ? '/B' : '/A', selectedProject: { id: input.projectId, name: input.projectId === 'B' ? 'Beta' : 'Alpha' }, lanes: [{ ...lane, title: input.projectId === 'B' ? 'Lane Beta' : 'Lane one' }], focus: null }; }
+    if (action === 'set_collaboration') {
+      server = { ...server, collaboration: { ...server.collaboration, enabled: input.enabled, state: input.enabled ? 'enabled' : 'disabled', automatic_mutation_sync: input.enabled } };
+    }
+    if (action === 'read_attachment') return { ok: true, json: async () => ({ result: {
+      id: input.attachmentId, type: 'markdown', title: 'Current notes', status: 'available',
+      content: '# Current notes', content_semantics: 'current_file',
+    } }) };
     if (action === 'focus' || action === 'clear_focus') server.focus = input.ref || null;
     return { ok: true, json: async () => ({ result: structuredClone(server) }) };
   };

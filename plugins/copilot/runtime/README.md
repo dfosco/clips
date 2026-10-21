@@ -1,16 +1,16 @@
 # Copilot runtime adapter
 
 `createClipsRuntime` supplies canonical board/record commands, saved-session
-navigation, joined-session work delivery and read-only diagnostics. All Clips
+navigation, joined-session work delivery and read-only diagnostics. All Lanes
 mutations use the checkout CLI in the explicitly selected Git project. No
 adapter writes workflow journals or chooses the source repo as a fallback.
 
 ## Interpreter and dependency resolution
 
-`CLIPS_CLI_PATH` selects `src/cli.js` or an installed executable. JS entry points
+`LANES_CLI_PATH` (legacy `CLIPS_CLI_PATH`) selects `src/cli.js` or an installed executable. JS entry points
 run through a verified Node 18+ executable. The packaged Copilot extension
 executable is not Node; it is never reused merely because it is process.execPath.
-`CLIPS_NODE_PATH` selects a specific interpreter. Otherwise discovery checks an
+`LANES_NODE_PATH` (legacy `CLIPS_NODE_PATH`) selects a specific interpreter. Otherwise discovery checks an
 npm-provided Node, a Node host, PATH, and conventional system installation paths.
 An invalid explicit setting fails with a repair instruction.
 
@@ -51,7 +51,7 @@ those tools or infer their success from a joined send.
 
 No host identity lookup or configuration is required to plan, coordinate or send
 work. The extension does not read native App credentials to unlock management.
-`options.hostId` and `CLIPS_COPILOT_HOST_ID` can supply optional metadata; absent
+`options.hostId` and `LANES_COPILOT_HOST_ID` (legacy `CLIPS_COPILOT_HOST_ID`) can supply optional metadata; absent
 identity remains null and `hostIdentityAuthenticated` remains false.
 
 The explicit `lane manager` CLI commands remain an opt-in metadata API with
@@ -64,7 +64,7 @@ authenticated transport and exact project/record/session checks remain required.
 
 After source edits, call `extensions_reload` in the actual Copilot session, or
 `session.rpc.extensions.reload()` on that joined connection. Then reopen the
-same Clips Work canvas instance. Refresh only rereads data from loaded code.
+same Lanes canvas instance. Refresh only rereads data from loaded code.
 The `inspect_clips_runtime` action reports loaded module hashes, actual
 process/interpreter identity, current metadata and bindings. Successful
 source installation alone is not successful native activation.

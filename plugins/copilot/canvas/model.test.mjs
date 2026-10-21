@@ -63,7 +63,7 @@ test('association provenance deduplicates exact IDs and preserves unavailable me
 });
 
 test('session titles use explicit names, never prompt summaries or raw IDs', () => {
-  const summary = 'You are the ordinary dev execution owner for canonical Clips Goal #g001. Read the full instructions before acting.';
+  const summary = 'You are the ordinary dev execution owner for canonical Lanes Goal #g001. Read the full instructions before acting.';
   assert.equal(sessionName({ id: 'raw-uuid', name: 'Security migration plans', summary }), 'Security migration plans');
   assert.equal(sessionName({ id: 'raw-uuid', name: '  Named session  ', summary }), 'Named session');
   assert.equal(sessionName({ id: 'raw-uuid', summary }), 'Copilot session');

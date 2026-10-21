@@ -8,18 +8,22 @@ const cli = path.resolve('src/cli.js');
 const roots = [];
 const flag = '--lane-max-active-agents';
 
-function workspace() {
+function workspace({ git = true } = {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-config-cli-'));
   roots.push(cwd);
-  execFileSync('git', ['init', '--quiet'], { cwd });
+  if (git) execFileSync('git', ['init', '--quiet'], { cwd });
   fs.mkdirSync(path.join(cwd, '.clips'));
   return cwd;
 }
 
 function run(cwd, ...args) {
-  return spawnSync(process.execPath, [cli, 'config', ...args], {
+  return runCli(cwd, 'config', ...args);
+}
+
+function runCli(cwd, ...args) {
+  return spawnSync(process.execPath, [cli, ...args], {
     cwd, encoding: 'utf8',
-    env: { ...process.env, CLIPS_HOME: path.join(cwd, 'home') },
+    env: { ...process.env, HOME: path.join(cwd, 'home-dir'), LANES_HOME: '', CLIPS_HOME: path.join(cwd, 'home') },
   });
 }
 
@@ -30,7 +34,7 @@ afterEach(() => {
 describe('Lane worker limit CLI', () => {
   it('documents the flag and persists numeric overrides through both interfaces', () => {
     const cwd = workspace();
-    const configPath = path.join(cwd, '.clips', 'clips.config.json');
+    const configPath = path.join(cwd, '.lanes', 'lanes.config.json');
     expect(run(cwd, '--help')).toMatchObject({ status: 0, stderr: '' });
     expect(run(cwd, '--help').stdout).toContain('--lane-max-active-agents <N>');
     expect(run(cwd, 'lane_max_active_agents')).toMatchObject({ status: 0, stdout: '5\n' });
@@ -67,5 +71,79 @@ describe('Lane worker limit CLI', () => {
     expect(run(cwd).stderr).toContain('positive safe integer');
     expect(run(cwd, flag, '2').status).toBe(0);
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ lane_max_active_agents: 2, custom: 'keep' });
+  });
+
+  it('reads and writes user model preferences outside Git, then resolves project overrides and inheritance', () => {
+    const cwd = workspace({ git: false });
+    const userConfig = path.join(cwd, 'home', 'lanes.config.json');
+    expect(run(cwd, '--help').stdout).toContain('lanes config --user <model-key> [value]');
+    expect(run(cwd, '--user', 'lane_dev_model', 'opaque-provider/model@revision')).toMatchObject({ status: 0, stderr: '' });
+    expect(run(cwd, '--user', 'lane_dev_model').stdout).toBe('opaque-provider/model@revision\n');
+    expect(run(cwd, 'lane_dev_model').status).toBe(1);
+    expect(run(cwd, '--user', 'lane_manager_model').stdout).toBe('(not set)\n');
+    expect(JSON.parse(fs.readFileSync(userConfig, 'utf8'))).toEqual({
+      lane_dev_model: 'opaque-provider/model@revision',
+    });
+    expect(run(cwd, '--user', 'lane_dev_model', '--unset').status).toBe(0);
+    expect(JSON.parse(fs.readFileSync(userConfig, 'utf8'))).toEqual({});
+  });
+
+  it('applies project > user > built-in defaults and removes overrides without pinning defaults', () => {
+    const cwd = workspace();
+    const userConfig = path.join(cwd, 'home', 'lanes.config.json');
+    const projectConfig = path.join(cwd, '.lanes', 'lanes.config.json');
+    expect(run(cwd, 'lane_manager_model').stdout).toBe('gpt-6.1-sol\n');
+    expect(run(cwd, 'lane_manager_reasoning_effort').stdout).toBe('high\n');
+    expect(run(cwd, 'lane_dev_model').stdout).toBe('gpt-6-luna\n');
+    expect(run(cwd, 'lane_dev_reasoning_effort').stdout).toBe('high\n');
+
+    expect(run(cwd, '--user', 'lane_dev_model', 'user-model').status).toBe(0);
+    expect(run(cwd, 'lane_dev_model').stdout).toBe('user-model\n');
+    expect(run(cwd, 'lane_dev_model', 'project-model').status).toBe(0);
+    expect(run(cwd, 'lane_dev_model').stdout).toBe('project-model\n');
+    expect(run(cwd, 'lane_dev_model', '--unset').status).toBe(0);
+    expect(run(cwd, 'lane_dev_model').stdout).toBe('user-model\n');
+    expect(run(cwd, '--user', 'lane_dev_model', '--unset').status).toBe(0);
+    expect(run(cwd, 'lane_dev_model').stdout).toBe('gpt-6-luna\n');
+
+    expect(run(cwd, 'collaboration', 'true').status).toBe(0);
+    expect(runCli(cwd, 'init', '--store-only').status).toBe(0);
+    const project = JSON.parse(fs.readFileSync(projectConfig, 'utf8'));
+    expect(project.collaboration).toBe(true);
+    expect(project).not.toHaveProperty('lane_manager_model');
+    expect(project).not.toHaveProperty('lane_manager_reasoning_effort');
+    expect(project).not.toHaveProperty('lane_dev_model');
+    expect(project).not.toHaveProperty('lane_dev_reasoning_effort');
+    expect(JSON.parse(fs.readFileSync(userConfig, 'utf8'))).toEqual({});
+  });
+
+  it('rejects invalid preference shapes and refuses malformed user config without overwriting', () => {
+    const cwd = workspace({ git: false });
+    expect(run(cwd, '--user', 'lane_dev_model', '').status).toBe(1);
+    expect(run(cwd, '--user', 'lane_dev_model', '--unset').status).toBe(0);
+
+    const userConfig = path.join(cwd, 'home', 'lanes.config.json');
+    fs.writeFileSync(userConfig, '{"lane_dev_model":42}\n');
+    const before = fs.readFileSync(userConfig, 'utf8');
+    expect(run(cwd, '--user', 'lane_dev_model').status).toBe(1);
+    expect(run(cwd, '--user', 'lane_dev_model', 'valid-model').status).toBe(1);
+    expect(fs.readFileSync(userConfig, 'utf8')).toBe(before);
+
+    fs.writeFileSync(userConfig, '[]\n');
+    const malformed = fs.readFileSync(userConfig, 'utf8');
+    expect(run(cwd, '--user', 'lane_dev_model', 'valid-model').status).toBe(1);
+    expect(fs.readFileSync(userConfig, 'utf8')).toBe(malformed);
+  });
+
+  it('refuses unrelated project config updates when the stored JSON is malformed', () => {
+    const cwd = workspace();
+    const projectConfig = path.join(cwd, '.clips', 'clips.config.json');
+    const malformed = '{"lane_dev_model":"saved-model",\n';
+    fs.writeFileSync(projectConfig, malformed);
+
+    const result = run(cwd, 'collaboration', 'true');
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Could not read config file');
+    expect(fs.readFileSync(projectConfig, 'utf8')).toBe(malformed);
   });
 });

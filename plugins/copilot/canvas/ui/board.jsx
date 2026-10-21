@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowLeftIcon, KebabHorizontalIcon, PlusIcon, SyncIcon, DotFillIcon, IssueOpenedIcon, CheckCircleIcon, SearchIcon } from '@primer/octicons-react';
+import { KebabHorizontalIcon, PlusIcon, SyncIcon, DotFillIcon, IssueOpenedIcon, CheckCircleIcon, SearchIcon } from '@primer/octicons-react';
 import { ActionList, ActionMenu, Button, CounterLabel, IconButton, Label, TextInput, Tooltip } from '@primer/react';
 import { active, executionFor, goalGroup, goalsForLane, laneForFocus, sessionsFor } from '../board-view.mjs';
 import { associationLabel, isOngoingSession, sessionName } from '../model.mjs';
@@ -26,6 +26,177 @@ function Description({ record, expanded }) {
   const text = String(record.description || '').trim();
   if (!text) return null;
   return <div className="clips-board-description"><p>{text.length > 240 && !expanded ? text.slice(0, 240).trimEnd() + '…' : text}</p></div>;
+}
+function safeExternalUrl(value, { httpsOnly = false } = {}) {
+  if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password ||
+      httpsOnly && url.protocol !== 'https:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+function markdownInline(source) {
+  const nodes = [];
+  const pattern = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
+  let cursor = 0;
+  let index = 0;
+  for (const match of source.matchAll(pattern)) {
+    const position = match.index ?? 0;
+    if (position > cursor) nodes.push(source.slice(cursor, position));
+    if (match[2] !== undefined) {
+      const href = safeExternalUrl(match[3]);
+      nodes.push(href
+        ? <a key={index++} href={href} target="_blank" rel="noopener noreferrer">{match[2]}</a>
+        : <span key={index++}>{match[2]}</span>);
+    } else if (match[4] !== undefined) nodes.push(<code key={index++}>{match[4]}</code>);
+    else if (match[5] !== undefined) nodes.push(<strong key={index++}>{match[5]}</strong>);
+    else nodes.push(<em key={index++}>{match[6]}</em>);
+    cursor = position + match[0].length;
+  }
+  if (cursor < source.length) nodes.push(source.slice(cursor));
+  return nodes;
+}
+function MarkdownContent({ source }) {
+  const lines = String(source).split(/\r?\n/);
+  const blocks = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) { index += 1; continue; }
+    if (/^\s*```/.test(line)) {
+      index += 1;
+      const code = [];
+      while (index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      blocks.push(<pre key={`code-${index}`}><code>{code.join('\n')}</code></pre>);
+      continue;
+    }
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      blocks.push(<h3 key={`heading-${index++}`}>{markdownInline(heading[2])}</h3>);
+      continue;
+    }
+    const list = line.match(/^\s*([-*+]|\d+\.)\s+(.+)$/);
+    if (list) {
+      const ordered = /^\d/.test(list[1]);
+      const items = [];
+      while (index < lines.length) {
+        const item = lines[index].match(/^\s*([-*+]|\d+\.)\s+(.+)$/);
+        if (!item || /^\d/.test(item[1]) !== ordered) break;
+        items.push(<li key={index}>{markdownInline(item[2])}</li>);
+        index += 1;
+      }
+      const List = ordered ? 'ol' : 'ul';
+      blocks.push(<List key={`list-${index}`}>{items}</List>);
+      continue;
+    }
+    const paragraph = [];
+    while (index < lines.length && lines[index].trim() &&
+      !/^\s*```/.test(lines[index]) && !/^#{1,6}\s+(.+)$/.test(lines[index]) &&
+      !/^\s*([-*+]|\d+\.)\s+(.+)$/.test(lines[index])) {
+      paragraph.push(lines[index++]);
+    }
+    blocks.push(<p key={`paragraph-${index}`}>{markdownInline(paragraph.join(' '))}</p>);
+  }
+  return <div className="clips-attachment-markdown">{blocks}</div>;
+}
+function attachmentType(type) {
+  return ({ markdown: 'Markdown', url: 'URL', github_issue: 'GitHub issue', github_pr: 'GitHub pull request' })[type] || 'Reference';
+}
+function attachmentStatus(status) {
+  return ({ available: 'Available', missing: 'Missing', unreadable: 'Unreadable', remote: 'External', invalid: 'Invalid reference' })[status] || '';
+}
+function AttachmentList({ record, revision, onReadAttachment }) {
+  const attachments = Array.isArray(record.attachments) ? record.attachments : [];
+  if (!attachments.length) return null;
+  return <section className="clips-board-attachments" data-attachments-for={record.ref} aria-label={`Attachments for ${record.ref}`}>
+    <h3>Attachments</h3>
+    <ul>{attachments.map((attachment) => {
+      const url = attachment.type === 'github_issue' || attachment.type === 'github_pr'
+        ? safeExternalUrl(attachment.url, { httpsOnly: true })
+        : attachment.type === 'url' ? safeExternalUrl(attachment.url) : null;
+      return <li key={attachment.id || attachment.title}>
+        <div className="clips-board-attachment-heading">
+          {url ? <a href={url} target="_blank" rel="noopener noreferrer">{attachment.title || url}</a>
+            : <span>{attachment.title || 'Untitled reference'}</span>}
+          <span>{attachmentType(attachment.type)}</span>
+          {attachment.status ? <span data-attachment-status={attachment.status}>{attachmentStatus(attachment.status)}</span> : null}
+          {!url && attachment.url ? <span>Unsafe link omitted</span> : null}
+        </div>
+        {attachment.type === 'markdown' ? <MarkdownReference
+          key={`${revision || ''}:${record.ref}:${attachment.id}`}
+          record={record}
+          attachment={attachment}
+          onReadAttachment={onReadAttachment}
+        /> : null}
+        {attachment.identity_error ? <p role="status">{attachment.identity_error}</p> : null}
+      </li>;
+    })}</ul>
+  </section>;
+}
+function MarkdownReference({ record, attachment, onReadAttachment }) {
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function readCurrent() {
+    setBusy(true);
+    setResult(null);
+    setError('');
+    try {
+      const live = await onReadAttachment(record.ref, attachment.id);
+      const current = live?.attachment || live;
+      if (!current || current.id !== attachment.id) throw new Error('Lanes returned a different attachment.');
+      setResult(current);
+    } catch (readError) {
+      setError(readError instanceof Error ? readError.message : String(readError));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const status = result?.status || attachment.status;
+  return <div className="clips-board-attachment-read">
+    <Button
+      size="small"
+      variant="invisible"
+      type="button"
+      disabled={busy || !attachment.id}
+      data-attachment-read={attachment.id}
+      aria-expanded={Boolean(result || error)}
+      onClick={readCurrent}
+    >{busy ? 'Reading…' : result || error ? 'Refresh current Markdown' : 'Read current Markdown'}</Button>
+    {error ? <p role="alert">Could not read current Markdown: {error}</p> : null}
+    {result?.status === 'available' && typeof result.content === 'string'
+      ? <MarkdownContent source={result.content} />
+      : result || status === 'missing' || status === 'unreadable' || status === 'invalid'
+        ? <p role="status">{result?.error || (status === 'missing' ? 'The attached Markdown file is missing.' : status === 'unreadable' ? 'The attached Markdown file cannot be read.' : 'The Markdown reference is invalid.')}</p>
+        : null}
+  </div>;
+}
+function CollaborationControl({ state, busy, onAction }) {
+  const capability = state.collaboration;
+  const enabled = capability?.enabled;
+  const available = typeof enabled === 'boolean' && capability?.state !== 'invalid';
+  return <div className="clips-board-collaboration" data-collaboration-state={available ? String(enabled) : 'unavailable'}>
+    <span>GitHub collaboration</span>
+    <Label size="small" variant={available ? enabled ? 'success' : 'secondary' : 'attention'} data-collaboration-status>
+      {available ? enabled ? 'On' : 'Off' : 'Unavailable'}
+    </Label>
+    <Button
+      size="small"
+      variant="invisible"
+      type="button"
+      data-collaboration-toggle
+      aria-label={`${available ? enabled ? 'Turn off' : 'Turn on' : 'Unavailable'} GitHub collaboration`}
+      disabled={busy || !available}
+      title="This changes only local project configuration. It does not publish. Later supported record changes may sync automatically while enabled."
+      onClick={() => onAction('set_collaboration', { enabled: !enabled })}
+    >{available ? enabled ? 'Turn off' : 'Turn on' : 'Unavailable'}</Button>
+    <span className="clips-board-collaboration-note">Local-only setting; later supported record changes may sync while on.</span>
+    {capability?.error ? <span className="clips-board-collaboration-error" role="alert">{capability.error}</span> : null}
+  </div>;
 }
 function BoardIconButton({ 'aria-label': label, ...props }) {
   return <Tooltip text={label} type="description"><IconButton aria-label={label} {...props} /></Tooltip>;
@@ -82,10 +253,10 @@ function SessionAssociations({ associations }) {
     </div>;
   });
 }
-function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onAction, onMenu, onOpenSession, count, onAddGoal, onToggleClosed }) {
+function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onAction, onMenu, onOpenSession, onReadAttachment, count, onAddGoal, onToggleClosed }) {
   const detailsToggle = useRef(null);
   const isExpanded = ui.expanded.get(record.ref) ?? (record.kind === 'goal' && (Boolean(ui.search.trim()) || ui.filter === 'running'));
-  const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession };
+  const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession, onReadAttachment };
   const isLane = record.kind === 'lane';
   const Container = isLane ? 'header' : 'article';
   const Heading = isLane ? 'div' : 'header';
@@ -117,6 +288,7 @@ function WorkCard({ record, state, ui, toggle, tasks = [], busy, onFocus, onActi
         {record.blocked_by?.length ? <p>Blocked by {record.blocked_by.join(', ')}</p> : null}
       </> : null}
     </div>
+    <AttachmentList key={`${state.boardGeneratedAt || ''}:${record.ref}`} record={record} revision={state.boardGeneratedAt} onReadAttachment={onReadAttachment} />
     {hasDetails && !isExpanded ? <div className="clips-board-details-toggle"><Button ref={detailsToggle} variant="invisible" size="small" disabled={busy} data-description={record.ref} data-expand={record.ref} data-expand-position="collapsed" aria-expanded={false} onClick={() => toggle('expanded', record.ref, true)}>Show more</Button></div> : null}
     {record.kind === 'goal' && isExpanded ? <div className="clips-board-goal-tasks goal-tasks">{tasks.length ? tasks.map((task) => <WorkCard key={task.ref} record={{ ...task, kind: 'task' }} {...props} />) : <p className="clips-board-empty">{record.tasks?.length ? 'No Tasks match the current filter.' : 'No Tasks in this Goal yet.'}</p>}</div> : null}
     {hasDetails && isExpanded ? <div className="clips-board-details-toggle"><Button variant="invisible" size="small" disabled={busy} data-description={record.ref} data-expand={record.ref} data-expand-position="bottom" aria-expanded onClick={collapseDetails}>Show less</Button></div> : null}
@@ -199,7 +371,7 @@ export function ProjectTabs({ projects = [], selectedProjectId, busy, onSelectPr
     'aria-current': selectedHidden ? 'page' : undefined,
     'aria-label': overflowLabel,
   };
-  return projects.length ? <nav ref={nav} className="clips-board-project-tabs" aria-label="Clips projects" data-project-strip>
+  return projects.length ? <nav ref={nav} className="clips-board-project-tabs" aria-label="Lanes projects" data-project-strip>
     <div ref={probes} className="clips-board-project-tab-measurements" aria-hidden="true" inert>
       {projects.map((project) => <span className="clips-board-project-tab" data-project-measure={project.id} data-selected={project.id === selectedProjectId} key={project.id}>{project.name}</span>)}
       <span className="clips-board-project-tab" data-project-measure-more="normal">More</span>
@@ -211,7 +383,7 @@ export function ProjectTabs({ projects = [], selectedProjectId, busy, onSelectPr
       {hidden.length ? <li className="clips-board-project-tab-item" data-selected={selectedHidden}>
         <ActionMenu anchorRef={overflowTrigger} open={overflowOpen} onOpenChange={setOverflowOpen}>
           <ActionMenu.Anchor>{layout.icon ? <Tooltip text={overflowLabel} type="description"><IconButton {...overflowProps} icon={PlusIcon} /></Tooltip> : <Button {...overflowProps} type="button">More</Button>}</ActionMenu.Anchor>
-          <ActionMenu.Overlay align="end" variant={{ regular: 'anchored', narrow: 'anchored' }}><ActionList selectionVariant="single" aria-label="More Clips projects" data-project-overflow-menu>
+          <ActionMenu.Overlay align="end" variant={{ regular: 'anchored', narrow: 'anchored' }}><ActionList selectionVariant="single" aria-label="More Lanes projects" data-project-overflow-menu>
             {hidden.map((project) => <ActionList.Item key={project.id} selected={project.id === selectedProjectId} disabled={busy} data-project-id={project.id} data-project-navigation={navigationId} data-project-overflow-item={project.id} onSelect={() => selectProject(project.id, overflowTrigger.current)}>{project.name}</ActionList.Item>)}
           </ActionList></ActionMenu.Overlay>
         </ActionMenu>
@@ -219,7 +391,7 @@ export function ProjectTabs({ projects = [], selectedProjectId, busy, onSelectPr
     </ul>
   </nav> : null;
 }
-export function Board({ state, busy, projects = [], onSelectProject, canInitializeCurrentDirectory = false, onInitializeCurrentDirectory, onFocus, onAction, onCommand, onMenu, onOpenSession }) {
+export function Board({ state, busy, projects = [], onSelectProject, canInitializeCurrentDirectory = false, onInitializeCurrentDirectory, onFocus, onAction, onCommand, onMenu, onOpenSession, onReadAttachment }) {
   const [ui, setUi] = useState(makeUi);
   const lastFocus = useRef(undefined);
   const scrolls = useRef(new Map());
@@ -260,25 +432,27 @@ export function Board({ state, busy, projects = [], onSelectProject, canInitiali
   const group = (parent, entries, key) => goalGroup(parent ? { ...parent, kind: 'lane' } : null, entries, ui.filter, ui.search, ui.filter !== 'open' || ui.closed.has(key), (r) => executionFor(r, state));
   const assigned = new Set((state.lanes || []).flatMap((l) => goalsForLane(l, goals).map((g) => g.ref)));
   const groups = lane ? [{ lane, goals, key: lane.ref }] : [...(state.lanes || []).map((l) => ({ lane: l, goals: goalsForLane(l, goals), key: l.ref })), { lane: null, goals: goals.filter((g) => !assigned.has(g.ref)), key: 'unassigned' }];
-  const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession };
+  const props = { state, ui, toggle, busy, onFocus, onAction, onMenu, onOpenSession, onReadAttachment };
   const closed = (key, grouped) => ui.filter === 'open' && grouped.closedGoals.length ? <Button variant="invisible" size="small" data-closed={key} aria-pressed={ui.closed.has(key)} onClick={() => toggle('closed', key)}>{ui.closed.has(key) ? 'Hide closed goals' : 'Show closed goals'}</Button> : null;
   const empty = (grouped, entries) => grouped.canRevealClosed ? null : <p className="clips-board-empty">{!entries.length ? 'No Goals in this Lane yet.' : 'No Goals match the current filter.'}</p>;
   const focusedGroup = lane ? group(lane, goals, lane.ref) : null;
   return <div className="clips-board" aria-busy={busy}>
     <header className="clips-board-project-header">
-      <div className="clips-board-project-heading">
-        {lane ? <Button variant="invisible" size="medium" leadingVisual={ArrowLeftIcon} data-back disabled={busy} onClick={() => onFocus(null)}>Back to Clips</Button> : null}
-        <h1>{lane ? lane.title : 'Clips'}</h1>
+      <div className={`clips-board-project-heading${lane ? ' clips-board-project-heading-focused' : ''}`}>
+        {lane ? <button className="clips-board-back" type="button" data-back disabled={busy} onClick={() => onFocus(null)}>← Back</button> : null}
+        {lane ? <div className="clips-board-focused-title-row"><h1>{lane.title}</h1><StatusLabel record={lane} /></div> : <h1>Lanes</h1>}
         <p className="clips-board-project-context" title={state.projectPath}>{lane ? `${lane.ref} · Goals and Tasks` : state.projectPath}</p>
       </div>
       <div className="clips-board-project-actions">
+        <CollaborationControl state={state} busy={busy} onAction={onAction} />
         {lane ? <RecordMenu record={{ ...lane, kind: 'lane' }} state={state} busy={busy} onMenu={onMenu} onFocus={onFocus} onAction={onAction} onOpenSession={onOpenSession} onAddGoal={(trigger) => onCommand('create_goal', trigger, { lane_id: lane.ref })} closedVisible={ui.closed.has(lane.ref)} onToggleClosed={ui.filter === 'open' && focusedGroup.closedGoals.length ? () => toggle('closed', lane.ref) : undefined} /> : null}
-        <BoardIconButton variant="invisible" size="medium" icon={SyncIcon} data-command="refresh" aria-label="Refresh Clips" disabled={busy} onClick={(event) => onCommand('refresh', event.currentTarget)} />
-        {canInitializeCurrentDirectory && onInitializeCurrentDirectory ? <Button variant="invisible" size="medium" leadingVisual={PlusIcon} data-command="initialize" disabled={busy} onClick={(event) => onInitializeCurrentDirectory(event.currentTarget)}>Initialize Clips</Button> : null}
+        <BoardIconButton variant="invisible" size="medium" icon={SyncIcon} data-command="refresh" aria-label="Refresh Lanes" disabled={busy} onClick={(event) => onCommand('refresh', event.currentTarget)} />
+        {canInitializeCurrentDirectory && onInitializeCurrentDirectory ? <Button variant="invisible" size="medium" leadingVisual={PlusIcon} data-command="initialize" disabled={busy} onClick={(event) => onInitializeCurrentDirectory(event.currentTarget)}>Initialize Lanes</Button> : null}
         <NewMenu busy={busy} lane={lane} onCommand={onCommand} />
       </div>
       {lane ? <div className="clips-board-lane-context">
-        <StatusLabel record={lane} /><Labels record={lane} />
+        <Labels record={lane} />
+        <AttachmentList key={`${state.boardGeneratedAt || ''}:${lane.ref}`} record={lane} revision={state.boardGeneratedAt} onReadAttachment={onReadAttachment} />
         {lane.description && ui.expanded.get(lane.ref) ? <div className="clips-board-details-toggle"><Button ref={laneDetailsToggle} variant="invisible" size="small" disabled={busy} data-description={lane.ref} data-expand={lane.ref} data-expand-position="top" aria-expanded onClick={collapseLaneDetails}>Show less</Button></div> : null}
         <Description record={lane} expanded={ui.expanded.get(lane.ref)} />
         {lane.description && !ui.expanded.get(lane.ref) ? <div className="clips-board-details-toggle"><Button ref={laneDetailsToggle} variant="invisible" size="small" disabled={busy} data-description={lane.ref} data-expand={lane.ref} data-expand-position="collapsed" aria-expanded={false} onClick={() => toggle('expanded', lane.ref, true)}>Show more</Button></div> : null}
@@ -288,7 +462,7 @@ export function Board({ state, busy, projects = [], onSelectProject, canInitiali
     </header>
     {!lane ? <div className="clips-board-view-bar"><ProjectTabs projects={projects} selectedProjectId={state.selectedProject?.id} busy={busy} onSelectProject={onSelectProject} /></div> : null}
     <div className="clips-board-toolbar">
-      <TextInput block className="clips-board-search" id="work-search" type="search" data-control-key="search" aria-label="Search Clips work" leadingVisual={SearchIcon} placeholder={lane ? 'Search this Lane’s Goals and Tasks' : 'Search Lanes, Goals and Tasks'} value={ui.search} onChange={(event) => setUi((old) => ({ ...old, search: event.target.value }))} />
+      <TextInput block className="clips-board-search" id="work-search" type="search" data-control-key="search" aria-label="Search Lanes work" leadingVisual={SearchIcon} placeholder={lane ? 'Search this Lane’s Goals and Tasks' : 'Search Lanes, Goals and Tasks'} value={ui.search} onChange={(event) => setUi((old) => ({ ...old, search: event.target.value }))} />
       <div className="clips-board-filters" role="radiogroup" aria-label="Work filter">{['open', 'running', 'all'].map((filter, index, filters) => <Button key={filter} size="medium" variant={ui.filter === filter ? 'default' : 'invisible'} role="radio" aria-checked={ui.filter === filter} tabIndex={ui.filter === filter ? 0 : -1} data-filter={filter} title={filter === 'running' ? 'Records associated with sessions observed running; associations do not prove record execution.' : undefined} leadingVisual={filter === 'open' ? IssueOpenedIcon : filter === 'all' ? CheckCircleIcon : SyncIcon} onClick={() => setUi((old) => ({ ...old, filter }))} onKeyDown={(event) => {
         const next = { ArrowRight: (index + 1) % filters.length, ArrowDown: (index + 1) % filters.length, ArrowLeft: (index + filters.length - 1) % filters.length, ArrowUp: (index + filters.length - 1) % filters.length, Home: 0, End: filters.length - 1 }[event.key];
         if (next === undefined) return;

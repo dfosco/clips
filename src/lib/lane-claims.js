@@ -66,13 +66,21 @@ function authorization(value) {
   return { by: text(value.by, 'authorization.by'), reason: text(value.reason, 'authorization.reason') };
 }
 
-function load(file, laneId, ctx) {
-  let source;
-  try { source = fs.readFileSync(file, 'utf8'); }
-  catch (error) { if (error.code === 'ENOENT') return empty(laneId, ctx); throw error; }
+function invalidClaim(file, error) {
+  return new Error(`Invalid Lane claim ${file || '(in memory)'}: ${error.message}. Ownership is unknown; repair the state explicitly before claiming.`);
+}
+
+export function validateLaneClaim(state, { file, laneId, repositoryId, namespace } = {}) {
   try {
-    const state = JSON.parse(source);
-    if (state.version !== 1 || state.repository_id !== ctx.repository_id || state.namespace !== ctx.namespace || state.lane_id !== laneId) throw new Error('Claim identity/version mismatch');
+    if (!state || typeof state !== 'object' || Array.isArray(state) || state.version !== 1
+      || !path.isAbsolute(text(state.repository_id, 'repository_id')) || state.namespace !== ''
+      || normalizeLaneId(state.lane_id) !== state.lane_id
+      || (repositoryId !== undefined && state.repository_id !== repositoryId)
+      || (namespace !== undefined && state.namespace !== namespace)
+      || (laneId !== undefined && state.lane_id !== normalizeLaneId(laneId))) throw new Error('Claim identity/version mismatch');
+    if (file && (path.basename(file) !== `${state.lane_id}.json`
+      || path.basename(path.dirname(file)) !== digest(state.namespace)
+      || path.basename(path.dirname(path.dirname(file))) !== digest(state.repository_id))) throw new Error('Claim storage identity mismatch');
     if (!Number.isSafeInteger(state.revision) || state.revision < 1 || !Array.isArray(state.history) || state.history.length !== state.revision) throw new Error('Invalid claim revision/history');
     ownersValid(state.owners);
     let prior = [];
@@ -88,8 +96,18 @@ function load(file, laneId, ctx) {
     if (JSON.stringify(prior) !== JSON.stringify(state.owners)) throw new Error('Claim owners/history mismatch');
     return state;
   } catch (error) {
-    throw new Error(`Invalid Lane claim ${file}: ${error.message}. Ownership is unknown; repair the state explicitly before claiming.`);
+    throw invalidClaim(file, error);
   }
+}
+
+function load(file, laneId, ctx) {
+  let source;
+  try { source = fs.readFileSync(file, 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return empty(laneId, ctx); throw error; }
+  let state;
+  try { state = JSON.parse(source); }
+  catch (error) { throw invalidClaim(file, error); }
+  return validateLaneClaim(state, { file, laneId, repositoryId: ctx.repository_id, namespace: ctx.namespace });
 }
 
 export function readLaneClaim(ref, options = {}) {

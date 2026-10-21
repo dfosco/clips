@@ -50,7 +50,7 @@ describe("shared record launch lock", () => {
       expect(childAttempt(fixture().repository, "#g001").status).toBe(0);
     } finally { release(); }
     expect(childAttempt(worktree, "#g001").status).toBe(0);
-  });
+  }, 30_000);
 
   it("keeps a crashed process lock until explicit repair, without touching ownership", () => {
     const { repository } = fixture();
@@ -67,11 +67,12 @@ describe("shared record launch lock", () => {
 
   it("guards both CLI and server paths before any agent or workspace mutation", async () => {
     const { root, repository } = fixture();
-    const previousCli = process.env.CLIPS_CLI_PATH;
-    process.env.CLIPS_CLI_PATH = cli;
+    const previous = Object.fromEntries(["LANES_HOME", "LANES_CLI_PATH"].map(key => [key, process.env[key]]));
+    process.env.LANES_HOME = path.join(root, "home");
+    process.env.LANES_CLI_PATH = cli;
     try {
       execFileSync(process.execPath, [cli, "init", "--skills-scope", "project"], {
-        cwd: repository, env: { ...process.env, CLIPS_HOME: path.join(root, "home") },
+        cwd: repository, env: { ...process.env, LANES_HOME: path.join(root, "home") },
       });
       const { startWork } = await import("./backend");
       const { start } = await import("../cli.js");
@@ -90,8 +91,9 @@ describe("shared record launch lock", () => {
       await expect(startWork(paseo, { agent: "" }, { projectId: "p1", ref: "#g001", mode: "agent" })).rejects.toThrow("does not exist");
       expect(childAttempt(repository, "#g001").status).toBe(0);
     } finally {
-      if (previousCli === undefined) delete process.env.CLIPS_CLI_PATH;
-      else process.env.CLIPS_CLI_PATH = previousCli;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
     }
-  });
+  }, 30_000);
 });

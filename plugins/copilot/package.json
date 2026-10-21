@@ -1,21 +1,21 @@
 {
-  "name": "@dfosco/clips-copilot",
+  "name": "@dfosco/lanes-copilot",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.18.0"
   },
-  "description": "GitHub Copilot App canvas adapter for canonical Clips records and sessions",
+  "description": "GitHub Copilot App canvas adapter for canonical Lanes records and sessions",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dfosco/clips.git",
+    "url": "git+https://github.com/dfosco/lanes.git",
     "directory": "plugins/copilot"
   },
-  "homepage": "https://github.com/dfosco/clips/tree/main/plugins/copilot#readme",
+  "homepage": "https://github.com/dfosco/lanes/tree/main/plugins/copilot#readme",
   "keywords": [
-    "clips",
+    "lanes",
     "copilot",
     "canvas"
   ],

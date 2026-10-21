@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  getRepoRoot, normalizeComponentId, parseRef, formatRef,
+  getRepoRoot, getClipsDir, normalizeComponentId, parseRef, formatRef,
 } from './core.js';
 import { appendJsonEvent, assertExpectedRevision, readJsonEvents, withRecordLock } from './journal.js';
 import { extensionsFields, isPlainObject, referenceList, sectionsFields } from './work-fields.js';
@@ -11,6 +11,7 @@ import { extensionsFields, isPlainObject, referenceList, sectionsFields } from '
 export { normalizeComponentId } from './core.js';
 
 export const CLIPS_COMPONENTS_DIR = '.clips/components';
+export const LANES_COMPONENTS_DIR = '.lanes/components';
 const STATUSES = new Set(['active', 'retired']);
 const TEXT_FIELDS = ['title', 'responsibility', 'contract', 'decisions'];
 const INPUT_FIELDS = new Set([
@@ -18,8 +19,9 @@ const INPUT_FIELDS = new Set([
 ]);
 
 export function getClipsComponentsDir(repoRoot = getRepoRoot()) {
-  return path.join(repoRoot, CLIPS_COMPONENTS_DIR);
+  return path.join(getClipsDir(repoRoot), 'components');
 }
+export const getLanesComponentsDir = getClipsComponentsDir;
 
 function normalizedNamespace(username) {
   if (username == null) return null;

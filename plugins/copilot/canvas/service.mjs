@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCanvasArtifact } from '../src/canvas-build.js';
 import { discoverClipsProjects, resolveClipsProject } from '../src/project-discovery.js';
-import { getRepoRoot } from '../../../src/lib/core.js';
+import { getClipsDir, getRepoRoot } from '../../../src/lib/core.js';
 import { withRecordLock } from '../../../src/lib/journal.js';
 import { findRecord, focusOutline, recordPrompt, sessionAssociations, RECORD_STATUSES } from './model.mjs';
 
@@ -17,7 +17,7 @@ const assets = new Map([
   ['/canvas/app.js', ['dist/app.js', 'text/javascript; charset=utf-8']],
   ['/canvas/style.css', ['dist/style.css', 'text/css; charset=utf-8']],
 ]);
-const allowedActions = new Set(['context', 'list_projects', 'initialize_current_directory', 'diagnostics', 'refresh', 'set_project', 'focus', 'clear_focus', 'inspect', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
+const allowedActions = new Set(['context', 'list_projects', 'initialize_current_directory', 'diagnostics', 'refresh', 'set_project', 'focus', 'clear_focus', 'inspect', 'read_attachment', 'set_collaboration', 'set_status', 'add_label', 'remove_label', 'create_lane', 'create_goal', 'create_task', 'launch', 'steer', 'open_session']);
 
 const hash = (value) => createHash('sha256').update(String(value)).digest('hex');
 const sessionId = (session) => session?.id || session?.sessionId || null;
@@ -50,14 +50,14 @@ function recordCommandForStatus(record, status) {
     if (!new Set(['open', 'in_progress', 'not_planned', 'duplicate']).has(status)) throw new Error(`Unsupported Lane status: ${status}`);
     return ['lane', 'status', record.ref, status];
   }
-  if (!RECORD_STATUSES.has(status)) throw new Error(`Unsupported Clips status: ${status}`);
+  if (!RECORD_STATUSES.has(status)) throw new Error(`Unsupported Lanes status: ${status}`);
   if (record.kind === 'goal') return ['goal', 'status', record.ref, status];
   if (record.kind === 'task') return ['task', 'status', record.ref, status];
   throw new Error('Only Lanes, Goals, and Tasks have status controls.');
 }
 
 export function createCanvasService({ runtime, dataDir = localDataRoot(), serverFactory = createServer, onDiagnostic, projectDiscovery = { discoverClipsProjects, resolveClipsProject } } = {}) {
-  if (!runtime) throw new TypeError('A Clips runtime adapter is required.');
+  if (!runtime) throw new TypeError('A Lanes runtime adapter is required.');
   const { build: canvasBuild, files: artifactFiles, sourceStatus } = readCanvasArtifact(path.dirname(sourceDir));
   const buildIdentity = { manifestSha256: hash(JSON.stringify(canvasBuild)), bridgeVersion: canvasBuild.bridgeVersion };
   // Provider and renderer activate together. An old process must not serve a
@@ -82,9 +82,9 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     try { currentDirectory = await realpath(getRepoRoot(await realpath(instance.sessionDirectory))); }
     catch (error) { return { currentDirectory: null, currentProjectId: null, canInitializeCurrentDirectory: false, currentDirectoryError: `Current session directory is unavailable or not a Git repository: ${error.message}` }; }
     let canInitializeCurrentDirectory = false;
-    try { await lstat(path.join(currentDirectory, '.clips')); }
+    try { await lstat(getClipsDir(currentDirectory)); }
     catch (error) {
-      if (error.code !== 'ENOENT') return { currentDirectory, currentProjectId: null, canInitializeCurrentDirectory: false, currentDirectoryError: `Cannot inspect the current repository's Clips store: ${error.message}` };
+      if (error.code !== 'ENOENT') return { currentDirectory, currentProjectId: null, canInitializeCurrentDirectory: false, currentDirectoryError: `Cannot inspect the current repository's Lanes store: ${error.message}` };
       canInitializeCurrentDirectory = true;
     }
     return { currentDirectory, currentProjectId: catalog.projects.find((project) => project.projectRoot === currentDirectory)?.id || null, canInitializeCurrentDirectory };
@@ -92,7 +92,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
 
   async function projectContext(instance) {
     const catalog = await projectDiscovery.discoverClipsProjects();
-    if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed. Reopen the canvas.');
+    if (catalog.userScope !== instance.userScope) throw new Error('The local Lanes user scope changed. Reopen the canvas.');
     const directory = await directoryInfo(instance, catalog);
     return { ...catalog, ...directory, diagnostics: [...catalog.diagnostics, ...(directory.currentDirectoryError ? [{ code: 'current_directory_unavailable', message: directory.currentDirectoryError }] : [])], projectPath: instance.projectPath, selectedProject: instance.selectedProject || null, selectionSource: instance.selectionSource, selectionError: instance.selectionError || null };
   }
@@ -111,18 +111,18 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
   }
 
   async function requireProject(instance) {
-    if (!instance.selectedProject) throw new Error(instance.selectionError || 'Choose an available Clips project from your local registry to continue.');
+    if (!instance.selectedProject) throw new Error(instance.selectionError || 'Choose an available Lanes project from your local registry to continue.');
     const catalog = await projectDiscovery.discoverClipsProjects();
-    if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed. Reopen the canvas and choose a project.');
+    if (catalog.userScope !== instance.userScope) throw new Error('The local Lanes user scope changed. Reopen the canvas and choose a project.');
     const selected = catalog.projects.find((project) => project.id === instance.selectedProject.id && project.projectRoot === instance.projectPath && project.storeRoot === instance.selectedProject.storeRoot);
-    if (!selected) throw new Error('The selected Clips project is no longer available. Choose an available project; no other board was substituted.');
+    if (!selected) throw new Error('The selected Lanes project is no longer available. Choose an available project; no other board was substituted.');
     return instance.projectPath;
   }
 
   async function saveFocus(instance, ref) {
     await requireProject(instance);
     const board = await runtime.listBoard(instance.projectPath);
-    if (!findRecord(board, ref)) throw new Error(`Record ${ref} is not present in this project's Clips board.`);
+    if (!findRecord(board, ref)) throw new Error(`Record ${ref} is not present in this project's Lanes board.`);
     await writeJson(focusPath(instance), { ref, updatedAt: new Date().toISOString() });
     return ref;
   }
@@ -157,6 +157,8 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       uiSourceStatus: sourceStatus,
       uiBuild: buildIdentity,
       focus,
+      boardGeneratedAt: board.generated_at || null,
+      collaboration: board.collaboration || null,
       outline: outline ? {
         kind: outline.kind,
         record: outline.record,
@@ -179,7 +181,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     const normalized = safeRef(ref);
     const board = await runtime.listBoard(instance.projectPath);
     const record = findRecord(board, normalized);
-    if (!record) throw new Error(`Record ${normalized} is not present in this project's Clips board.`);
+    if (!record) throw new Error(`Record ${normalized} is not present in this project's Lanes board.`);
     return { board, record };
   }
 
@@ -209,17 +211,17 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
     if (action === 'initialize_current_directory') {
       if (Object.keys(input).length) throw new Error('Current-directory initialization accepts no caller path, project, or other overrides.');
       const context = await projectContext(instance);
-      if (!context.canInitializeCurrentDirectory) throw new Error(context.currentDirectoryError || 'The current session repository already has a Clips store; it was not modified.');
+      if (!context.canInitializeCurrentDirectory) throw new Error(context.currentDirectoryError || 'The current session repository already has a Lanes store; it was not modified.');
       const target = context.currentDirectory;
       if (directoryInitializations.has(target)) throw new Error('Current-directory initialization is already pending.');
       directoryInitializations.add(target);
       try {
-        if (!runtime.initializeProject) throw new Error('This runtime does not support minimal Clips initialization. Reload the extension.');
+        if (!runtime.initializeProject) throw new Error('This runtime does not support minimal Lanes initialization. Reload the extension.');
         await runtime.initializeProject(target);
         const catalog = await projectDiscovery.discoverClipsProjects();
-        if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed during initialization. Reopen the canvas.');
+        if (catalog.userScope !== instance.userScope) throw new Error('The local Lanes user scope changed during initialization. Reopen the canvas.');
         const project = catalog.projects.find((candidate) => candidate.projectRoot === target);
-        if (!project) throw new Error('Clips initialized, but its project is not available in the registry. Review discovery diagnostics before selecting it.');
+        if (!project) throw new Error('Lanes initialized, but its project is not available in the registry. Review discovery diagnostics before selecting it.');
         const next = { ...instance, selectedProject: project, projectPath: target, selectionSource: 'saved', selectionError: null };
         const state = await buildState(next);
         await writeJson(projectPathFile(instance), { projectId: project.id, openInputPath: instance.openInputPath, updatedAt: new Date().toISOString() });
@@ -235,9 +237,9 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       return { focus: null, state: await buildState(instance) };
     }
     if (action === 'set_project') {
-      if (!input.projectId || input.projectPath !== undefined) throw new Error('Choose an exact discovered Clips project ID; arbitrary paths are not accepted.');
+      if (!input.projectId || input.projectPath !== undefined) throw new Error('Choose an exact discovered Lanes project ID; arbitrary paths are not accepted.');
       const catalog = await projectDiscovery.discoverClipsProjects();
-      if (catalog.userScope !== instance.userScope) throw new Error('The local Clips user scope changed. Reopen this canvas.');
+      if (catalog.userScope !== instance.userScope) throw new Error('The local Lanes user scope changed. Reopen this canvas.');
       const project = await projectDiscovery.resolveClipsProject(input.projectId);
       const next = { ...instance, selectedProject: project, projectPath: project.projectRoot, selectionSource: 'saved', selectionError: null };
       // Validate the actual board and complete state before committing selection.
@@ -254,6 +256,36 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const ref = safeRef(input.ref);
       await selected(instance, ref);
       return runtime.viewRecord(ref, instance.projectPath);
+    }
+    if (action === 'read_attachment') {
+      if (Object.keys(input).some((key) => !['ref', 'attachmentId', 'expectedProjectPath'].includes(key))) {
+        throw new Error('Attachment reads accept only the exact record reference and attachment ID.');
+      }
+      const ref = safeRef(input.ref);
+      if (input.ref !== ref) throw new Error('Attachment reads require the exact current record reference.');
+      const { record } = await selected(instance, ref);
+      if (typeof input.attachmentId !== 'string') throw new Error('Provide an exact attached Markdown ID.');
+      const attachment = (Array.isArray(record.attachments) ? record.attachments : [])
+        .find((item) => item.id === input.attachmentId);
+      if (!attachment) throw new Error(`Attachment ${input.attachmentId} is not associated with ${record.ref}.`);
+      if (attachment.type !== 'markdown') throw new Error('Only Markdown attachments have readable file content.');
+      if (!runtime.readAttachment) throw new Error('This runtime does not support live Markdown attachment reads. Reload the extension.');
+      return runtime.readAttachment(record.ref, attachment.id, instance.projectPath);
+    }
+    if (action === 'set_collaboration') {
+      if (Object.keys(input).some((key) => !['enabled', 'expectedProjectPath'].includes(key))) {
+        throw new Error('Collaboration changes accept only an enabled boolean.');
+      }
+      if (typeof input.enabled !== 'boolean') throw new Error('Collaboration must be explicitly enabled or disabled.');
+      if (!runtime.setCollaboration) throw new Error('This runtime does not support project-local collaboration settings. Reload the extension.');
+      const projectPath = await requireProject(instance);
+      const board = await runtime.listBoard(projectPath);
+      const capability = board.collaboration;
+      if (!capability || capability.enabled === null || capability.state === 'invalid') {
+        throw new Error(capability?.error || 'The current project collaboration setting is unavailable.');
+      }
+      const result = await runtime.setCollaboration(input.enabled, projectPath);
+      return { result, state: await buildState(instance) };
     }
     if (action === 'set_status') {
       const { record } = await selected(instance, input.ref);
@@ -402,7 +434,7 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const input = ctx.input && typeof ctx.input === 'object' ? ctx.input : {};
       const existing = instances.get(ctx.instanceId);
       if (existing && existing.sessionId !== ctx.sessionId) throw new Error('This canvas provider belongs to a different session.');
-      if (existing) return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${existing.token}` };
+      if (existing) return { title: 'Lanes', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${existing.token}` };
       const catalog = await projectDiscovery.discoverClipsProjects();
       const scope = { ...ctx, userScope: catalog.userScope };
       let persisted;
@@ -426,11 +458,11 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       const sessionDirectory = ctx.session?.workingDirectory || current?.context?.workingDirectory || null;
       const explicitNewInput = openInputPath && openInputPath !== persisted.openInputPath;
       if (persisted.invalid) {
-        selectionError = 'Saved Clips project selection is invalid. Choose a project; no other board was substituted.';
+        selectionError = 'Saved Lanes project selection is invalid. Choose a project; no other board was substituted.';
       } else if (persisted.projectId && !explicitNewInput) {
         selectionSource = 'saved';
         selectedProject = catalog.projects.find((project) => project.id === persisted.projectId);
-        if (!selectedProject) selectionError = 'Your selected Clips project is no longer available. Choose a project; the session directory was not substituted.';
+        if (!selectedProject) selectionError = 'Your selected Lanes project is no longer available. Choose a project; the session directory was not substituted.';
       } else {
         const sourcePath = openInputPath || sessionDirectory;
         if (sourcePath) {
@@ -441,9 +473,9 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
           } catch { /* Default selection can use the first available project below. */ }
         }
         if (selectedProject) selectionSource = 'current_directory';
-        else if (openInputPath) selectionError = 'The requested directory is not an available registered Clips project. Choose a Clips project.';
+        else if (openInputPath) selectionError = 'The requested directory is not an available registered Lanes project. Choose a Lanes project.';
         else if (catalog.projects.length) { selectedProject = catalog.projects[0]; selectionSource = 'first_available'; }
-        else selectionError = 'No available registered Clips projects. Initialize Clips in the current repository or choose a project after registration.';
+        else selectionError = 'No available registered Lanes projects. Initialize Lanes in the current repository or choose a project after registration.';
       }
       const projectPath = selectedProject?.projectRoot || null;
       instances.set(ctx.instanceId, { instanceId: ctx.instanceId, sessionId: ctx.sessionId, sessionDirectory, sessionDirectoryError, userScope: catalog.userScope, selectedProject, selectionSource, selectionError, projectPath, openInputPath, token: randomBytes(32).toString('hex') });
@@ -451,23 +483,23 @@ export function createCanvasService({ runtime, dataDir = localDataRoot(), server
       await writeJson(projectPathFile(scope), { projectId: selectedProject?.id || persisted.projectId || null, ...(persisted.invalid ? { invalid: true } : {}), openInputPath });
       await startServer();
       const instance = instances.get(ctx.instanceId);
-      return { title: 'Clips Work', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${instance.token}` };
+      return { title: 'Lanes', url: `${origin}/canvas/index.html?instanceId=${encodeURIComponent(ctx.instanceId)}&token=${instance.token}` };
     },
     async close(ctx) { instances.delete(ctx.instanceId); },
     async action(ctx) {
       const instance = instances.get(ctx.instanceId);
-      if (!instance) throw new Error('Open Clips Work in this canvas instance first.');
+      if (!instance) throw new Error('Open Lanes in this canvas instance first.');
       if (ctx.sessionId && ctx.sessionId !== instance.sessionId) throw new Error('Canvas action belongs to a different session.');
       return dispatch(instance, ctx.actionName, ctx.input || {});
     },
     async dispatch(instanceId, action, input) {
       const instance = instances.get(instanceId);
-      if (!instance) throw new Error('Open Clips Work in this canvas instance first.');
+      if (!instance) throw new Error('Open Lanes in this canvas instance first.');
       return dispatch(instance, action, input);
     },
     async state(instanceId) {
       const instance = instances.get(instanceId);
-      if (!instance) throw new Error('Open Clips Work in this canvas instance first.');
+      if (!instance) throw new Error('Open Lanes in this canvas instance first.');
       return buildState(instance);
     },
     async shutdown() {

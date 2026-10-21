@@ -55,7 +55,7 @@ export function resolveSdkRuntimeExecutable({
   try {
     packageJson = resolvePackage(`${packageName}/package.json`);
   } catch (error) {
-    throw new Error(`Could not resolve ${packageName} from the installed Clips extension. Run node scripts/install-copilot.js to install its locked platform package.`, { cause: error });
+    throw new Error(`Could not resolve ${packageName} from the installed Lanes extension. Run node scripts/install-copilot.js to install its locked platform package.`, { cause: error });
   }
   const executable = path.join(path.dirname(packageJson), "prebuilds", runtimePlatform, platform === "win32" ? "copilot-runtime.exe" : "copilot-runtime");
   if (!exists(executable)) {
@@ -84,7 +84,7 @@ async function withTimeout(operation, message, timeout = 5000) {
 // Extension hosts may embed JavaScript in the Copilot executable. execPath is
 // therefore not necessarily an interpreter that accepts a JS entry point.
 export async function resolveNodeExecutable({
-  configured = process.env.CLIPS_NODE_PATH,
+  configured = process.env.LANES_NODE_PATH || process.env.CLIPS_NODE_PATH,
   executable = process.execPath,
   env = process.env,
   run = execFile,
@@ -103,7 +103,7 @@ export async function resolveNodeExecutable({
       if (Number(value.node?.split('.')[0]) >= 18 && path.isAbsolute(value.execPath)) return value.execPath;
     } catch { /* Try the next installed interpreter, never the embedded host. */ }
   }
-  throw new Error(`Node.js 18 or newer is required to run Clips.${configured ? ` CLIPS_NODE_PATH (${configured}) is not a working Node interpreter.` : ''} Install Node or set CLIPS_NODE_PATH to its absolute executable path, then reload the extension.`);
+  throw new Error(`Node.js 18 or newer is required to run Lanes.${configured ? ` LANES_NODE_PATH/CLIPS_NODE_PATH (${configured}) is not a working Node interpreter.` : ''} Install Node or set LANES_NODE_PATH to its absolute executable path, then reload the extension.`);
 }
 
 async function realpath(input) {
@@ -134,7 +134,7 @@ function parseJson(text, description) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(`Clips returned invalid JSON for ${description}.`);
+    throw new Error(`Lanes returned invalid JSON for ${description}.`);
   }
 }
 
@@ -152,13 +152,14 @@ function commandFamily(args) {
       : args.slice(0, 2).join(" ");
   const first = args[0];
   if (!recordCommandPattern.test(first) || !allowedCommands.has(family) && !allowedCommands.has(first)) {
-    throw new Error(`Unsupported Clips command family: ${family}`);
+    throw new Error(`Unsupported Lanes command family: ${family}`);
   }
   return family;
 }
 
 function isReadCommand(args) {
   return args[0] === "board" || args[0] === "view" || args[0] === "history" ||
+    args[0] === "attachment" && args[1] === "read" && args.length === 4 ||
     args[0] === "lane" && (args[1] === "list" || args[1] === "show" || args[1] === "manager" && ["list", "inspect"].includes(args[2])) ||
     args[0] === "component" && ["list", "show"].includes(args[1]) ||
     args[0] === "track" && ["list", "show"].includes(args[1]) ||
@@ -216,7 +217,7 @@ export function appSessionUrl(sessionId) {
 /**
  * Create the Copilot host adapter. It starts an owned SDK client lazily, only
  * when a session operation is requested. Injected clients remain caller-owned.
- * All planning mutations go through the canonical Clips CLI; no journal files
+ * All planning mutations go through the canonical Lanes CLI; no journal files
  * are read or written here.
  */
 export async function createClipsRuntime(options = {}) {
@@ -234,10 +235,10 @@ export async function createClipsRuntime(options = {}) {
   let started = false;
   let clientStart;
   let nodeExecutable;
-  const nodePath = () => nodeExecutable ??= resolveNodeExecutable({ configured: options.nodePath ?? process.env.CLIPS_NODE_PATH });
-  const configuredHostId = options.hostId ?? process.env.CLIPS_COPILOT_HOST_ID;
+  const nodePath = () => nodeExecutable ??= resolveNodeExecutable({ configured: options.nodePath ?? process.env.LANES_NODE_PATH ?? process.env.CLIPS_NODE_PATH });
+  const configuredHostId = options.hostId ?? process.env.LANES_COPILOT_HOST_ID ?? process.env.CLIPS_COPILOT_HOST_ID;
   const hostId = safeId(configuredHostId) ? configuredHostId.trim() : null;
-  const hostIdentitySource = hostId ? (options.hostId ? "runtime option" : "CLIPS_COPILOT_HOST_ID") : null;
+  const hostIdentitySource = hostId ? (options.hostId ? "runtime option" : process.env.LANES_COPILOT_HOST_ID ? "LANES_COPILOT_HOST_ID" : "CLIPS_COPILOT_HOST_ID") : null;
   let recordSendQueue = Promise.resolve();
   let appSessionVisibilityVerified = false;
   const capabilityFile = path.join(dataRoot, "host-capabilities.json");
@@ -254,7 +255,7 @@ export async function createClipsRuntime(options = {}) {
     }
     if (!started) {
       if (!clientStart) {
-        clientStart = withTimeout(client.start(), "Copilot session catalog startup timed out. The Clips board is still available.")
+        clientStart = withTimeout(client.start(), "Copilot session catalog startup timed out. The Lanes board is still available.")
           .then(() => { started = true; })
           .catch(async (error) => {
             if (ownsClient) {
@@ -273,7 +274,7 @@ export async function createClipsRuntime(options = {}) {
     if (options.cliPath) return options.cliPath.endsWith(".js")
       ? { bin: await nodePath(), prefix: [path.resolve(options.cliPath)] }
       : { bin: options.cliPath, prefix: [] };
-    const configured = process.env.CLIPS_CLI_PATH?.trim();
+    const configured = (process.env.LANES_CLI_PATH || process.env.CLIPS_CLI_PATH)?.trim();
     if (configured) {
       return configured.endsWith(".js")
         ? { bin: await nodePath(), prefix: [path.resolve(configured)] }
@@ -281,14 +282,15 @@ export async function createClipsRuntime(options = {}) {
     }
     const local = path.join(moduleRoot, "src", "cli.js");
     if (existsSync(local)) return { bin: await nodePath(), prefix: [local] };
-    const candidates = ["clips", path.join(os.homedir(), ".local", "bin", "clips"), "/opt/homebrew/bin/clips", "/usr/local/bin/clips"];
+    const candidates = ["lanes", path.join(os.homedir(), ".local", "bin", "lanes"), "/opt/homebrew/bin/lanes", "/usr/local/bin/lanes",
+      "clips", path.join(os.homedir(), ".local", "bin", "clips"), "/opt/homebrew/bin/clips", "/usr/local/bin/clips"];
     for (const candidate of candidates) {
       try {
         await cliRunner(candidate, ["--version"], projectPath);
         return { bin: candidate, prefix: [] };
       } catch { /* continue */ }
     }
-    throw new Error("Clips CLI not found. Install Clips or set CLIPS_CLI_PATH to the maintained checkout's src/cli.js.");
+    throw new Error("Lanes CLI not found. Install Lanes or set LANES_CLI_PATH (legacy CLIPS_CLI_PATH is supported) to the maintained checkout's src/cli.js.");
   }
 
   async function runClips(args, projectPath, { parse = true } = {}) {
@@ -302,8 +304,8 @@ export async function createClipsRuntime(options = {}) {
       diagnostic({ event: 'clips.command.completed', projectPath: context.cwd, executable: cli.bin, command: args[0], ref: args[0] === 'view' ? args[1] : undefined });
     } catch (error) {
       const message = errorMessage(error);
-      if (message.includes('No Clips store')) throw new Error(`No Clips store in the selected project (${context.cwd}). Choose an initialized Clips project, or run clips init there to create one. The canvas has not changed your project.`);
-      throw new Error(`Clips command failed in ${context.cwd}: ${message}`);
+      if (message.includes('No Lanes store')) throw new Error(`No Lanes store in the selected project (${context.cwd}). Choose an initialized Lanes project, or run lanes init there to create one. The canvas has not changed your project.`);
+      throw new Error(`Lanes command failed in ${context.cwd}: ${message}`);
     }
     const output = asString(result?.stdout).trim();
     if (!output) return { success: true };
@@ -420,18 +422,39 @@ export async function createClipsRuntime(options = {}) {
 
   async function listBoard(projectPath) {
     const result = await runClips(["board"], projectPath);
-    if (!result || !Array.isArray(result.lanes) || !Array.isArray(result.goals)) throw new Error("Clips returned an invalid board response.");
+    if (!result || !Array.isArray(result.lanes) || !Array.isArray(result.goals)) throw new Error("Lanes returned an invalid board response.");
     return result;
   }
 
   async function viewRecord(ref, projectPath) {
-    if (!safeId(ref) || !ref.startsWith("#")) throw new Error("viewRecord requires a full Clips record reference.");
+    if (!safeId(ref) || !ref.startsWith("#")) throw new Error("viewRecord requires a full Lanes record reference.");
     return runClips(["view", ref], projectPath);
   }
 
   async function recordCommand(args, projectPath) {
     const family = commandFamily(args);
     return runClips(args, projectPath, { parse: true, family });
+  }
+
+  async function readAttachment(ref, attachmentId, projectPath) {
+    if (typeof ref !== "string" || !/^#[\w.-]+(?:#[\w.-]+){0,2}$/.test(ref)) {
+      throw new Error("readAttachment requires an exact current Lane, Goal, or Task reference.");
+    }
+    if (typeof attachmentId !== "string" || !/^att-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(attachmentId)) {
+      throw new Error("readAttachment requires a canonical attachment ID.");
+    }
+    const result = await runClips(["attachment", "read", ref, attachmentId], projectPath);
+    if (result?.ref !== ref || result?.attachment?.id !== attachmentId || result?.attachment?.type !== "markdown") {
+      throw new Error("Lanes returned a different record or attachment than requested.");
+    }
+    const display = { ...result.attachment };
+    delete display.path;
+    return display;
+  }
+
+  async function setCollaboration(enabled, projectPath) {
+    if (typeof enabled !== "boolean") throw new Error("Collaboration must be explicitly enabled or disabled.");
+    return runClips(["config", "collaboration", String(enabled)], projectPath);
   }
 
   async function listSessions(projectPath) {
@@ -486,23 +509,23 @@ export async function createClipsRuntime(options = {}) {
       await hostSession.send(prompt);
       return;
     }
-    throw new Error("Only the currently joined Copilot session can be steered from this canvas. Open the target session and its Clips canvas. A prior visibility check is not a live host connection.");
+    throw new Error("Only the currently joined Copilot session can be steered from this canvas. Open the target session and its Lanes canvas. A prior visibility check is not a live host connection.");
   }
 
   async function launchRecord(input) {
     if (!hostSession) {
-      throw new Error("This extension is not joined to a Copilot session. Open the Clips canvas inside the intended session before sending work.");
+      throw new Error("This extension is not joined to a Copilot session. Open the Lanes canvas inside the intended session before sending work.");
     }
     validateSessionConfig(input);
     if (input.model !== undefined || input.reasoningEffort !== undefined) throw new Error('Work uses the current session model and settings. Change them in the host before sending work.');
     const context = await gitContext(input.projectPath);
     const record = await viewRecord(input.ref, context.cwd);
-    if (!record || record.ref !== input.ref) throw new Error(`Clips did not return the exact requested record ${input.ref}; refusing to bind a Copilot session to a different record.`);
+    if (!record || record.ref !== input.ref) throw new Error(`Lanes did not return the exact requested record ${input.ref}; refusing to bind a Copilot session to a different record.`);
     const lastPart = input.ref.split('#').at(-1);
     const expectedKind = /^l\d+$/.test(lastPart) ? 'lane' : /^t\d+$/.test(lastPart) ? 'task' : /^g\d+$/.test(lastPart) ? 'goal' : null;
     if (!expectedKind) throw new Error('Work requires a current Lane, Goal, or Task reference.');
     const kind = record.kind || expectedKind;
-    if (kind !== expectedKind) throw new Error(`Clips record ${input.ref} resolved to kind ${kind}, expected ${expectedKind}; refusing to bind a Copilot session.`);
+    if (kind !== expectedKind) throw new Error(`Lanes record ${input.ref} resolved to kind ${kind}, expected ${expectedKind}; refusing to bind a Copilot session.`);
     // Serialize metadata writes and prompt delivery, without a persistent
     // ownership lease or rejecting another explicitly requested record.
     const pending = recordSendQueue.then(() => sendRecord(input, context, kind));
@@ -561,9 +584,11 @@ export async function createClipsRuntime(options = {}) {
     listBoard,
     viewRecord,
     recordCommand,
+    readAttachment,
+    setCollaboration,
     async initializeProject(projectPath) {
       const result = await runClips(['init', '--store-only'], projectPath);
-      if (result?.initialized !== true) throw new Error('Clips did not confirm minimal store initialization. Use the maintained CLI with init --store-only support.');
+      if (result?.initialized !== true) throw new Error('Lanes did not confirm minimal store initialization. Use the maintained CLI with init --store-only support.');
       return result;
     },
     listSessions,

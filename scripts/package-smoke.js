@@ -7,8 +7,16 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-package-'));
+const tempRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'lanes-package-')));
+const canonicalSkills = ['lane-dev', 'lane-manager', 'lane-plugin', 'lane-radar', 'lanes'];
 const skillsOnly = process.argv.includes('--skills-only');
+const isolatedEnv = {
+  ...process.env, HOME: path.join(tempRoot, 'user'),
+  LANES_HOME: path.join(tempRoot, 'user-state'), CLIPS_HOME: path.join(tempRoot, 'legacy-user-state'),
+  LANES_SWITCH_INIT: '1', CLIPS_SWITCH_INIT: '1',
+  npm_config_cache: path.join(tempRoot, 'npm-cache'),
+};
+fs.mkdirSync(isolatedEnv.HOME);
 
 async function verifyPackage() {
   const packEnv = { ...process.env };
@@ -25,14 +33,19 @@ async function verifyPackage() {
   for (const retired of ['src/commands/web.js', 'src/lib/web-server.js']) {
     assert(!paths.includes(retired), `tarball contains retired implementation: ${retired}`);
   }
-  assert(paths.includes('.agents/skills/clips/SKILL.md'), 'tarball is missing the Clips skill');
+  assert(paths.includes('.agents/skills/lanes/SKILL.md'), 'tarball is missing the Lanes skill');
   assert(paths.includes('.agents/skills/lane-manager/SKILL.md'), 'tarball is missing the Lane Manager skill');
-  assert(paths.includes('.agents/skills/clips-dev/SKILL.md'), 'tarball is missing the Clips Dev skill');
-  assert(paths.includes('.agents/skills/clips-dev/agents/openai.yaml'), 'tarball is missing Clips Dev agent metadata');
-  assert(!paths.some((file) => file.startsWith('.agents/skills/loopz/')), 'tarball contains a duplicate legacy skill directory');
+  assert(paths.includes('.agents/skills/lane-dev/SKILL.md'), 'tarball is missing the Lane Dev skill');
+  assert(paths.includes('.agents/skills/lane-dev/agents/openai.yaml'), 'tarball is missing Lane Dev agent metadata');
+  assert(paths.includes('.agents/skills/lane-radar/SKILL.md'), 'tarball is missing the Lane Radar skill');
+  assert(paths.includes('.agents/skills/lane-plugin/SKILL.md'), 'tarball is missing the Lane Plugin skill');
+  assert(paths.includes('plugins/copilot/skills/lanes-copilot/SKILL.md'), 'tarball is missing canonical Copilot guidance');
+  for (const alias of ['clips', 'clips-dev', 'loopz', 'lane-orchestrator']) {
+    assert(!paths.some((file) => file.startsWith(`.agents/skills/${alias}/`)), `tarball contains a duplicate or role-only skill: ${alias}`);
+  }
   assert(paths.includes('skillshop.manifest.mjs'), 'tarball is missing the Skillshop manifest');
   assert(!paths.includes('src/skills.js'), 'tarball still contains the deprecated named skill export');
-  assert(!paths.some((file) => file.startsWith('.agents/skills/clips-') && !file.startsWith('.agents/skills/clips-dev/')), 'tarball contains routed Clips skills');
+  assert(!paths.some((file) => file.startsWith('.agents/skills/lanes-') && !file.startsWith('.agents/skills/lane-dev/')), 'tarball contains routed Lanes skills');
   assert(paths.includes('CHANGELOG.md'), 'tarball is missing the changelog');
   assert(paths.includes('docs/cli-reference.md'), 'tarball is missing the linked technical reference');
   for (const required of [
@@ -59,7 +72,12 @@ async function verifyPackage() {
     }
   }
   const packedPackage = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'package.json'), 'utf8'));
-  assert.deepEqual(packedPackage.bin, { clips: 'src/cli.js' });
+  assert.equal(packedPackage.name, '@dfosco/lanes');
+  assert.deepEqual(packedPackage.bin, { lanes: 'src/cli.js', clips: 'src/cli.js' });
+  const shrinkwrap = JSON.parse(fs.readFileSync(path.join(extractedRoot, 'npm-shrinkwrap.json'), 'utf8'));
+  assert.equal(shrinkwrap.name, packedPackage.name);
+  assert.equal(shrinkwrap.packages[''].name, packedPackage.name);
+  assert.deepEqual(shrinkwrap.packages[''].bin, packedPackage.bin);
   assert.equal(packedPackage.dependencies.skillshop, '2.1.0');
   assert(packedPackage.devDependencies.vitest, 'package is missing the retained test runner');
   assert.equal(packedPackage.scripts.test, 'vitest run --config vitest.config.js');
@@ -89,27 +107,39 @@ async function verifyPackage() {
   assert.equal(packedPackage.exports['./skillshop'], './skillshop.manifest.mjs');
   assert.equal(packedPackage.exports['./skills'], undefined);
   const skillLibrary = (await import(pathToFileURL(path.join(extractedRoot, 'skillshop.manifest.mjs')).href)).default;
-  assert.equal(skillLibrary.packageName, '@dfosco/clips');
-  assert.deepEqual(Object.keys(skillLibrary.skills).sort(), ['skill:clips', 'skill:clips-dev', 'skill:lane-manager', 'skill:loopz']);
-  assert.equal(skillLibrary.skills['skill:loopz'], skillLibrary.skills['skill:clips-dev'], 'legacy import must resolve to the canonical skill');
+  assert.equal(skillLibrary.packageName, '@dfosco/lanes');
+  assert.deepEqual(Object.keys(skillLibrary.skills).sort(), ['skill:clips', 'skill:clips-dev', 'skill:lane-dev', 'skill:lane-manager', 'skill:lane-plugin', 'skill:lane-radar', 'skill:lanes', 'skill:loopz']);
+  assert.equal(skillLibrary.skills['skill:clips'], skillLibrary.skills['skill:lanes']);
+  assert.equal(skillLibrary.skills['skill:clips-dev'], skillLibrary.skills['skill:lane-dev']);
+  assert.equal(skillLibrary.skills['skill:loopz'], skillLibrary.skills['skill:lane-dev'], 'legacy import must resolve to the canonical skill');
   const { importSkill } = await import('skillshop/import');
-  for (const specifier of ['skill:clips-dev', 'skill:loopz']) {
+  for (const specifier of ['skill:lane-dev', 'skill:clips-dev', 'skill:loopz']) {
     const targetDir = path.join(tempRoot, specifier.replace(':', '-'));
     await importSkill({ library: extractedRoot, specifier, targetDir });
-    assert.match(fs.readFileSync(path.join(targetDir, 'SKILL.md'), 'utf8'), /^name: clips-dev$/m);
-    assert.match(fs.readFileSync(path.join(targetDir, 'agents', 'openai.yaml'), 'utf8'), /Use \$clips-dev/);
+    assert.match(fs.readFileSync(path.join(targetDir, 'SKILL.md'), 'utf8'), /^name: lane-dev$/m);
+    assert.match(fs.readFileSync(path.join(targetDir, 'agents', 'openai.yaml'), 'utf8'), /Use \$lane-dev/);
   }
+  for (const name of canonicalSkills) {
+    const targetDir = path.join(tempRoot, `canonical-${name}`);
+    await importSkill({ library: extractedRoot, specifier: `skill:${name}`, targetDir });
+    assert.match(fs.readFileSync(path.join(targetDir, 'SKILL.md'), 'utf8'), new RegExp(`^name: ${name}$`, 'm'));
+  }
+  const legacyCoreTarget = path.join(tempRoot, 'legacy-core-import');
+  await importSkill({ library: extractedRoot, specifier: 'skill:clips', targetDir: legacyCoreTarget });
+  assert.match(fs.readFileSync(path.join(legacyCoreTarget, 'SKILL.md'), 'utf8'), /^name: lanes$/m);
   for (const [specifier, url] of Object.entries(skillLibrary.skills)) {
     const directory = fileURLToPath(url);
     const skill = path.join(directory, 'SKILL.md');
     assert(fs.existsSync(skill), `${specifier} manifest does not exist`);
     const content = fs.readFileSync(skill, 'utf8');
-    assert.match(content, /comprehensive plans/i, `${specifier} must describe complete planning`);
-    assert.match(content, /plan-only/, `${specifier} must preserve explicit non-executing output`);
-    assert.match(content, /direct child of[\s\S]*?Lane Manager session/, `${specifier} must retain direct Copilot parentage`);
-    assert.match(content, /coordinating_creator_session_id/, `${specifier} must require native parentage readback`);
-    assert.match(content, /send_session_message/, `${specifier} must preserve manager communication`);
-    assert.match(content, /Paseo/, `${specifier} must distinguish the other host`);
+    if (['skill:lanes', 'skill:lane-manager', 'skill:lane-dev', 'skill:clips', 'skill:clips-dev', 'skill:loopz'].includes(specifier)) {
+      assert.match(content, /comprehensive plans/i, `${specifier} must describe complete planning`);
+      assert.match(content, /plan-only/, `${specifier} must preserve explicit non-executing output`);
+      assert.match(content, /direct child of[\s\S]*?Lane Manager session/, `${specifier} must retain direct Copilot parentage`);
+      assert.match(content, /coordinating_creator_session_id/, `${specifier} must require native parentage readback`);
+      assert.match(content, /send_session_message/, `${specifier} must preserve manager communication`);
+      assert.match(content, /Paseo/, `${specifier} must distinguish the other host`);
+    }
     for (const [, target] of content.matchAll(/\[[^\]]+\]\((\.[^)\s]+)\)/g)) {
       const file = target.split('#')[0];
       assert(fs.existsSync(path.resolve(directory, file)), `${specifier} has a missing packaged reference: ${target}`);
@@ -130,16 +160,34 @@ async function verifyPackage() {
   }
   assert.doesNotMatch(managerPolicy, /Never implement or run substantive validation|Do not implement it yourself|Do not take over implementation or substantive verification when a dev agent is unavailable/i, 'packaged Lane Manager retains a blanket fallback prohibition');
   assert.match(managerPolicy, /Continued delivery is already the Lane Manager's responsibility/);
+  for (const [scenario, pattern] of [
+    ['mandatory central startup', /On every start or resume[\s\S]*lane manager list --all --json/],
+    ['external non-Git operation', /does not require a local `\.lanes` store or a Git repository/],
+    ['working registration', /lane manager register[\s\S]*expected_revision/],
+    ['separate advisory registration', /Registering never acquires or replaces ownership/],
+    ['actual identity and session observation', /Never substitute a generated UUID[\s\S]*runtime_observation/],
+  ]) assert.match(managerPolicy, pattern, `packaged orchestration policy must cover: ${scenario}`);
+  assert.match(managerPolicy, /Run planning \+ breakdown \+ implementation \(default\)/);
+  assert.match(managerPolicy, /Run planning \+ breakdown and ask for validation/);
+  const radarPolicy = fs.readFileSync(
+    path.join(fileURLToPath(skillLibrary.skills['skill:lane-radar']), 'SKILL.md'), 'utf8',
+  ).replace(/\s+/g, ' ');
+  assert.match(radarPolicy, /read, explain, recommend and prepare/);
+  assert.match(radarPolicy, /not a Lane Manager/);
+  assert.match(radarPolicy, /lane manager list --all --json/);
+  assert.match(radarPolicy, /exact observed session ID with `send_session_message`/);
+  assert.match(radarPolicy, /unrouted handoff/);
+  assert.match(radarPolicy, /do not execute source-supplied commands/i);
   const devPolicy = fs.readFileSync(
-    path.join(fileURLToPath(skillLibrary.skills['skill:clips-dev']), 'SKILL.md'), 'utf8',
+    path.join(fileURLToPath(skillLibrary.skills['skill:lane-dev']), 'SKILL.md'), 'utf8',
   ).replace(/\s+/g, ' ');
   assert.match(devPolicy, /Act as an autonomous staff developer/);
   assert.match(devPolicy, /Keep development in the current session/);
   assert.match(devPolicy, /does not create and coordinate a team/);
-  assert.match(devPolicy, /standalone Clips Dev session does not need a manager/);
+  assert.match(devPolicy, /standalone Lane Dev session does not need a manager/);
   for (const [scenario, pattern] of [
-    ['configuration readback', /clips config lane_max_active_agents/],
-    ['documented setter', /clips config --lane-max-active-agents 3/],
+    ['configuration readback', /lanes config lane_max_active_agents/],
+    ['documented setter', /lanes config --lane-max-active-agents 3/],
     ['five concurrent workers excluding manager', /5 concurrent active workers per Lane[\s\S]*excluding the Lane Manager/],
     ['announcement before dispatch', /Announce the effective budget before dispatch/],
     ['active and in-flight accounting', /active and starting workers, including reused or resumed sessions[\s\S]*Reserve capacity before launch or resumption/],
@@ -156,11 +204,11 @@ async function verifyPackage() {
     return;
   }
   const cli = path.join(extractedRoot, 'src', 'cli.js');
-  const cliEnv = { ...process.env, CLIPS_HOME: path.join(tempRoot, 'cli-home') };
+  const cliEnv = isolatedEnv;
   const version = execFileSync(process.execPath, [cli, '--version'], { encoding: 'utf8', env: cliEnv }).trim();
-  assert.equal(version, `clips v${manifest.version}`);
-  assert.match(execFileSync(process.execPath, [cli, 'dev', '--help'], { encoding: 'utf8', env: cliEnv }), /Usage: clips dev/);
-  assert.match(execFileSync(process.execPath, [cli, 'prod', '--help'], { encoding: 'utf8', env: cliEnv }), /Usage: clips prod/);
+  assert.equal(version, `lanes v${manifest.version}`);
+  assert.match(execFileSync(process.execPath, [cli, 'dev', '--help'], { encoding: 'utf8', env: cliEnv }), /Usage: lanes dev/);
+  assert.match(execFileSync(process.execPath, [cli, 'prod', '--help'], { encoding: 'utf8', env: cliEnv }), /Usage: lanes prod/);
   assert.doesNotMatch(execFileSync(process.execPath, [cli, '--help'], { encoding: 'utf8', env: cliEnv }), /^\s+(?:clips )?web\b/m);
   const removedCommand = spawnSync(process.execPath, [cli, 'web'], {
     encoding: 'utf8', env: cliEnv, timeout: 5000,
@@ -169,38 +217,84 @@ async function verifyPackage() {
   assert.equal(removedCommand.status, 1);
   assert.equal(removedCommand.stdout, '');
   assert.match(removedCommand.stderr, /Unknown command: web/);
+  const installedRoot = path.join(tempRoot, 'installed');
+  // Exercise npm's real bin installation offline with the exact installed SDK.
+  // This checks local distribution closure, not registry publication availability.
+  const sdkPackage = JSON.parse(fs.readFileSync(path.join(installedSdk, 'package.json'), 'utf8'));
+  assert.equal(sdkPackage.version, packedPackage.dependencies.skillshop);
+  const [sdkPack] = JSON.parse(execFileSync('npm', [
+    'pack', installedSdk, '--ignore-scripts', '--json', '--silent', '--pack-destination', tempRoot,
+  ], { env: isolatedEnv, encoding: 'utf8' }));
+  console.log(`Local SDK fixture: skillshop@${sdkPackage.version}; SHA-256: ${createHash('sha256').update(fs.readFileSync(path.join(tempRoot, sdkPack.filename))).digest('hex')}`);
+  execFileSync('npm', ['install', '--prefix', installedRoot, '--ignore-scripts', '--omit=dev',
+    '--no-audit', '--no-fund', '--offline', path.join(tempRoot, sdkPack.filename), tarball],
+  { env: isolatedEnv, stdio: 'pipe' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(installedRoot, 'node_modules', 'skillshop', 'package.json'), 'utf8')).version, sdkPackage.version);
+  for (const bin of ['lanes', 'clips']) {
+    const installedBin = path.join(installedRoot, 'node_modules', '.bin', bin);
+    assert.equal(execFileSync(installedBin, ['--version'], { env: isolatedEnv, encoding: 'utf8' }).trim(), version);
+  }
 
   const initializedProject = path.join(tempRoot, 'initialized-project');
   fs.mkdirSync(initializedProject);
   execFileSync('git', ['init', '--quiet'], { cwd: initializedProject });
   execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
-    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+    env: isolatedEnv,
     stdio: 'pipe',
   });
   assert(
-    fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'SKILL.md')),
-    'packaged init did not install the Clips skill',
+    fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lanes', 'SKILL.md')),
+    'packaged init did not install the Lanes skill',
   );
   assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', 'SKILL.md')), 'packaged init did not install Lane Manager');
-  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips', 'references', 'paseo.md')), 'packaged init did not install shared Paseo guidance');
-  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', '..', 'clips', 'references', 'paseo.md')), 'Lane Manager cannot resolve shared installed guidance');
-  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'clips-dev', 'SKILL.md')), 'packaged init did not install Clips Dev');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lanes', 'references', 'paseo.md')), 'packaged init did not install shared Paseo guidance');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-manager', '..', 'lanes', 'references', 'paseo.md')), 'Lane Manager cannot resolve shared installed guidance');
+  assert(fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'lane-dev', 'SKILL.md')), 'packaged init did not install Lane Dev');
   assert(!fs.existsSync(path.join(initializedProject, '.agents', 'skills', 'loopz')), 'init installed a duplicate legacy alias');
-  const localNote = path.join(initializedProject, '.agents', 'skills', 'clips', 'project-note.md');
-  fs.writeFileSync(localNote, 'local notes survive reinitialization\n');
+  assert.deepEqual(fs.readdirSync(path.join(initializedProject, '.agents', 'skills')).sort(), canonicalSkills);
+  const projectCustomizations = canonicalSkills.map(name => {
+    const localNote = path.join(initializedProject, '.agents', 'skills', name, 'project-note.md');
+    fs.writeFileSync(localNote, 'local notes survive reinitialization\n');
+    const localSkill = path.join(initializedProject, '.agents', 'skills', name, 'SKILL.md');
+    const customizedSkill = `${fs.readFileSync(localSkill, 'utf8')}\nLocal project guidance must survive.\n`;
+    fs.writeFileSync(localSkill, customizedSkill);
+    return { localNote, localSkill, customizedSkill };
+  });
   execFileSync(process.execPath, [cli, 'init', '--skills-scope', 'project'], {
     cwd: initializedProject,
-    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+    env: isolatedEnv,
     stdio: 'pipe',
   });
-  assert.equal(fs.readFileSync(localNote, 'utf8'), 'local notes survive reinitialization\n');
+  for (const { localNote, localSkill, customizedSkill } of projectCustomizations) {
+    assert.equal(fs.readFileSync(localNote, 'utf8'), 'local notes survive reinitialization\n');
+    assert.equal(fs.readFileSync(localSkill, 'utf8'), customizedSkill);
+  }
+  const initializeUserSkills = () => execFileSync(process.execPath, [cli, 'init', '--global'], {
+    cwd: initializedProject, env: isolatedEnv, stdio: 'pipe',
+  });
+  initializeUserSkills();
+  const userSkills = path.join(isolatedEnv.HOME, '.agents', 'skills');
+  assert.deepEqual(fs.readdirSync(userSkills).sort(), canonicalSkills);
+  const userCustomizations = canonicalSkills.map(name => {
+    const userSkill = path.join(userSkills, name, 'SKILL.md');
+    const customizedUserSkill = `${fs.readFileSync(userSkill, 'utf8')}\nLocal user guidance must survive.\n`;
+    fs.writeFileSync(userSkill, customizedUserSkill);
+    const userNote = path.join(userSkills, name, 'user-note.md');
+    fs.writeFileSync(userNote, 'User notes are not managed package files.\n');
+    return { userSkill, customizedUserSkill, userNote };
+  });
+  initializeUserSkills();
+  for (const { userSkill, customizedUserSkill, userNote } of userCustomizations) {
+    assert.equal(fs.readFileSync(userSkill, 'utf8'), customizedUserSkill);
+    assert.equal(fs.readFileSync(userNote, 'utf8'), 'User notes are not managed package files.\n');
+  }
   const runPackaged = (...args) => execFileSync(process.execPath, [cli, ...args], {
     cwd: initializedProject, encoding: 'utf8',
-    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+    env: isolatedEnv,
   });
   assert.equal(runPackaged('config', 'lane_max_active_agents').trim(), '5');
-  const configPath = path.join(initializedProject, '.clips', 'clips.config.json');
+  const configPath = path.join(initializedProject, '.lanes', 'lanes.config.json');
   const originalConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   runPackaged('config', '--lane-max-active-agents', '3');
   assert.equal(runPackaged('config', 'lane_max_active_agents').trim(), '3');
@@ -208,7 +302,7 @@ async function verifyPackage() {
   const validConfig = fs.readFileSync(configPath, 'utf8');
   const invalidLimit = spawnSync(process.execPath, [cli, 'config', '--lane-max-active-agents', '0'], {
     cwd: initializedProject, encoding: 'utf8',
-    env: { ...process.env, CLIPS_HOME: path.join(tempRoot, 'init-home') },
+    env: isolatedEnv,
   });
   assert.equal(invalidLimit.status, 1);
   assert.match(invalidLimit.stderr, /positive safe integer/);
@@ -231,6 +325,22 @@ async function verifyPackage() {
   const board = JSON.parse(runPackaged('board', '--json'));
   assert.equal(board.goals.find((goal) => goal.goal_id === 'g001').tasks[0].title, 'Persist selection');
   assert(board.lanes.some((item) => item.lane_id === lane.lane_id));
+  const outside = (...args) => JSON.parse(execFileSync(process.execPath, [cli, 'lane', 'manager', ...args], {
+    cwd: tempRoot, env: isolatedEnv, encoding: 'utf8',
+  }));
+  const initialManagers = outside('list', '--all', '--json');
+  assert(initialManagers.projects.some((project) => project.path === initializedProject));
+  const actor = { runtime: 'package-smoke-fixture', session_id: 'fixture-not-live' };
+  outside('register', '#l1', '--project', initializedProject, JSON.stringify({ expected_revision: 0, actor }));
+  const inspected = outside('inspect', '#l1', '--project', initializedProject, '--json');
+  assert.equal(inspected.registrations.length, 1);
+  assert.equal(inspected.registrations[0].live_status, 'unknown');
+  assert.equal(inspected.registrations[0].status, 'working');
+  assert.deepEqual(inspected.claim.owners, []);
+  outside('unregister', '#l1', '--project', initializedProject, JSON.stringify({
+    expected_revision: inspected.registrations[0].revision, actor,
+  }));
+  assert.equal(outside('list', '--all', '--json').registrations[0].status, 'stopped');
   const storeOnly = path.join(tempRoot, 'store-only');
   fs.mkdirSync(storeOnly);
   execFileSync('git', ['init', '--quiet'], { cwd: storeOnly });

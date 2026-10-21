@@ -248,7 +248,7 @@ export function AgentLaunchDialog({
         <ScrollView style={{ maxHeight: 440 }} contentContainerStyle={{ gap: 12, paddingBottom: 4 }}>
           <Text style={{ color: theme.colors.foreground, fontWeight: "600" }}>{workTitle}</Text>
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 }}>
-            These choices apply to this new session. They do not change Clips settings.
+            These choices apply to this new session. They do not change Lanes settings.
           </Text>
           <AgentConfigFields
             theme={theme}

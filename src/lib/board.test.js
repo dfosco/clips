@@ -218,6 +218,32 @@ describe('readBoardData', () => {
     expect(result.change_records[0].linked_prs[0].pr_number).toBe(12);
   });
 
+  it('keeps same-number pull requests from different GitHub hosts distinct', () => {
+    const dbDir = makeDb({
+      '_github.jsonl': [
+        {
+          event: 'github_pr_synced',
+          repository: 'acme/app',
+          pr_number: 12,
+          title: 'Public PR',
+          state: 'open',
+          url: 'https://github.com/acme/app/pull/12',
+        },
+        {
+          event: 'github_pr_synced',
+          repository: 'acme/app',
+          remote_host: 'git.example.test',
+          pr_number: 12,
+          title: 'Enterprise PR',
+          state: 'open',
+          url: 'https://git.example.test/acme/app/pull/12',
+        },
+      ].map(JSON.stringify).join('\n'),
+    });
+
+    expect(readBoardData({ dbDir }).github_prs.map((pr) => pr.title).sort()).toEqual(['Enterprise PR', 'Public PR']);
+  });
+
   it('aggregates projects with qualified collision-safe references', () => {
     const first = makeDb({
       '.clips/db/g001.jsonl': `${JSON.stringify({ event: 'goal_created', goal_id: 'g001', title: 'First goal' })}\n${JSON.stringify({ event: 'task_created', task_id: 't01', title: 'First task' })}`,

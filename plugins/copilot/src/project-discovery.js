@@ -3,7 +3,8 @@ import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { getRepoRoot } from '../../../src/lib/core.js';
+import { getClipsDir, getRepoRoot } from '../../../src/lib/core.js';
+import { getConfigPath } from '../../../src/lib/config.js';
 import { getRegistryPath, getSystemClipsDir, validateProjectId } from '../../../src/lib/registry.js';
 
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -31,21 +32,22 @@ async function readJson(file) {
 }
 
 /**
- * Read only the existing local-user Clips project registry. options.clipsHome
- * overrides CLIPS_HOME/default home for isolated callers/tests; it is not a
+ * Read only the existing local-user Lanes project registry. options.lanesHome
+ * (or the legacy clipsHome option) overrides the resolved user home; it is not a
  * project path or a second registry. No cwd inference, registration or pruning.
  *
- * The canonical registry reader filters local .clips/config before resolving
- * worktrees and treats corrupt config as {}. Read its supported schema here so
+ * Read the supported registry schema here so
  * Git common-root normalization and strict validation happen in the right order.
  */
 export async function discoverClipsProjects(options = {}) {
-  if (!object(options) || (options.clipsHome !== undefined &&
-      (typeof options.clipsHome !== 'string' || !options.clipsHome.trim() || options.clipsHome.includes('\0')))) {
-    throw new TypeError('clipsHome must be a non-empty local path when provided.');
+  if (!object(options)) throw new TypeError('Discovery options must be an object.');
+  const configuredHome = options.lanesHome ?? options.clipsHome;
+  if (configuredHome !== undefined &&
+      (typeof configuredHome !== 'string' || !configuredHome.trim() || configuredHome.includes('\0'))) {
+    throw new TypeError('lanesHome/clipsHome must be a non-empty local path when provided.');
   }
-  const home = options.clipsHome === undefined ? getSystemClipsDir() : path.resolve(options.clipsHome);
-  const registryPath = options.clipsHome === undefined ? getRegistryPath() : path.join(home, 'projects.json');
+  const home = configuredHome === undefined ? getSystemClipsDir() : path.resolve(configuredHome);
+  const registryPath = configuredHome === undefined ? getRegistryPath() : path.join(home, 'projects.json');
   const diagnostics = [];
   let suppressed = 0;
   const report = (code, message, projectId) => {
@@ -62,18 +64,22 @@ export async function discoverClipsProjects(options = {}) {
     // An inaccessible home cannot yield a selectable project. Keep a stable
     // lexical scope until it becomes accessible; never substitute another home.
     canonicalHome = path.resolve(home);
-    report('unavailable_home', 'The configured Clips home is unavailable.');
+    report('unavailable_home', 'The configured Lanes home is unavailable.');
   }
-  const userScope = `clips-user-${hash([canonicalHome, os.userInfo().username])}`;
+  // Keep existing canvas selections across the default user-directory migration.
+  const userHome = await resolvedPath(os.homedir());
+  const scopeHome = canonicalHome === path.join(userHome, '.lanes')
+    ? path.join(userHome, '.clips') : canonicalHome;
+  const userScope = `clips-user-${hash([scopeHome, os.userInfo().username])}`;
   let registry;
   try { registry = await readJson(registryPath); }
   catch (error) {
     report(error.code === 'ENOENT' ? 'missing_registry' : error.code === 'EACCES' || error.code === 'EPERM' ? 'unavailable_registry' : 'invalid_registry',
-      error.code === 'ENOENT' ? 'No local-user Clips project registry exists in the configured Clips home.' : 'The local-user Clips project registry is unreadable or invalid.');
+      error.code === 'ENOENT' ? 'No local-user Lanes project registry exists in the configured Lanes home.' : 'The local-user Lanes project registry is unreadable or invalid.');
     return finish([], userScope);
   }
   if (!object(registry) || !Array.isArray(registry.projects) || (registry.version !== undefined && registry.version !== 1)) {
-    report('invalid_registry', 'The local-user Clips project registry has an unsupported structure or version.');
+    report('invalid_registry', 'The local-user Lanes project registry has an unsupported structure or version.');
     return finish([], userScope);
   }
 
@@ -95,17 +101,20 @@ export async function discoverClipsProjects(options = {}) {
     }
     let storeRoot;
     try {
-      storeRoot = await fs.realpath(path.join(projectRoot, '.clips'));
+      storeRoot = await fs.realpath(getClipsDir(projectRoot));
       if (!(await fs.stat(storeRoot)).isDirectory()) throw new Error('Not a directory.');
       await fs.access(storeRoot, constants.R_OK | constants.X_OK);
     } catch {
-      report('unavailable_store', `Registry entry ${index + 1} has no available canonical Clips store.`);
+      report('unavailable_store', `Registry entry ${index + 1} has no available canonical Lanes store.`);
       continue;
     }
-    const id = `clips-project-${hash([storeRoot])}`;
+    // The legacy path is an identity key, not a storage lookup.
+    const identityRoot = storeRoot === path.join(projectRoot, '.lanes')
+      ? path.join(projectRoot, '.clips') : storeRoot;
+    const id = `clips-project-${hash([identityRoot])}`;
     let config;
     try {
-      config = await readJson(path.join(storeRoot, 'clips.config.json'));
+      config = await readJson(getConfigPath(projectRoot));
       if (!object(config)) throw new Error('Not a configuration object.');
       if (config.project_id != null) {
         if (typeof config.project_id !== 'string') throw new Error('Invalid project_id.');
@@ -124,7 +133,7 @@ export async function discoverClipsProjects(options = {}) {
     } catch (error) {
       const unavailable = ['ENOENT', 'EACCES', 'EPERM'].includes(error.code);
       report(unavailable ? 'unavailable_config' : 'invalid_config',
-        unavailable ? 'A registered project has no readable canonical Clips configuration or board directory.' : 'A registered project has an invalid canonical Clips configuration or board directory.', id);
+        unavailable ? 'A registered project has no readable canonical Lanes configuration or board directory.' : 'A registered project has an invalid canonical Lanes configuration or board directory.', id);
       continue;
     }
     if (stores.has(storeRoot)) continue;
@@ -143,10 +152,10 @@ export async function discoverClipsProjects(options = {}) {
 /** Re-discover on every choice; a removed/stale id never falls back to cwd. */
 export async function resolveClipsProject(id, options = {}) {
   if (typeof id !== 'string' || !/^clips-project-[a-f0-9]{64}$/.test(id)) {
-    throw new TypeError('Choose a valid discovered Clips project ID.');
+    throw new TypeError('Choose a valid discovered Lanes project ID.');
   }
   const { projects } = await discoverClipsProjects(options);
   const project = projects.find((candidate) => candidate.id === id);
-  if (!project) throw new Error('The selected Clips project is no longer available in this user registry. Choose an available project.');
+  if (!project) throw new Error('The selected Lanes project is no longer available in this user registry. Choose an available project.');
   return project;
 }

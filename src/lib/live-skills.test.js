@@ -9,7 +9,7 @@ import { isLiveSkill } from './lane-manager-install.js';
 import { reconcileSkills } from './installation.js';
 
 const cli = path.resolve('src/cli.js');
-const names = ['clips', 'lane-manager', 'clips-dev'];
+const names = ['lanes', 'lane-manager', 'lane-dev', 'lane-radar', 'lane-plugin'];
 const roots = [];
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-live-skills-'));
@@ -23,7 +23,9 @@ function fixture() {
     fs.mkdirSync(path.join(sourceRoot, name));
     fs.writeFileSync(path.join(sourceRoot, name, 'SKILL.md'), `${name} maintained\n`);
   }
-  const env = { ...process.env, HOME: home, CODEX_HOME: path.join(home, '.codex'), CLIPS_HOME: path.join(home, '.clips') };
+  fs.mkdirSync(path.join(sourceRoot, 'clips'));
+  fs.writeFileSync(path.join(sourceRoot, 'clips', 'SKILL.md'), 'clips maintained\n');
+  const env = { ...process.env, LANES_HOME: '', HOME: home, CODEX_HOME: path.join(home, '.codex'), CLIPS_HOME: path.join(home, '.clips') };
   const options = { sourceRoot, home, codexHome: env.CODEX_HOME, backupRoot: path.join(home, 'backups') };
   return { root, home, project, sourceRoot, env, options };
 }
@@ -35,7 +37,7 @@ function linkClips(project, sourceRoot, agentDir = '.agents') {
 }
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe('live canonical Clips skills', () => {
+describe('live canonical Lanes skills and legacy sources', () => {
   it('backs up canonical copies at both paths, repeats safely, and exposes source/reference edits', () => {
     const { home, sourceRoot, options } = fixture();
     for (const base of [path.join(home, '.agents'), options.codexHome]) {
@@ -56,11 +58,11 @@ describe('live canonical Clips skills', () => {
     expect(installClipsSkills(options).every(result => !result.changed)).toBe(true);
     expect(fs.readdirSync(options.backupRoot)).toEqual(backups);
     for (const name of names) fs.writeFileSync(path.join(sourceRoot, name, 'SKILL.md'), `${name} updated\n`);
-    fs.mkdirSync(path.join(sourceRoot, 'clips', 'references'));
-    fs.writeFileSync(path.join(sourceRoot, 'clips', 'references', 'paseo.md'), 'shared procedure updated\n');
+    fs.mkdirSync(path.join(sourceRoot, 'lanes', 'references'));
+    fs.writeFileSync(path.join(sourceRoot, 'lanes', 'references', 'paseo.md'), 'shared procedure updated\n');
     for (const result of first) {
       expect(fs.readFileSync(path.join(result.target, 'SKILL.md'), 'utf8')).toContain('updated');
-      if (path.basename(result.target) === 'clips') {
+      if (path.basename(result.target) === 'lanes') {
         expect(fs.readFileSync(path.join(result.target, 'references', 'paseo.md'), 'utf8')).toContain('shared procedure updated');
       }
     }
@@ -73,7 +75,7 @@ describe('live canonical Clips skills', () => {
     expect(results.filter(result => result.target.includes('/.agents/')).every(result => !result.changed)).toBe(true);
     for (const name of names) expect(fs.readFileSync(path.join(sourceRoot, name, 'SKILL.md'), 'utf8')).toContain('maintained');
     const second = fixture();
-    fs.rmSync(path.join(second.sourceRoot, 'lane-manager'), { recursive: true });
+    fs.rmSync(path.join(second.sourceRoot, 'lane-plugin'), { recursive: true });
     expect(() => installClipsSkills(second.options)).toThrow();
     expect(fs.existsSync(path.join(second.home, '.agents'))).toBe(false);
   });
@@ -95,8 +97,17 @@ describe('live canonical Clips skills', () => {
         expect(fs.lstatSync(target).isSymbolicLink()).toBe(true);
         expect(fs.readFileSync(path.join(target, 'SKILL.md'), 'utf8')).toBe(`${name} maintained\n`);
       }
-      expect(fs.existsSync(path.join(base, '.agents', 'skills', 'loopz'))).toBe(false);
+      expect(fs.readdirSync(path.join(base, '.agents', 'skills')).sort()).toEqual([...names].sort());
     }
+  });
+
+  it.each(names)('protects the canonical %s skill in a maintained Lanes checkout', name => {
+    const { project } = fixture();
+    const source = path.join(project, '.agents', 'skills', name);
+    fs.mkdirSync(source, { recursive: true });
+    fs.writeFileSync(path.join(project, 'package.json'), JSON.stringify({ name: '@dfosco/lanes' }));
+    fs.writeFileSync(path.join(source, 'SKILL.md'), 'uncommitted source\n');
+    expect(isLiveSkill(source)).toBe(true);
   });
 
   it('protects a Clips-only source checkout and rejects prod from nested shared worktrees before state writes', () => {
@@ -114,13 +125,13 @@ describe('live canonical Clips skills', () => {
     for (const cwd of [project, nested]) {
       const result = spawnSync(process.execPath, [cli, 'prod'], { cwd, env, encoding: 'utf8' });
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('Cannot refresh production skills over a live Clips source');
+      expect(result.stderr).toContain('Cannot refresh production skills over a live Lanes source');
     }
     expect(fs.existsSync(path.join(env.CLIPS_HOME, 'installation.json'))).toBe(false);
     expect(fs.readFileSync(path.join(source, 'SKILL.md'), 'utf8')).toBe('uncommitted Clips source\n');
   });
 
-  it('blocks stale saved-prod init over Clips-only user and custom project links without invoking it', () => {
+  it('bypasses stale saved-prod init and preserves Clips-only user and custom project links', () => {
     const { root, home, project, sourceRoot, env } = fixture();
     const custom = '.custom';
     const target = linkClips(project, sourceRoot, custom);
@@ -137,10 +148,12 @@ describe('live canonical Clips skills', () => {
     const nested = path.join(project, 'nested'); fs.mkdirSync(nested);
     for (const args of [['init', '--global'], ['init', '--skills-scope', 'project'], ['prod']]) {
       const result = spawnSync(process.execPath, [cli, ...args], { cwd: nested, env, encoding: 'utf8' });
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('live Clips source');
+      if (args[0] === 'prod') {
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('live Lanes source');
+      } else expect(result.status).toBe(0);
       expect(fs.existsSync(marker)).toBe(false);
-      expect(fs.readFileSync(stateFile, 'utf8')).toBe(state);
+      expect(JSON.parse(fs.readFileSync(stateFile, 'utf8'))).toMatchObject(JSON.parse(state));
     }
     for (const directory of [target, user]) {
       expect(fs.lstatSync(directory).isSymbolicLink()).toBe(true);

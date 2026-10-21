@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getClipsDbDir, readGoalWithTasks } from './core.js';
-import { appendJsonEvent, withRecordLock } from './journal.js';
+import { appendJsonEvent, assertExpectedRevision, withRecordLock } from './journal.js';
+import { attachmentsForRecord, replayAttachmentEvent } from './attachments.js';
 
 export function normalizeTrackId(ref) {
   const match = String(ref || '').match(/^#?r(\d+)$/i);
@@ -43,10 +44,25 @@ export function readTrack(id, dbDir = getClipsDbDir(), { revision } = {}) {
       track.issue_number = event.issue_number;
       track.issue_id = event.issue_id;
       track.issue_url = event.issue_url;
+      delete track.github_create_pending;
+      if (Object.hasOwn(event, 'repository')) track.repository = event.repository;
+      if (Object.hasOwn(event, 'remote_host')) track.remote_host = event.remote_host;
       if (event.event === 'lane_github_synced') track.record_kind = 'lane';
+    }
+    if (event.event === 'track_github_create_pending' || event.event === 'lane_github_create_pending') {
+      track.github_create_pending = { marker: event.marker, created_at: event.timestamp };
+      if (event.event === 'lane_github_create_pending') track.record_kind = 'lane';
+    }
+    if (event.event === 'track_github_create_cancelled' || event.event === 'lane_github_create_cancelled') {
+      delete track.github_create_pending;
+    }
+    if (event.event === 'attachment_added' || event.event === 'attachment_removed') {
+      track.attachments = replayAttachmentEvent(track.attachments, event);
     }
     track.revision = index + 1;
   }
+  const attachments = attachmentsForRecord(track);
+  if (attachments.length || Object.hasOwn(track, 'attachments')) track.attachments = attachments;
   return track;
 }
 
@@ -57,9 +73,13 @@ export function listTracks(dbDir = getClipsDbDir()) {
     .map((name) => readTrack(name.slice(0, -6), dbDir));
 }
 
-export function appendTrackEvent(id, event, dbDir = getClipsDbDir()) {
+export function appendTrackEvent(id, event, dbDir = getClipsDbDir(), { expectedRevision } = {}) {
   const file = trackPath(id, dbDir);
-  return withRecordLock(file, () => appendJsonEvent(file, { ...event, track_id: normalizeTrackId(id), timestamp: new Date().toISOString() }));
+  return withRecordLock(file, () => {
+    const current = readTrack(id, dbDir);
+    assertExpectedRevision(expectedRevision, current?.revision || 0, `#${normalizeTrackId(id)}`);
+    return appendJsonEvent(file, { ...event, track_id: normalizeTrackId(id), timestamp: new Date().toISOString() });
+  });
 }
 
 export function nextTrackId(dbDir = getClipsDbDir()) {

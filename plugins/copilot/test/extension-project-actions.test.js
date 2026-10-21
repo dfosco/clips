@@ -23,19 +23,35 @@ async function extensionFixture(t) {
     async listSessions() { return { sessions: [] }; },
     async hostCapabilities() { return { canSendToCurrentSession: false }; },
   };
-  let canvas; let service;
+  let canvas; let service; const logs = [];
   const source = await readFile(new URL('../extension.mjs', import.meta.url), 'utf8');
   const body = source.replace(/^import .*;\n/gm, '');
   const run = Object.getPrototypeOf(async function () {}).constructor('createCanvas', 'joinSession', 'createClipsRuntime', 'createCanvasService', 'process', body);
-  await run((definition) => (canvas = definition), async () => ({ sessionId: 'actual-fixture-session', log() {} }), async () => runtime,
+  await run((definition) => (canvas = definition), async () => ({ sessionId: 'actual-fixture-session', log(message) { logs.push(message); } }), async () => runtime,
     (options) => (service = createCanvasService({ ...options, projectDiscovery: discovery, dataDir })),
     { on() {}, stderr: { write() {} }, exit() {} });
   const ctx = { instanceId: 'panel', sessionId: 'actual-fixture-session', session: { workingDirectory: '/alpha' } };
-  await canvas.open(ctx);
+  const opened = await canvas.open(ctx);
   t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
   const action = (name) => { const a = canvas.actions.find((a) => a.name === name); assert.ok(a, `Registered action ${name}`); return a; };
-  return { ctx, action, reads, projects, service, setAvailable(value) { available = value; } };
+  return { ctx, canvas, opened, logs, action, reads, projects, service, setAvailable(value) { available = value; } };
 }
+
+test('visible surface is exactly Lanes while canvas and action identities stay compatible', async (t) => {
+  const f = await extensionFixture(t);
+  assert.equal(f.canvas.id, 'clips-work');
+  assert.equal(f.canvas.displayName, 'Lanes');
+  assert.equal(f.opened.title, 'Lanes');
+  assert.equal((await f.canvas.open(f.ctx)).title, 'Lanes');
+  assert.match(f.logs[0], /^Lanes canvas connected\./);
+  const html = await (await fetch(f.opened.url)).text();
+  assert.match(html, /<title>Lanes<\/title>/);
+  assert.match(html, /Loading Lanes…/);
+  assert.doesNotMatch(html, /Lanes Work/);
+  for (const action of ['list_clips_projects', 'select_clips_project', 'refresh_clips_board']) {
+    assert.equal(f.action(action).name, action);
+  }
+});
 
 test('registered agent discovery and declared selection schema select the exact canonical project through the real service', async (t) => {
   const f = await extensionFixture(t);

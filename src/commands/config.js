@@ -1,5 +1,9 @@
-// Config command - view and edit clips configuration
-import { readConfig, getConfigValue, setConfigValue, DEFAULT_CONFIG, getConfigPath } from '../lib/config.js';
+// Config command - view and edit lanes configuration
+import {
+  readConfig, getConfigValue, setConfigValue, DEFAULT_CONFIG, getConfigPath,
+  getModelPreference, getUserModelPreference, MODEL_PREFERENCE_KEYS,
+  setModelPreference, unsetModelPreference,
+} from '../lib/config.js';
 import { getRepoRoot } from '../lib/core.js';
 import { effectiveProjectId, registerProject } from '../lib/registry.js';
 import fs from 'fs';
@@ -7,7 +11,8 @@ import fs from 'fs';
 export function runConfigCommand(args) {
   const [key, value] = args;
   if (args.length === 1 && (key === '--help' || key === '-h')) return showHelp();
-  if (args.length > 2) throw new Error('Usage: clips config <key> [value] or --lane-max-active-agents <N>');
+  if (key === '--user') return runUserConfigCommand(args.slice(1));
+  if (args.length > 2) throw new Error('Usage: lanes config <key> [value] or --lane-max-active-agents <N>');
   if (key === '--lane-max-active-agents') {
     if (args.length !== 2) throw new Error('--lane-max-active-agents requires a positive integer');
     return setConfig('lane_max_active_agents', value);
@@ -17,6 +22,12 @@ export function runConfigCommand(args) {
   // No args: show all config
   if (!key) {
     return showAllConfig();
+  }
+
+  if (MODEL_PREFERENCE_KEYS.includes(key)) {
+    if (value === '--unset') return unsetPreference(key, 'project');
+    if (args.length === 1) return showConfigKey(key);
+    return setPreference(key, value, 'project');
   }
   
   // One arg: show specific key
@@ -28,6 +39,23 @@ export function runConfigCommand(args) {
   return setConfig(key, value);
 }
 
+function runUserConfigCommand(args) {
+  if (args.length < 1 || args.length > 2) {
+    throw new Error('Usage: lanes config --user <model-key> [value|--unset]');
+  }
+  const [key, value] = args;
+  if (!MODEL_PREFERENCE_KEYS.includes(key)) {
+    throw new Error(`User scope supports only model preferences: ${MODEL_PREFERENCE_KEYS.join(', ')}`);
+  }
+  if (args.length === 1) {
+    const preference = getUserModelPreference(key);
+    console.log(preference ?? '(not set)');
+    return;
+  }
+  if (value === '--unset') return unsetPreference(key, 'user');
+  return setPreference(key, value, 'user');
+}
+
 function showAllConfig() {
   const repoRoot = getRepoRoot();
   const config = readConfig(repoRoot);
@@ -36,16 +64,21 @@ function showAllConfig() {
   const configPath = getConfigPath(repoRoot);
   const exists = fs.existsSync(configPath);
   
-  console.log('📋 clips configuration\n');
+  console.log('📋 lanes configuration\n');
   
   if (!exists) {
-    console.log('(using defaults - no .clips/clips.config.json file)\n');
+    console.log(`(using defaults - no ${configPath} file)\n`);
   }
   
   for (const [key, value] of Object.entries(config)) {
+    if (MODEL_PREFERENCE_KEYS.includes(key)) continue;
     const isDefault = config[key] === DEFAULT_CONFIG[key];
     const marker = isDefault ? '' : ' *';
     console.log(`  ${key}: ${value}${marker}`);
+  }
+
+  for (const key of MODEL_PREFERENCE_KEYS) {
+    console.log(`  ${key}: ${getModelPreference(key, repoRoot)} (resolved)`);
   }
   
   console.log('\n* = modified from default');
@@ -54,15 +87,26 @@ function showAllConfig() {
 }
 
 function showHelp() {
-  console.log(`Usage: clips config [key] [value]
-  clips config                             Show configuration
-  clips config <key>                        Read a value
-  clips config <key> <value>                Set a value
-  clips config --lane-max-active-agents <N>  Set the project default per Lane
+  console.log(`Usage: lanes config [key] [value]
+  lanes config                             Show configuration
+  lanes config <key>                        Read a value
+  lanes config <key> <value>                Set a value
+  lanes config <model-key> --unset         Remove a project model override
+  lanes config --user <model-key> [value]  Read or set a user model preference
+  lanes config --user <model-key> --unset  Remove a user model override
+  lanes config --lane-max-active-agents <N>  Set the project default per Lane
+
+Model preferences resolve project > user > built-in. Built-in values are
+gpt-6.1-sol/high for Lane Managers and gpt-6-luna/high for Lane Devs.
+The --user forms work outside a Git repository. Reading a model key without
+--user returns its effective value; a user-scoped read shows only that override.
+Model identifiers are stored as provided; availability is determined at dispatch.
+Keys: lane_manager_model, lane_manager_reasoning_effort, lane_dev_model,
+lane_dev_reasoning_effort.
 
 lane_max_active_agents defaults to 5 concurrent active workers, excluding
 the Lane Manager. N must be a positive safe integer (decimal digits).
-Read back the numeric value: clips config lane_max_active_agents
+Read back the numeric value: lanes config lane_max_active_agents
 
 Lane Manager applies this budget through dispatch policy, not a native
 process limit. An explicit user override can apply to one Lane. Reducing
@@ -72,6 +116,11 @@ the budget does not terminate workers; defer new dispatch until capacity returns
 function showConfigKey(key) {
   const repoRoot = getRepoRoot();
   
+  if (MODEL_PREFERENCE_KEYS.includes(key)) {
+    console.log(getModelPreference(key, repoRoot));
+    return;
+  }
+
   if (!(key in DEFAULT_CONFIG)) {
     console.error(`Unknown config key: ${key}`);
     console.error(`Valid keys: ${Object.keys(DEFAULT_CONFIG).join(', ')}`);
@@ -79,6 +128,26 @@ function showConfigKey(key) {
   }
   
   console.log(key === 'project_id' ? effectiveProjectId(repoRoot) : getConfigValue(key, repoRoot));
+}
+
+function setPreference(key, value, scope) {
+  try {
+    const options = scope === 'user' ? { scope } : { scope, repoRoot: getRepoRoot() };
+    const preference = setModelPreference(key, value, options);
+    console.log(`✅ Set ${scope} ${key} = ${preference}`);
+  } catch (error) {
+    throw new Error(error.message, { cause: error });
+  }
+}
+
+function unsetPreference(key, scope) {
+  try {
+    const options = scope === 'user' ? { scope } : { scope, repoRoot: getRepoRoot() };
+    unsetModelPreference(key, options);
+    console.log(`✅ Removed ${scope} override for ${key}`);
+  } catch (error) {
+    throw new Error(error.message, { cause: error });
+  }
 }
 
 function setConfig(key, value) {

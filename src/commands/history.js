@@ -5,7 +5,7 @@ export function runHistoryCommand(args) {
   const json = args.includes('--json');
   const refs = args.filter((arg) => arg !== '--json');
   if (refs.length !== 1 || refs[0] === '--help') {
-    console.log('Usage: clips history <goal|task|component ref> [--json]\nA #rN suffix limits the journal to that snapshot. Use a full goal/task ref.');
+    console.log('Usage: lanes history <goal|task|component ref> [--json]\nA #rN suffix limits the journal to that snapshot. Use a full goal/task ref.');
     if (refs[0] !== '--help') process.exitCode = 1;
     return;
   }

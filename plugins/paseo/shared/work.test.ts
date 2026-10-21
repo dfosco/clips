@@ -123,11 +123,11 @@ describe("generated work execution contexts", () => {
   });
 
   it("passes the same Goal/Task context through CLI previews, CLI/server agents and workspace attachments", async () => {
-    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "clips-dev-context-")));
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "lane-dev-context-")));
     const cli = fileURLToPath(new URL("../../../src/cli.js", import.meta.url));
-    const previous = { home: process.env.CLIPS_HOME, cli: process.env.CLIPS_CLI_PATH };
-    process.env.CLIPS_HOME = path.join(root, "home");
-    process.env.CLIPS_CLI_PATH = cli;
+    const previous = Object.fromEntries(["LANES_HOME", "LANES_CLI_PATH"].map(key => [key, process.env[key]]));
+    process.env.LANES_HOME = path.join(root, "home");
+    process.env.LANES_CLI_PATH = cli;
     try {
       execFileSync("git", ["init", "--quiet"], { cwd: root });
       const run = (...args: string[]) => execFileSync(process.execPath, [cli, ...args], { cwd: root });
@@ -180,10 +180,9 @@ describe("generated work execution contexts", () => {
         createAgent.mockClear();
       }
     } finally {
-      if (previous.home === undefined) delete process.env.CLIPS_HOME;
-      else process.env.CLIPS_HOME = previous.home;
-      if (previous.cli === undefined) delete process.env.CLIPS_CLI_PATH;
-      else process.env.CLIPS_CLI_PATH = previous.cli;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 15_000);

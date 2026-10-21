@@ -5,7 +5,7 @@ import { WorkScreen } from "./client/work-screen";
 import { SettingsScreen } from "./client/settings";
 import { WorkspaceWorkScreen } from "./client/workspace-panel";
 
-const TITLE = "Clips";
+const TITLE = "Lanes";
 
 function SidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   return (
@@ -37,20 +37,20 @@ export default function contribute(client: PluginClientContext) {
   });
   client.addSettingsScreen({
     id: "preferences",
-    title: "Clips settings",
+    title: "Lanes settings",
     icon: "Settings",
     Component: SettingsScreen,
   });
   client.addCommandCenterItem({
     id: "open-clips",
-    title: "Open Clips",
+    title: "Open Lanes",
     icon: "ListTodo",
     context: "global",
     onSelect: ({ openScreen }) => openScreen({ screenId: "work" }),
   });
   client.addCommandCenterItem({
     id: "open-clips-workspace",
-    title: "Open Clips as workspace tab",
+    title: "Open Lanes as workspace tab",
     icon: "ListTodo",
     keywords: ["clips", "lanes", "goals", "tasks", "workspace", "tab"],
     context: "workspace",

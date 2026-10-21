@@ -31,17 +31,17 @@ scheme. Primer owns component colors; no arbitrary host palette is synthesized.
 
 The visual target is GitHub Projects: compact project chrome and filtering,
 muted closely spaced Lane columns, count/add/overflow affordances, and compact
-bordered record cards. Clips Lanes remain columns; no status grouping, table,
+bordered record cards. Lanes remain columns; no status grouping, table,
 Insights, workflow editor or drag-and-drop feature is implied. Board and app
 styles live in their own local stylesheets; the root adds no outer padding.
 In-card controls and project tabs use actual Primer small sizing. Other project
 chrome and form controls use medium sizing, without legacy large target overrides.
 The Lane information area is an edge-to-edge default-background header with a
 full-width separator inside its muted column, not an inset record card.
-The overview's larger heading is simply "Clips", without a separate brand icon,
+The overview's larger heading is simply "Lanes", without a separate brand icon,
 small duplicate brand or selected-project title. The project path, actions and
 project tabs remain; focused Lane titles and Back navigation are unchanged.
-Loading, empty and failed-board recovery share a persistent "Clips" heading
+Loading, empty and failed-board recovery share a persistent "Lanes" heading
 with Refresh and eligible Initialize actions aligned to the right. While initial
 work, discovery, refresh or initialization is pending, the content area uses the
 official Primer Spinner sized to 20px inside a polite status region with
@@ -154,10 +154,10 @@ focus to the original New or record-menu trigger. Closed-Goal reveal stays in
 the Lane menu without the old empty-Lane "Closed goals are hidden." sentence.
 
 The invisible-variant Initialize action beside Refresh is offered only when the actual
-joined-session Git root has no `.clips` entry, even when another project is
+joined-session Git root has no resolved Lanes store, even when another project is
 selected or no board can load. It accepts no caller path/project override.
 The service revalidates the directory and invokes the dedicated runtime method
-using canonical `clips init --store-only`. This noninteractive mode creates and
+using canonical `lanes init --store-only`. This noninteractive mode creates and
 registers local-only workflow storage without installing skills/plugins, changing
 editor settings or syncing GitHub. Existing stores are not modified. Success
 refreshes discovery and selects the newly initialized current project; pending

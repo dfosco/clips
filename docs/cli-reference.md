@@ -1,22 +1,22 @@
-# Clips command and workflow reference
+# Lanes command and workflow reference
 
 For installation, onboarding, and everyday use cases, start with the
 [README](../README.md). This reference covers manual commands, record formats,
 coordination rules, and maintenance.
 
-`clips` keeps local work contracts for agents and people. A goal holds the
+`lanes` keeps local work contracts for agents and people. A goal holds the
 outcome and plan. A task starts as an atomic change request and becomes the
 record of what changed and was accepted. System components give related tasks
 stable boundaries to rely on.
 
-Workflow state stays under `.clips/`, outside repository history. GitHub
+Workflow state stays under `.lanes/`, outside repository history. GitHub
 collaboration is available after explicit opt-in.
 
-> This reference describes Clips 2.0.0. Earlier
+> This reference describes Lanes 2.0.0. Earlier
 > releases can have a different command set; the 1.6.0 baseline did not include
 > the component, acceptance, and revision capabilities below. Check
-> `clips --help` for installed commands, or use
-> `node /path/to/clips/src/cli.js` to run this checkout.
+> `lanes --help` for installed commands, or use
+> `node /path/to/lanes/src/cli.js` to run this checkout.
 
 ## Work model
 
@@ -59,18 +59,29 @@ Read [the precise work model and JSON fields](work-contracts.md) or
 
 ### Agent execution policy
 
-The shipped skills default to comprehensive plans within one coherent Lane,
+For authorized delivery, the execution skills use comprehensive plans within one coherent Lane,
 detailed Goals with observable acceptance criteria, meaningful Tasks and real
 dependencies, followed by implementation and verification. Reuse existing
 records and preserve selected-Task or atomic scope. Comprehensive means complete
 coverage, not filler work. Explicit brainstorming, plan-only, defer, queue or
 narrower-output requests override that default. A plan or launch preview is not
 implementation. Lane Manager plans and coordinates continued delivery through
-the current harness's execution path. Clips Dev plans, implements and verifies
+the current harness's execution path. Lane Dev plans, implements and verifies
 an outcome in its own session, either directly for the user or as a delegated
-dev owner. Clips supplies the durable work contracts and acceptance mechanics.
+dev owner. Lanes supplies the durable work contracts and acceptance mechanics.
 Lane Manager continues through the agreed outcome without requiring another
 skill or a routine "go" between tasks.
+
+For new scope without an explicit user-selected mode, Lane Manager asks:
+1. Run planning + breakdown + implementation (default).
+2. Run planning + breakdown and ask for validation.
+
+The default is a displayed recommendation, not consent by silence. Plan-validation
+stops before implementation or worker launch. Explicit and prior authorization
+are reused without repeated task-by-task prompts. Lane Radar separately handles
+on-demand external intake, PR preparation and proposed routing. It does not
+delegate work or continue delivery; third-party requests do not authorize
+execution or external actions.
 
 Host identity, Lane claims, management roles, and previous session associations
 are not prerequisites for authorized work. The canonical CLI does not require a
@@ -92,7 +103,7 @@ retains technical integration responsibility without spawning nested workers.
 Native readback checks both creator fields, repository and workspace; native
 messages preserve manager contact and user steering throughout execution.
 Paseo instead keeps its verified top-level manager-to-dev path. A standalone
-Clips Dev session does not need a manager or a new parent. These are
+Lane Dev session does not need a manager or a new parent. These are
 host-specific instructions, not a new runtime launcher or scheduler. On other
 harnesses, Lane Manager must invoke available native sub-agents even if they
 are not user-steerable. If no delegation primitive exists, the manager implements and
@@ -102,6 +113,14 @@ fallback does not bypass denied authorization or missing tools/files.
 Authentication, external-action approval, exact action targets, acceptance
 attribution, atomic writes, journal locks, and stale-revision checks remain
 separate safeguards. See [coordination policy](work-contracts.md#management-policy).
+
+Dispatch follows a visible contract: preserve the selected mode; persist or reuse
+full Goal/Task requests, coverage and real prerequisites; read them back; show the
+refs and worker mapping; mark ready Tasks `in_progress` before launch or resume;
+then dispatch exact refs, request revisions and write boundaries. Attach observed
+session identity after creation. Missing, failed or stale writes and true blockers
+stop the affected dispatch. Amend the request before redirecting work, and assess
+returned evidence against that request. This is agent policy, not a native scheduler.
 
 ## Lane worker budget
 
@@ -113,10 +132,10 @@ It is a ceiling, not a requirement to launch five workers.
 After project setup, use the supported configuration interface:
 
 ```bash
-clips config lane_max_active_agents          # Read the numeric value; absent means 5
-clips config --lane-max-active-agents 3       # Store the project default for its Lanes
-clips config lane_max_active_agents 3        # Equivalent existing key/value syntax
-clips config --help
+lanes config lane_max_active_agents          # Read the numeric value; absent means 5
+lanes config --lane-max-active-agents 3       # Store the project default for its Lanes
+lanes config lane_max_active_agents 3        # Equivalent existing key/value syntax
+lanes config --help
 ```
 
 The flag takes one value, separated by a space. Values must be positive safe
@@ -140,24 +159,70 @@ Lowering the budget never implicitly terminates existing workers. Defer new
 launches or resumptions until capacity returns.
 
 The CLI validates and persists the configuration value. **Lane Manager applies
-the concurrency policy through the host's native tools; Clips does not enforce
+the concurrency policy through the host's native tools; Lanes does not enforce
 a native process limit or provide a cross-session scheduler.** Copilot still
 uses direct children without nested workers. Other hosts retain their own
 delegation paths. A harness with no delegation primitive uses the existing
 linear fallback and creates no worker slots; a full budget does not make an
 available primitive disappear.
 
+The manager may skip this stored project cap only when reliable native metadata
+for its current session explicitly confirms cloud execution. It does not change
+the stored numeric value. Local, unknown, or ambiguous environments keep the
+configured cap. An explicit user ceiling for the Lane and native host quotas
+or resource limits still apply. Do not infer cloud from a hostname, SSH,
+container, environment variable, remote repository or workspace path.
+
+## Lane execution model preferences
+
+Model preferences resolve from project configuration, then user configuration,
+then built-in defaults. New Lane Managers use `gpt-6.1-sol` with `high` effort;
+new Lane Dev workers use `gpt-6-luna` with `high` effort. The preference is a
+request to the execution host, not a guarantee that the model is available.
+Opaque model identifiers are stored without a catalog check; fallback belongs
+to dispatch policy.
+
+These values configure new sessions only. In particular, applying a saved
+manager preference must not change an existing, resumed, or reused Lane
+Manager's selected model or effort. Explicit user choices for a particular Lane
+or worker take precedence over configured defaults. Before launch, the host
+must confirm supported model/effort values through its actual catalog, help or
+tool schema. A fallback is disclosed and does not rewrite preferences; the
+requested value, launch value and host-reported effective value are distinct.
+See the [Lane Manager model policy](../.agents/skills/lane-manager/SKILL.md#resolve-model-preferences-and-fallbacks)
+for host-specific handling and ambiguous-launch reconciliation.
+
+```bash
+lanes config lane_manager_model                         # Read the effective value
+lanes config lane_manager_reasoning_effort high         # Set a project override
+lanes config --user lane_dev_model gpt-6-luna           # Set a user preference; works outside Git
+lanes config --user lane_dev_model                      # Read that user preference outside Git
+lanes config lane_dev_model custom-model                # Override for this project
+lanes config lane_dev_model                             # Read the project override
+lanes config lane_dev_reasoning_effort                  # Read the effective effort
+lanes config lane_dev_model --unset                     # Remove a project override
+lanes config lane_dev_model                             # Inherit the user preference
+lanes config --user lane_dev_model --unset              # Remove a user override
+lanes config lane_dev_model                             # Inherit the built-in default
+lanes config --help                                     # List all model preference keys
+```
+
+The keys are `lane_manager_model`, `lane_manager_reasoning_effort`,
+`lane_dev_model`, and `lane_dev_reasoning_effort`. Unsetting an override resumes
+inheritance from the next scope. Project initialization and unrelated project
+configuration writes do not store inherited model defaults as overrides.
+
 ## Quick start
 
 Initialize inside a Git repository:
 
 ```bash
-clips init
-clips goal create '{"title":"Restore the selected workspace","description":"Reopen the last available workspace after reload","plan":"Implement persistence, then integrate selection","decisions":"Store the workspace ID and validate it against current workspaces","acceptance_criteria":[{"id":"A1","description":"Reload restores the last available workspace"}]}'
-clips component create '{"title":"Workspace preference","responsibility":"Persist the selected workspace ID","contract":"Read returns an ID or no preference; storage failures do not block startup","source_refs":["src/workspace-preference.js"]}'
-clips task create g1 '{"title":"Persist workspace preference","description":"Read and write the selected workspace ID","components":["#c1"],"scope":"Persistence boundary and its failure behavior","acceptance_criteria":[{"id":"A1","description":"A stored ID can be read back"},{"id":"A2","description":"Unavailable storage does not throw"}]}'
-clips task status g1 t1 in_progress
-clips view '#g1#t1' --json
+lanes init
+lanes goal create '{"title":"Restore the selected workspace","description":"Reopen the last available workspace after reload","plan":"Implement persistence, then integrate selection","decisions":"Store the workspace ID and validate it against current workspaces","acceptance_criteria":[{"id":"A1","description":"Reload restores the last available workspace"}]}'
+lanes component create '{"title":"Workspace preference","responsibility":"Persist the selected workspace ID","contract":"Read returns an ID or no preference; storage failures do not block startup","source_refs":["src/workspace-preference.js"]}'
+lanes task create g1 '{"title":"Persist workspace preference","description":"Read and write the selected workspace ID","components":["#c1"],"scope":"Persistence boundary and its failure behavior","acceptance_criteria":[{"id":"A1","description":"A stored ID can be read back"},{"id":"A2","description":"Unavailable storage does not throw"}]}'
+lanes task status g1 t1 in_progress
+lanes view '#g1#t1' --json
 ```
 
 The examples assume an empty store; use the refs returned by your commands.
@@ -180,8 +245,8 @@ the actual change:
 Apply the result, then record acceptance after verifying it:
 
 ```bash
-clips task update g1 t1 --file task-result.json
-clips task accept g1 t1 --file task-acceptance.json
+lanes task update g1 t1 --file task-result.json
+lanes task accept g1 t1 --file task-acceptance.json
 ```
 
 An acceptance file contains the artifact actually checked, the accepting actor,
@@ -202,11 +267,11 @@ use one history mechanism across goals, tasks, and components; they are record
 snapshots, not versions of the executable code.
 
 ```bash
-clips view '#c1#r1' --json
-clips view '#g1#t1#A1' --json
-clips view '#t1#A1' --goal '#g1' --json
-clips history '#g1#t1' --json
-clips component history c1
+lanes view '#c1#r1' --json
+lanes view '#g1#t1#A1' --json
+lanes view '#t1#A1' --goal '#g1' --json
+lanes history '#g1#t1' --json
+lanes component history c1
 ```
 
 Include the commit, tree/diff identity, or immutable artifact reference with
@@ -221,7 +286,7 @@ authorized waiver. Contract changes invalidate affected acceptance while
 preserving its history. `accepted_by` must match a configured
 `acceptance_owner`; both are metadata, not authentication.
 
-Clips checks receipt structure. It does not execute verification commands,
+Lanes checks receipt structure. It does not execute verification commands,
 validate the truth of submitted evidence, or grant approval authority. Agents
 must inspect the actual result and respect human-owned approvals.
 
@@ -245,7 +310,7 @@ Goals and tasks retain the statuses `open`, `in_progress`, `closed`,
 ### Behavior and verification modes
 
 Goals and tasks can carry optional behavior descriptions, including Gherkin-style
-scenarios. Clips stores this text without parsing or executing it.
+scenarios. Lanes stores this text without parsing or executing it.
 
 - `behavior`: verify relevant observable behavior using methods suitable for
   the repository and change.
@@ -271,14 +336,14 @@ a description and product goals, but they do not have technical acceptance
 criteria, test evidence, or an acceptance owner.
 
 ```bash
-clips lane create '{"title":"Workspace experience","description":"Make returning to work feel continuous","product_goals":["Users return to the right workspace quickly"]}'
-clips goal assign g1 l1
-clips goal update g2 '{"blocked_by":["g1"]}'
-clips lane show l1
-clips goal assign g1 none
+lanes lane create '{"title":"Workspace experience","description":"Make returning to work feel continuous","product_goals":["Users return to the right workspace quickly"]}'
+lanes goal assign g1 l1
+lanes goal update g2 '{"blocked_by":["g1"]}'
+lanes lane show l1
+lanes goal assign g1 none
 ```
 
-When a Lane is closed, Clips records a strategic retrospective rather than an
+When a Lane is closed, Lanes records a strategic retrospective rather than an
 engineering acceptance receipt. Closure requires a summary, a cross-goal decision
 log, a system overview, and the product goals achieved. It also snapshots the
 Lane's goals and their statuses, derives referenced components from those goals
@@ -299,9 +364,9 @@ and tasks, and can include screenshot or other product-media references.
 ```
 
 ```bash
-clips lane close l1 --file lane-closure.json
-clips view '#l1'
-clips view '#l1#r1' --json
+lanes lane close l1 --file lane-closure.json
+lanes view '#l1'
+lanes view '#l1#r1' --json
 ```
 
 Lanes can be moved to `in_progress`, `not_planned`, or `duplicate` without
@@ -309,21 +374,21 @@ technical ceremony. The `closed` state uses `lane close` so the retrospective
 is not lost. Merely sharing a Lane does not make goals dependent on one another.
 
 Historical Tracks remain readable. Existing `#r001`, `track_id`,
-`.clips/db/tracks/`, and `clips track` data/commands are compatibility
+`.lanes/db/tracks/`, and `lanes track` data/commands are compatibility
 surfaces; current UI and agent guidance use `#l001`, `lane_id`, and
-`clips lane`. GitHub collaboration mirrors Lanes as parent issues containing
+`lanes lane`. GitHub collaboration mirrors Lanes as parent issues containing
 their goal issues.
 
 
 ## Storage and compatibility
 
-Goal/task events live under `.clips/db/`. Component events live under
-`.clips/components/`. Components default to repository-wide storage: `#c1` does
+Goal/task events live under `.lanes/db/`. Component events live under
+`.lanes/components/`. Components default to repository-wide storage: `#c1` does
 not change when the configured user changes. Explicit component namespaces such
 as `#alice#c1` remain available; goal/task namespaces keep their existing behavior.
-Independent legacy CR and ADR Markdown records live under `.clips/records/{cr,adr}/`.
+Independent legacy CR and ADR Markdown records live under `.lanes/records/{cr,adr}/`.
 
-Workflow instances must not be committed. Clips adds `.clips` to the
+Workflow instances must not be committed. Lanes adds `.lanes` to the
 repository-local `.git/info/exclude`; no shared `.gitignore` change is needed.
 Committed product documentation and source describe shipped behavior.
 Committed templates define formats, not record instances.
@@ -346,61 +411,69 @@ record into its type's `archived/` directory. Use them when the project needs a
 separate record and link the authoritative work rather than duplicating it.
 
 ```bash
-clips record status CR-017 in_review
-clips record status ADR-003 accepted
-clips record status CR-017 archived
+lanes record status CR-017 in_review
+lanes record status ADR-003 accepted
+lanes record status CR-017 archived
 ```
 
 The optional [CR template](records/cr/CR-TEMPLATE.md) and
 [ADR template](records/adr/ADR-TEMPLATE.md) remain available. Copy them into
-`.clips/records/` when needed; never put instances beside templates.
+`.lanes/records/` when needed; never put instances beside templates.
 
 ## Skill library exports
 
-Clips is also a Skillshop-compatible skill library. It publishes portable
-components through the standard `@dfosco/clips/skillshop` package manifest:
+Lanes is also a Skillshop-compatible skill library. It publishes portable
+components through the standard `@dfosco/lanes/skillshop` package manifest:
 
 | Export | Role |
 |---|---|
 | `skill:lane-manager` | Comprehensive planning, coordination and continued delivery. Delegates development through the current harness, with linear execution only when delegation is unavailable. |
-| `skill:clips-dev` | Autonomous staff-developer workflow. Plans, builds and verifies the requested outcome in its own session, without acting as Lane Manager. |
-| `skill:clips` | Structured work records: Lanes, Goals, Tasks, components, criteria, results and acceptance. |
+| `skill:lane-dev` | Autonomous staff-developer workflow. Plans, builds and verifies the requested outcome in its own session, without acting as Lane Manager. |
+| `skill:lanes` | Structured work records: Lanes, Goals, Tasks, components, criteria, results and acceptance. |
+| `skill:lane-radar` | On-demand external intake, PR preparation and proposed routing. Does not delegate or continue delivery. |
+| `skill:lane-plugin` | Host-specific guidance for installing, updating, and verifying the Paseo plugin or local Copilot App canvas. |
 
-`skill:loopz` remains an import compatibility alias for `skill:clips-dev`, not
-a fourth skill or a separate continuation requirement. Both resolve to the same
-canonical `clips-dev` directory. Use `skill:clips-dev` for new imports.
+`skill:clips` remains an import alias for `skill:lanes`; `skill:clips-dev` and
+`skill:loopz` resolve to `skill:lane-dev`. These aliases are not additional
+installed skills or a separate continuation requirement. Use the canonical
+names for new imports. Lane Radar is a distinct installed skill; there is no
+`lane-orchestrator` export.
 These exports describe the current source; an older installed package may not
 include them yet. A source update does not update an installed package.
 
 Consumers refer to these names rather than importing package-specific JavaScript
-symbols. With Skillshop available and Clips installed in the consuming project's
+symbols. With Skillshop available and Lanes installed in the consuming project's
 dependencies, resolve or materialize them with:
 
 ```bash
-skillshop resolve @dfosco/clips skill:clips
-skillshop import @dfosco/clips skill:lane-manager --to .agents/skills/lane-manager
-skillshop import @dfosco/clips skill:clips-dev --to .agents/skills/clips-dev
+skillshop resolve @dfosco/lanes skill:lanes
+skillshop import @dfosco/lanes skill:lane-manager --to .agents/skills/lane-manager
+skillshop import @dfosco/lanes skill:lane-dev --to .agents/skills/lane-dev
+skillshop import @dfosco/lanes skill:lane-radar --to .agents/skills/lane-radar
+skillshop import @dfosco/lanes skill:lane-plugin --to .agents/skills/lane-plugin
 ```
 
-For the **global Clips installation** in the README, pass the installed package
+For the **global Lanes installation** in the README, pass the installed package
 directory instead. Run these from the project that should receive the skills:
 
 ```bash
-npx --package=skillshop@2 skillshop import "$(npm root -g)/@dfosco/clips" \
+npx --package=skillshop@2 skillshop import "$(npm root -g)/@dfosco/lanes" \
   skill:lane-manager --to .agents/skills/lane-manager
-npx --package=skillshop@2 skillshop import "$(npm root -g)/@dfosco/clips" \
-  skill:clips-dev --to .agents/skills/clips-dev
+npx --package=skillshop@2 skillshop import "$(npm root -g)/@dfosco/lanes" \
+  skill:lane-dev --to .agents/skills/lane-dev
+npx --package=skillshop@2 skillshop import "$(npm root -g)/@dfosco/lanes" \
+  skill:lane-plugin --to .agents/skills/lane-plugin
 ```
 
 These commands can download Skillshop and create project skill files; they do
-not change the global Clips installation. Use the agent directory printed by
-`clips init` if it differs from `.agents`. If Clips was installed another way,
+not change the global Lanes installation. Use the agent directory printed by
+`lanes init` if it differs from `.agents`. If Lanes was installed another way,
 pass that package directory instead. Imports refuse an existing destination by
 default; review local changes before choosing how to update it.
 
 A Skillshop-built personal library can also re-export a component without
 copying its source. Applications such as Hypercanvas can resolve the same
-components directly when offering Clips-based workflows.
+components directly when offering Lanes-based workflows.
 
 The source mapping lives in `skillshop.library.json`; the packaged
 `skillshop.manifest.mjs` is the generated application-facing contract.
@@ -408,12 +481,15 @@ Maintainers add exports with `skillshop export skill:<name> <directory>` and
 regenerate with `skillshop build`; do not hand-edit the generated manifest.
 Source delivery does not refresh already installed skills or publish a release.
 
-Clips uses Skillshop 2.1.0 during `clips init` to install the canonical Clips,
-Lane Manager and Clips Dev skills in the selected project or user scope.
-Duplicate export targets are installed once; the legacy alias does not create
-a second `loopz` directory. Re-running project init overlays changed skill files
-and preserves additional project-local files. User-scope installation replaces
-ordinary skill copies. Both paths preserve maintained live source links.
+Lanes uses Skillshop 2.1.0 during `lanes init` to install the canonical Lanes,
+Lane Manager, Lane Dev, Lane Radar and Lane Plugin skills in the selected project
+or user scope.
+Duplicate export targets are installed once under canonical names. Existing
+local modifications and maintained live sources are not overwritten. Managed
+per-file digests in the existing user installation state identify unchanged files
+that can be refreshed; unknown or edited content is retained with a warning.
+Review reported conflicts instead of deleting edited skills to force an update.
+Additional project-local files are preserved.
 Ordinary imports remain independent filesystem snapshots, not live subscriptions.
 
 The root `npm-shrinkwrap.json` records locked dependency integrity and ships in
@@ -424,42 +500,124 @@ plugin lockfile, before exposing user extension links.
 ## Installation and setup
 
 ```bash
-npm install -g @dfosco/clips
+npm install -g @dfosco/lanes
 # Or inspect the published CLI without a global install:
-npx @dfosco/clips --help
+npx @dfosco/lanes --help
 ```
 
 Install commands above select the published npm package, not the source in this
 checkout. Check the installed command set before using newer capabilities.
 
-Use `clips --help` or the read-only `clips init --help` to inspect commands.
-Interactive `clips init` asks for project or user skill scope. Noninteractive
+Use `lanes --help` or the read-only `lanes init --help` to inspect commands.
+Interactive `lanes init` asks for project or user skill scope. Noninteractive
 callers must select `--skills-scope project`, `--skills-scope user`, or `--global`
 (equivalent to user). Project scope uses the detected agent directory; user
 scope uses `~/.agents/skills`.
 
-`clips init` creates local workflow state and installs the canonical skills.
+`lanes init` creates local workflow state and installs the canonical skills.
 It does not contact GitHub or import
 issues by default. Existing repositories with `collaboration: true` preserve
 that setting.
 
-`clips init --store-only` creates only the repository's local store, default
+`lanes init --store-only` creates only the repository's local store, default
 configuration, Git exclusion and project registration, returning JSON. It
 refuses an existing store or an invalid registry. It performs no skill/plugin
 installation, editor settings changes, network access or synchronization.
 The Copilot canvas uses this path for its current-directory Initialize action.
 
-The system registry lives at `~/.clips/projects.json` or
-`$CLIPS_HOME/projects.json`. Missing project paths are pruned from the registry.
+The system registry lives in the resolved user directory as `projects.json`.
 Projects default to their directory name; change an ID with
-`clips config project_id <id>`. IDs must be unique across registered projects.
+`lanes config project_id <id>`. IDs must be unique across registered projects.
+
+### Storage compatibility and migration
+
+The canonical names are `.lanes/`, `lanes.config.json`, and `~/.lanes/`.
+The compatible names `.clips/`, `clips.config.json`, and `~/.clips/` remain
+readable. Project directory, config filename, and user directory are independent:
+an old project works with the new user home, and a new project can retain the
+old config filename. Record IDs, journal history, and legacy Track aliases are
+not renamed.
+
+The user directory resolves from `LANES_HOME`, then `CLIPS_HOME`, then the
+populated default directory. An explicit environment override names an exact
+path; initialization does not import unrelated default homes into it. Without
+overrides, a populated old directory takes precedence over an empty new one.
+Fresh installations use `.lanes`. Both names pointing at the same real
+directory represent one store.
+
+Ordinary commands do not migrate. Distinct populated old/new stores, or
+distinct files using both config filenames, require explicit initialization
+instead of silently choosing one and hiding data:
+
+```bash
+lanes init --skills-scope project
+```
+
+Initialization preflights the project and selected user migration. It merges
+disjoint or identical content, normalizes the names, and refuses conflicting
+content before mutation. It does not overwrite divergent journals or settings.
+Resolve a reported conflict deliberately, preserving the data you need, then
+retry. Keep records backed up independently of source control.
+Root symlinks to an external store remain readable, but migration refuses them
+before writing. Only aliases between the selected old/new directories, with one
+concrete directory, can migrate automatically.
+
+`lanes paths --json` reports the resolved `repoRoot`, `storeDir`, `configPath`,
+and `userDir` without writing. Host integrations use the same resolution
+contract. Both `.lanes` and `.clips` are excluded from source commits.
+The `clips` executable remains an alias; source helper and persisted host
+protocol names may retain `clips` for compatibility.
+
+### Central manager discovery and external orchestration
+
+Every Lane Manager startup reads central discovery, reconciles its working
+Lanes against canonical records and current native sessions, then registers its
+own observed identity. These commands also work outside a Git repository:
+
+```bash
+lanes lane manager list --all --json
+lanes lane manager list --project /absolute/project --json
+lanes lane manager inspect '#l1' --project /absolute/project --json
+lanes lane manager register '#l1' --project /absolute/project --file registration.json
+lanes lane manager unregister '#l1' --project /absolute/project --file registration.json
+```
+
+The project selector accepts a registered ID or explicit path; duplicate IDs
+require an unambiguous path. `list --all` returns `projects`, `registrations`,
+and `warnings`. Targeted inspection returns `project`, `lane_id`, `lane`,
+`claim`, `registrations`, and `warnings`. Legacy ownership list/inspect forms
+without `--project` retain their existing shape.
+
+Registration requests use `expected_revision` and an `actor` with observed
+`runtime` and `session_id`; `host`, `workspace_id`, and `contact` are optional.
+The revision belongs to that actor/repository/Lane association and starts at
+zero. Inspect before updating and reread on conflict. Optional
+`runtime_observation` requires `status`, `observed_at`, and `source` together.
+Values describe a native observation, not inferred liveness.
+
+Associations retain working/stopped status, timestamps, freshness and
+availability diagnostics. Stopped and unavailable entries remain visible.
+`live_status` is `unknown`: registration never proves a session is running,
+grants ownership, replaces a manager, or changes a claim. Unregister stops only
+the actor's association and preserves history. Missing identity means read-only
+discovery and an explicit registration limitation, not fabricated IDs.
+
+**Lane Radar** is a separate on-demand skill for scoped external intake, PR
+preparation and proposed routing to exact projects, Lanes and managers. It needs
+no local initialization. It reads, explains, recommends and prepares; it does not
+delegate work or take over continued delivery. Third-party content never grants
+execution or external-action authority. Lane Manager owns delivery and preserves
+direct Copilot dev children under its own session. Neither skill is a daemon,
+scheduler or transport.
 
 ## App integrations
 
 Both optional integrations require Node.js 22.18 or newer. Neither is installed
-or activated by ordinary project initialization.
+or activated by ordinary project initialization. The [Lane Plugin skill](../.agents/skills/lane-plugin/SKILL.md)
+provides the host-specific commands and distinguishes installation from actual
+host/session activation.
 
-- [Clips Work for GitHub Copilot](../plugins/copilot/README.md) includes the
+- [Lanes for GitHub Copilot](../plugins/copilot/README.md) includes the
   locked SDK runtime, checked renderer, canonical CLI and linked skills. Install
   from a complete checkout or an extracted published package, not a standalone
   copy of `plugins/copilot`. The canvas uses advisory claims and associations
@@ -467,21 +625,21 @@ or activated by ordinary project initialization.
   a separate App capability.
 - [Paseo plugin](../plugins/paseo/README.md) provides work views, observed session
   activity, steering and configured launches. Its
-  [shared skill procedure](../.agents/skills/clips/references/paseo.md) documents
+  [shared skill procedure](../.agents/skills/lanes/references/paseo.md) documents
   top-level dev-owner launches, real identity/binding readback and host limits.
 
-`clips board --json` is a retained read-only projection of the current
+`lanes board --json` is a retained read-only projection of the current
 repository's Lanes, Goals, Tasks, labels and related records. It is a machine
-interface for integrations, not an HTTP server or the removed `clips web`
-command. Inspect and maintain project labels with `clips label --help`.
+interface for integrations, not an HTTP server or the removed `lanes web`
+command. Inspect and maintain project labels with `lanes label --help`.
 Optional Lane claim commands retain advisory coordination history and require
 fresh expected revisions; they do not gate ordinary Goal/Task work.
 
 ### Switch between development and the installed npm package
 
-`clips dev` links a source checkout as the global command and saves the
-currently installed npm package under `~/.clips/installations/prod/`.
-`clips prod` runs that saved package without downloading from npm. The global
+`lanes dev` links a source checkout as the global command and saves the
+currently installed npm package under `~/.lanes/installations/prod/`.
+`lanes prod` runs that saved package without downloading from npm. The global
 command stays linked to the development checkout as a dispatcher, so both switch
 commands remain available even if the saved package predates them.
 
@@ -489,14 +647,14 @@ Start the first switch from a development checkout:
 
 ```bash
 cd ~/workspace/example-project
-node ~/workspace/clips/src/cli.js dev
-clips prod
-clips dev
+node ~/workspace/lanes/src/cli.js dev
+lanes prod
+lanes dev
 ```
 
 Use `--project <repo>` to refresh another repository and
-`clips dev --checkout <clips-repo>` to choose a checkout. The remembered
-installation lives under `~/.clips/installation.json`; `CLIPS_HOME` overrides
+`lanes dev --checkout <lanes-repo>` to choose a checkout. The remembered
+installation lives under `~/.lanes/installation.json`; `LANES_HOME` overrides
 that directory. Switching modes reruns the selected version's initialization to
 refresh project skills. Skills absent from the selected package are removed
 only if unchanged; locally edited files are retained with a warning.
@@ -504,21 +662,46 @@ Project-tracked skill changes remain visible in Git.
 
 ### Optional GitHub collaboration
 
+The collaboration setting is local configuration. Inspect it and review the
+local sync plan without contacting GitHub:
+
+```bash
+lanes sync status --json
+lanes sync preview --json
+lanes sync preview '#g1' --json
+```
+
+Status, preview, and attachment operations are local-only. Preview does not
+check GitHub authentication or remote capability, and it is neither approval
+nor authorization to publish. Attachments do not change the collaboration
+setting or start synchronization.
+
 Enable collaboration only when intended:
 
 ```bash
-clips config collaboration true
-clips sync
+lanes config collaboration true
 ```
 
-With collaboration disabled, initialization, synchronization, and local
-goal/task mutations perform no GitHub issue or pull-request operations.
-With it enabled, goals can mirror as issues and tasks as checklists or separate
-issues according to `tasks_as_issues`.
+Set `lanes config collaboration false` to turn the local setting off again:
 
 ```bash
-clips goal unlink g1
-clips goal unlink --all
+lanes config collaboration false
+```
+
+Changing the setting alone does not run synchronization. With collaboration
+enabled, supported Goal, Task, Lane, and Track mutations retain their existing
+automatic pushes to GitHub. Treat those mutations as remote actions too; do not
+issue them without authorization. `lanes sync` is the explicit remote
+synchronization operation and also requires authorization.
+
+With collaboration disabled, initialization, synchronization, and local
+Goal/Task/Lane/Track mutations perform no GitHub issue or pull-request
+operations. With it enabled, Goals can mirror as issues and Tasks as checklists
+or separate issues according to `tasks_as_issues`.
+
+```bash
+lanes goal unlink g1
+lanes goal unlink --all
 ```
 
 Unlinking preserves local history and existing remote issues, and removes the
@@ -528,8 +711,57 @@ Structured work-contract state remains in the local workflow store.
 When collaboration is enabled, sync also reads PRs through the configured
 `gh` session. It associates PRs whose title or body explicitly references a
 goal, task, or legacy CR. Unmatched PRs remain in the reserved
-`.clips/db/_github.jsonl` cache and are not discovered as goals. Repeated pulls
-are idempotent by repository and PR number.
+`.lanes/db/_github.jsonl` cache and are not discovered as goals. Repeated pulls
+are idempotent by host, repository, and PR number.
+
+## Attachments and external plans
+
+Lanes coordinates existing planning structures rather than requiring that plans
+be rewritten into Lanes. Reuse a relevant plan or ADR and attach its reference to
+the appropriate Lane, Goal, or Task. Adding an attachment is a non-destructive
+local association and needs no separate routine approval during authorized
+Lanes work.
+
+```bash
+lanes attachment add '#l1' '{"type":"markdown","path":"docs/plan.md","title":"Existing plan"}'
+lanes attachment add '#g1' '{"type":"url","url":"https://example.com/design","title":"Design"}'
+lanes attachment add '#g1#t1' '{"type":"github_issue","url":"https://github.com/acme/app/issues/18"}'
+lanes attachment add '#g1#t1' '{"type":"github_pr","url":"https://github.com/acme/app/pull/23"}'
+lanes attachment list '#l1'
+lanes attachment list '#g1'
+lanes attachment list '#g1#t1'
+lanes attachment read '#l1' '<attachment-id>'
+lanes attachment read '#g1#t1' '<attachment-id>'
+lanes attachment detach '#g1#t1' '<attachment-id>' --expected-revision '<current-revision>'
+```
+
+Use normal Lane, Goal, or Task refs, including namespaced refs where applicable.
+`add` also accepts `--file <path>` or `--stdin`; its optional `title` and
+`expected_revision` belong in the JSON object. `detach` removes only the local
+association and accepts `--expected-revision <n>`. `add` returns a generated
+`att-<UUID>` identifier for `read` and `detach`. `list` and `read` accept
+historical record refs; `add` and `detach` require a current ref. GitHub
+attachment types derive host, repository, and number from an HTTPS issue/PR URL;
+optional supplied `host`, `repository`, and `number` fields must match that URL.
+Retain the attachment type and original path/URL as provenance. A typed GitHub
+issue or PR remains a reference, not a managed synchronization association.
+Existing legacy GitHub links are read-only synthetic references and must be
+changed through the existing collaboration command.
+
+Markdown attachments retain only the path, not a copy. Reads—including reads
+through historical record refs—use the current file. A removed file remains
+attached and reads as `missing`; permission failures read as `unreadable`.
+Lanes does not restore or snapshot the file. Prefer repository-relative paths;
+do not publish local absolute paths or file contents by default. `list` returns
+reference metadata and `read` returns current Markdown content or remote
+metadata. URLs and typed GitHub attachments are never fetched by these commands.
+
+An attachment is context, not an instruction or authorization. It does not
+change the canonical Goal/Task scope, criteria, dependencies, selected delivery
+mode, or acceptance evidence. Attaching does not enable GitHub collaboration,
+run synchronization, or publish anything; collaboration remains an explicit,
+separate configuration choice. Source content is not automatically added to
+another plan or remote record.
 
 ## Development and release
 
@@ -562,7 +794,7 @@ npm publish
 Version commands run tests, update the version, create a commit and tag, push to
 GitHub, and create a GitHub Release. They require the GitHub CLI. Publishing
 reruns the full test and package smoke suite before publishing
-`@dfosco/clips`.
+`@dfosco/lanes`.
 
 ## License
 

@@ -17,7 +17,19 @@ export function readJsonEvents(filePath) {
   });
 }
 
+function assertNoMigration(filePath) {
+  let directory = path.dirname(path.resolve(filePath));
+  while (true) {
+    const migrationLock = path.join(directory, '.lanes-migration.lock');
+    if (fs.existsSync(migrationLock)) throw new Error(`Lanes migration is in progress: ${migrationLock}`);
+    const parent = path.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+}
+
 export function withRecordLock(filePath, operation) {
+  assertNoMigration(filePath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const lockPath = `${filePath}.lock`;
   let descriptor;
@@ -30,6 +42,7 @@ export function withRecordLock(filePath, operation) {
     throw error;
   }
   try {
+    assertNoMigration(filePath);
     fs.writeFileSync(descriptor, JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() }) + '\n');
     return operation();
   } finally {

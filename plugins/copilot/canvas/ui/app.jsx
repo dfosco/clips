@@ -90,7 +90,7 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
       if (result) {
         initializedProjectId = result.projectId;
         setDialog(null);
-        setNotice('Clips initialized in the current session directory.');
+        setNotice('Lanes initialized in the current session directory.');
         await discover();
       }
     } finally {
@@ -113,6 +113,11 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
     else setError('This record action is not supported.');
   }
   async function openSession(sessionId) { try { navigate((await call('open_session', { sessionId, expectedProjectPath: stateRef.current?.projectPath })).url); } catch (err) { setError(err.message); } }
+  async function readAttachment(ref, attachmentId) {
+    const projectPath = stateRef.current?.projectPath;
+    if (!projectPath) throw new Error('Choose an available Lanes project before reading attachments.');
+    return call('read_attachment', { ref, attachmentId, expectedProjectPath: projectPath });
+  }
   function command(command, trigger, context = {}) {
     if (command === 'refresh') return void refreshBoard();
     if (command.startsWith('create_')) openDialog({ kind: 'create', createKind: command.slice(7), parentRef: context.lane_id }, trigger);
@@ -155,8 +160,8 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
   const canInitializeCurrentDirectory = discovery?.canInitializeCurrentDirectory === true;
   const selectedProjectId = state?.selectedProject?.id || discovery?.selectedProject?.id;
   const loadingWork = !loaded || refreshing || discoveryBusy || busy || initializing;
-  const emptyHeading = discoveryError ? 'Clips projects unavailable' :
-    discovery?.projects?.length ? 'Select a project tab to continue' : 'No available Clips projects';
+  const emptyHeading = discoveryError ? 'Lanes projects unavailable' :
+    discovery?.projects?.length ? 'Select a project tab to continue' : 'No available Lanes projects';
   useEffect(() => {
     let frame;
     if (dialogWasOpen.current && !safeDialog) {
@@ -173,9 +178,9 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
   const closeDialog = () => { if (!busy) setDialog(null); };
   const feedback = notice || (error && !safeDialog) || discoveryError || discovery?.diagnostics?.length || (state && discoveryBusy && !discovery) ? <div className="clips-app-feedback">
     {notice ? <Feedback variant="success">{notice}</Feedback> : null}
-    {error && !safeDialog ? <Feedback variant="critical" title="Clips could not complete that action">{error}</Feedback> : null}
-    {state && discoveryBusy && !discovery ? <Text as="p" role="status" className="clips-app-loading"><Spinner size="small" />Reading Clips projects…</Text> : null}
-    {discoveryError ? <Feedback variant="critical" title="Clips projects could not be loaded">{discoveryError}</Feedback> : null}
+    {error && !safeDialog ? <Feedback variant="critical" title="Lanes could not complete that action">{error}</Feedback> : null}
+    {state && discoveryBusy && !discovery ? <Text as="p" role="status" className="clips-app-loading"><Spinner size="small" />Reading Lanes projects…</Text> : null}
+    {discoveryError ? <Feedback variant="critical" title="Lanes projects could not be loaded">{discoveryError}</Feedback> : null}
     {discovery?.diagnostics?.map((item, index) => <Feedback variant="warning" key={`${item.code}:${index}`}>{item.message}</Feedback>)}
   </div> : null;
   return <main className="clips-app" onKeyDownCapture={(event) => {
@@ -187,12 +192,12 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
     }
   }}>
     {state ? feedback : null}
-    {state ? <Board key={state.projectPath} state={state} busy={busy || initializing} projects={discovery?.projects || []} onSelectProject={selectProject} canInitializeCurrentDirectory={canInitializeCurrentDirectory} onInitializeCurrentDirectory={initializeCurrentDirectory} onFocus={(ref) => { void act(ref ? 'focus' : 'clear_focus', ref ? { ref } : {}); }} onAction={act} onCommand={command} onMenu={openRecordForm} onOpenSession={openSession} /> : <div className="clips-app-recovery">
+    {state ? <Board key={state.projectPath} state={state} busy={busy || initializing} projects={discovery?.projects || []} onSelectProject={selectProject} canInitializeCurrentDirectory={canInitializeCurrentDirectory} onInitializeCurrentDirectory={initializeCurrentDirectory} onFocus={(ref) => { void act(ref ? 'focus' : 'clear_focus', ref ? { ref } : {}); }} onAction={act} onCommand={command} onMenu={openRecordForm} onOpenSession={openSession} onReadAttachment={readAttachment} /> : <div className="clips-app-recovery">
       <header className="clips-app-recovery-header">
-        <Heading as="h1" className="clips-app-recovery-title">Clips</Heading>
+        <Heading as="h1" className="clips-app-recovery-title">Lanes</Heading>
         <div className="clips-app-recovery-actions">
           <Button size="medium" leadingVisual={SyncIcon} data-command="refresh" disabled={busy || initializing} onClick={() => { void refreshBoard(); }}>Refresh</Button>
-          {canInitializeCurrentDirectory ? <Button size="medium" variant="invisible" data-command="initialize" disabled={busy || initializing} onClick={() => { void initializeCurrentDirectory(); }}>{initializing ? 'Initializing Clips…' : 'Initialize Clips'}</Button> : null}
+          {canInitializeCurrentDirectory ? <Button size="medium" variant="invisible" data-command="initialize" disabled={busy || initializing} onClick={() => { void initializeCurrentDirectory(); }}>{initializing ? 'Initializing Lanes…' : 'Initialize Lanes'}</Button> : null}
         </div>
       </header>
       {feedback}
@@ -204,7 +209,7 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
           <Spinner size="small" style={{ width: 20, height: 20 }} srText="Loading" />
           <Text as="p" className="clips-app-muted" aria-hidden="true">Loading<span className="clips-app-loading-dots"><span>.</span><span>.</span><span>.</span></span></Text>
         </div> :
-          <EmptyState title={emptyHeading}>Boards come from your local Clips project registry.{discovery?.currentDirectory ? <><br />Current session directory: <code>{discovery.currentDirectory}</code></> : null}</EmptyState>}
+          <EmptyState title={emptyHeading}>Boards come from your local Lanes project registry.{discovery?.currentDirectory ? <><br />Current session directory: <code>{discovery.currentDirectory}</code></> : null}</EmptyState>}
       </div>
     </div>}
     {state ? <details className="clips-app-sessions"><summary>Project sessions <CounterLabel>{state.projectSessions?.length || 0}</CounterLabel></summary><div className="clips-app-session-list">{state.warnings?.length ? <Feedback variant="warning">{state.warnings.join(' ')}</Feedback> : null}{state.projectSessions?.length ? state.projectSessions.map((session) => {
@@ -218,14 +223,14 @@ export function App({ call, navigate = (url) => window.top.location.assign(url) 
       </section>;
     }) : <Text as="p" className="clips-app-muted">No Copilot sessions are listed for this project.</Text>}</div></details> : null}
     {safeDialog ? <Dialog key={`${dialog.kind}:${dialog.ref || ''}:${dialog.createKind || ''}`} title={heading}
-      subtitle={work ? `${work.ref} · ${work.title}` : dialog.kind === 'steer' ? 'Send through the exact current joined session. No session is created.' : 'Write a canonical Clips record in the selected project.'}
+      subtitle={work ? `${work.ref} · ${work.title}` : dialog.kind === 'steer' ? 'Send through the exact current joined session. No session is created.' : 'Write a canonical Lanes record in the selected project.'}
       onClose={closeDialog} returnFocusRef={dialogTrigger} initialFocusRef={dialogInitialFocus} width="large" height="auto" className="clips-app-dialog">
         <div className="clips-app-dialog-content">
         {error ? <Feedback variant="critical">{error}</Feedback> : null}
         <form id="canvas-dialog-form" onSubmit={submit} className="clips-app-form">
           <fieldset disabled={busy} className="clips-app-fields">
             {dialog.kind === 'status' && work ? <FormControl id="record-status"><FormControl.Label>Status</FormControl.Label><Select ref={dialogInitialFocus} block name="status" defaultValue={work.status}>{statuses.map((s) => <Select.Option key={s} value={s} disabled={work.kind === 'lane' && s === 'closed'}>{s.replaceAll('_', ' ')}</Select.Option>)}</Select></FormControl> : null}
-            {dialog.kind === 'close' ? <Text as="p" className="clips-app-muted">This marks the Goal closed in Clips. It does not record engineering acceptance.</Text> : null}
+            {dialog.kind === 'close' ? <Text as="p" className="clips-app-muted">This marks the Goal closed in Lanes. It does not record engineering acceptance.</Text> : null}
             {dialog.kind === 'labels' && work ? <><FormControl id="label-choice"><FormControl.Label>Add label</FormControl.Label><Select ref={dialogInitialFocus} block name="label"><Select.Option value="">Choose label</Select.Option>{state?.labels?.map((label) => <Select.Option key={label.id} value={label.id}>{label.name}</Select.Option>)}</Select></FormControl><div><Button size="medium" type="submit" data-operation="add" disabled={busy}>Add label</Button></div><hr /><FormControl id="assigned-choice"><FormControl.Label>Remove label</FormControl.Label><Select block name="assigned"><Select.Option value="">Choose assigned label</Select.Option>{work.labels?.map((label) => <Select.Option key={label.id} value={label.id}>{label.name}</Select.Option>)}</Select></FormControl><div><Button size="medium" type="submit" disabled={busy} data-operation="remove">Remove label</Button></div></> : null}
             {dialog.kind === 'steer' ? <FormControl id="steer-prompt" required><FormControl.Label>Message</FormControl.Label><Textarea ref={dialogInitialFocus} block resize="vertical" rows={5} name="prompt" maxLength={12000} /></FormControl> : null}
             {dialog.kind === 'create' ? <>

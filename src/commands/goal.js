@@ -1,7 +1,8 @@
 // Goal management commands
 import fs from 'fs';
 import { appendEvent, readGoalWithTasks, getClipsDbDir, getClipsRecordsDir, getGoalFilePath, getCurrentCommitSha, normalizeGoalId as canonicalGoalId, parseRef } from '../lib/core.js';
-import { pushGoal } from '../lib/sync.js';
+import { autoSyncGoal } from '../lib/sync.js';
+import { reportAutoSyncResult } from './sync-output.js';
 import { planningBehaviorFields } from '../lib/behavior.js';
 import { discoverGoals } from '../lib/goal-discovery.js';
 import { adrRecordExists, goalTypeFields, normalizeAdrId } from '../lib/goal-type.js';
@@ -54,7 +55,9 @@ function expectedRevision(data, current) {
 function syncGoal(goalId, username) {
   // Explicit other-user records must not accidentally synchronize a local goal
   // with the same numeric ID. The sync command owns namespaced synchronization.
-  if (!username) try { pushGoal(goalId); } catch (error) { /* best effort */ }
+  if (username) return;
+  const result = autoSyncGoal(goalId);
+  reportAutoSyncResult(result, `#${goalId}`);
 }
 
 function goalLaneFields(data) {
@@ -107,7 +110,7 @@ function createGoal(data) {
   }
   
   appendEvent(goalId, event, { expectedRevision: expectedRevision(data, null) });
-  try { pushGoal(goalId); } catch (e) { /* sync is best-effort */ }
+  syncGoal(goalId, null);
   const synced = readGoalWithTasks(goalId);
   const result = { success: true, goal_id: goalId };
   if (synced && synced.issue_number) result.issue_number = synced.issue_number;
@@ -170,7 +173,7 @@ function attachAdr(goalId, adrId) {
 
   const normalizedAdrId = normalizeAdrId(adrId);
   const recordsDir = getClipsRecordsDir('adr');
-  if (!adrRecordExists(recordsDir, normalizedAdrId)) throw new Error(`${normalizedAdrId} not found in .clips/records/adr`);
+  if (!adrRecordExists(recordsDir, normalizedAdrId)) throw new Error(`${normalizedAdrId} not found in ${recordsDir}`);
 
   appendEvent(normalizedId, {
     event: 'adr_attached',
@@ -332,7 +335,7 @@ export function runGoalCommand(args) {
       listGoals();
       break;
     default:
-      console.log(`Usage: clips goal <command> [args]
+      console.log(`Usage: lanes goal <command> [args]
 
 Commands:
   create <json>        Create a new goal
@@ -369,12 +372,12 @@ not_planned/duplicate children. Status closure alone is administrative.
 Declared component refs are resolved to pinned revisions in the receipt.
 Pin refs before work when a negotiated baseline must remain fixed.
 
-Internal (prefer 'clips view' for browsing):
+Internal (prefer 'lanes view' for browsing):
   status <id> <status> Change goal status
   show <id>            Show goal as JSON
   list                 List all goals as JSON
 
-Tip: Use 'clips view' to see goals and tasks in a readable format.
+Tip: Use 'lanes view' to see goals and tasks in a readable format.
 `);
   }
 }

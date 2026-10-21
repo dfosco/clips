@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lane Dev"
+  short_description: "Plan and build as an autonomous staff developer"
+  default_prompt: "Use $lane-dev to plan, implement, and verify the requested outcome in this session, keeping its Lanes work records current through completion."

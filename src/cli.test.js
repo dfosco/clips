@@ -12,7 +12,7 @@ function run(...args) {
   tempDirs.push(cwd);
   return spawnSync(process.execPath, [cli, ...args], {
     cwd, encoding: 'utf8', timeout: 5000,
-    env: { ...process.env, CLIPS_HOME: path.join(cwd, 'home') },
+    env: { ...process.env, LANES_HOME: '', CLIPS_HOME: path.join(cwd, 'home') },
   });
 }
 
@@ -47,6 +47,6 @@ describe('CLI command surface', () => {
     const result = run(command, '--help');
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(`Usage: clips ${command}`);
+    expect(result.stdout).toContain(`Usage: lanes ${command}`);
   });
 });

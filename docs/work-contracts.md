@@ -1,4 +1,4 @@
-# Work contracts in Clips
+# Work contracts in Lanes
 
 This document defines the work-contract implementation in this checkout.
 It is not a claim that an older installed CLI supports every command below.
@@ -99,6 +99,16 @@ receipt naming the actual actor and criterion evidence records **accepted**.
 For "plan this only", deliver the same necessary planning detail but do not
 launch implementation or claim any of those later states.
 
+Lanes is an orchestration layer, not a replacement format for planning. Reuse
+adequate user- or harness-created plans and ADRs instead of duplicating them.
+Keep the canonical Goal/Task request, scope, criteria, dependencies, and
+acceptance evidence sufficient for execution and review. Attach relevant
+Markdown files, URLs, and typed GitHub references as local links; these are
+context, not authority or an external publication. Markdown attachments resolve
+the current file and remain missing if that file is removed; Lanes never saves a
+snapshot or restores the source. See the
+[attachment command reference](cli-reference.md#attachments-and-external-plans).
+
 A Lane Manager delegates engineering and substantive verification through the
 current harness. Paseo uses workspace agents; Copilot uses direct coordinated
 children. Other harnesses must invoke available native sub-agents even if they
@@ -145,7 +155,7 @@ Goals support `lane_id` for their strategic frame and retain legacy
 `summary`, `decision_log`, `system_overview`,
 `product_goals_achieved`, and optional `components` / `media`.
 Use status commands for lifecycle changes, except Lane closure, which uses
-`clips lane close` so the retrospective is captured.
+`lanes lane close` so the retrospective is captured.
 
 ### Extend without multiplying artifact types
 
@@ -220,13 +230,13 @@ Append `#rN` to read a recoverable record snapshot. Lane IDs use `l`, so
 `#l1#r2` is unambiguous: Lane 1, revision 2.
 
 ```bash
-clips view '#l1#r1' --json
-clips view '#c1#r1' --json
-clips view '#g1#t1#r2' --json
-clips view '#g1#t1#r2#A1' --json
-clips history '#g1' --json
-clips history '#g1#t1' --json
-clips history '#c1' --json
+lanes view '#l1#r1' --json
+lanes view '#c1#r1' --json
+lanes view '#g1#t1#r2' --json
+lanes view '#g1#t1#r2#A1' --json
+lanes history '#g1' --json
+lanes history '#g1#t1' --json
+lanes history '#c1' --json
 ```
 
 Goal revisions count events in the aggregate goal/task stream. Task revisions
@@ -270,7 +280,7 @@ as proof that another agent is currently writing.
 
 Use the CLI for records and supported host tools for agent sessions and
 communication. User-requested coordinated children remain steerable through
-those tools; they do not require a Clips role or claim. Respect resource limits
+those tools; they do not require a Lanes role or claim. Respect resource limits
 and reuse an existing session when another is unnecessary. The packaged Copilot
 canvas uses an exact-current-session adapter; native App tools still own child
 creation and cross-session steering. Agent instructions cannot change checks
@@ -303,9 +313,9 @@ written to `record`; the acceptance receipt also carries its summary and
 evidence. The request remains available in the same task and history.
 
 ```bash
-clips task update '#g1#t1' --file task-result.json
-clips task accept '#g1#t1' --file task-acceptance.json
-clips goal accept '#g1' --file goal-acceptance.json
+lanes task update '#g1#t1' --file task-result.json
+lanes task accept '#g1#t1' --file task-acceptance.json
+lanes goal accept '#g1' --file goal-acceptance.json
 ```
 
 Receipt shape, with illustrative values:
@@ -399,7 +409,7 @@ receipt. Criteria or reference reordering alone does not change the agreement.
 Plan updates, work-owner changes, result notes, sections, and extensions do not
 automatically change the obligation. They remain in history. An agent must still
 notice when source changes or custom semantics make earlier evidence stale.
-Clips does not watch the filesystem and prove continued correctness.
+Lanes does not watch the filesystem and prove continued correctness.
 
 Administrative `status closed` creates no receipt and is not evidence of
 acceptance. Reopening work also invalidates its prior current acceptance.
@@ -427,7 +437,7 @@ A provider and consumer can be implemented in parallel after agreeing their
 interface. Record any integration acceptance gate in the goal plan. A mock can
 support local development without proving that the real integration works.
 
-Keep one coordinator writing shared Clips state by default. Workers return
+Keep one coordinator writing shared Lanes state by default. Workers return
 results and proposed updates. Keep execution state in task status, owner,
 blockers, and result; keep cross-task coordination in the goal plan. An existing
 squad log or host handoff can hold transient context. No separate execution-note
@@ -442,8 +452,8 @@ Contributors must contact existing managers before overlapping decisions or chan
 If an authorized messaging route is unavailable, report that limitation rather than
 silently claiming ownership or inventing a successful exchange.
 
-Inspect with `clips lane manager inspect '#l1' --json`; list with
-`clips lane manager list --json`. An unowned Lane returns revision 0. Mutations
+Inspect with `lanes lane manager inspect '#l1' --json`; list with
+`lanes lane manager list --json`. An unowned Lane returns revision 0. Mutations
 accept one JSON argument, `--file <path>`, or `--stdin`, and output the updated
 claim as JSON. Every mutation requires the revision just inspected:
 
@@ -462,10 +472,10 @@ claim as JSON. Every mutation requires the revision just inspected:
 
 | Command | Behavior and additional input |
 |---|---|
-| `clips lane manager claim '#l1' <json>` | Claims an unowned Lane; repeating the same identity is idempotent |
-| `clips lane manager share '#l1' <json>` | Current manager adds `owner`, another observed manager identity |
-| `clips lane manager release '#l1' <json>` | Removes only the calling `actor`; preserves coowners |
-| `clips lane manager handover '#l1' <json>` | Replaces `from` (defaults to `actor`) with `owner`; requires `authorization: {"by":"user identity","reason":"explicit instruction"}` |
+| `lanes lane manager claim '#l1' <json>` | Claims an unowned Lane; repeating the same identity is idempotent |
+| `lanes lane manager share '#l1' <json>` | Current manager adds `owner`, another observed manager identity |
+| `lanes lane manager release '#l1' <json>` | Removes only the calling `actor`; preserves coowners |
+| `lanes lane manager handover '#l1' <json>` | Replaces `from` (defaults to `actor`) with `owner`; requires `authorization: {"by":"user identity","reason":"explicit instruction"}` |
 
 The tuple `host`, `runtime`, `session_id` identifies a manager. `workspace_id`
 and `contact` are optional navigation/coordination hints. Use observed identity
@@ -475,7 +485,7 @@ that replacement. The metadata records the asserted authority; it is not an
 authentication mechanism. Never infer permission to take over from a stale or
 disconnected session. Revision conflicts require rereading and coordination.
 
-Claims live under `CLIPS_HOME/lane-claims/` or `~/.clips/lane-claims/`, outside
+Claims live under `LANES_HOME/lane-claims/` or `~/.lanes/lane-claims/`, outside
 repository state and GitHub sync. Canonical realpath Git common-directory identity
 and Lane ID determine the record. Worktrees and symlinks share ownership; repository
 labels, configured agent usernames, and display project IDs cannot fork it. Lanes
@@ -497,20 +507,20 @@ not interpret unknown ownership as an unowned Lane or offer automatic replacemen
 Existing planning/building labels, Track relationships, attached ADRs, CR/ADR
 files, GitHub metadata, and old event streams remain supported. Track IDs such
 as `#r001` are exposed as legacy aliases of `#l001`; their journals remain in
-`.clips/db/tracks/` so existing stores do not need a migration. New user-facing
+`.lanes/db/tracks/` so existing stores do not need a migration. New user-facing
 commands, fields, and references use Lane terminology. Labels no longer
 force a separate ADR or prohibit tasks. Existing records are not rewritten into
 new objects or discarded.
 
-Workflow instances remain local under `.clips/` and must not be committed:
+Workflow instances remain local under `.lanes/` and must not be committed:
 
 | State | Location |
 |---|---|
-| Lane events (including legacy Tracks) | `.clips/db/tracks/r001.jsonl` |
-| Goal/task events | `.clips/db/[username/]g001.jsonl` |
-| Component events | `.clips/components/[username/]c001.jsonl` |
-| Optional CR/ADR Markdown | `.clips/records/{cr,adr}/` |
-| Archived CR/ADR Markdown | `.clips/records/{cr,adr}/archived/` |
+| Lane events (including legacy Tracks) | `.lanes/db/tracks/r001.jsonl` |
+| Goal/task events | `.lanes/db/[username/]g001.jsonl` |
+| Component events | `.lanes/components/[username/]c001.jsonl` |
+| Optional CR/ADR Markdown | `.lanes/records/{cr,adr}/` |
+| Archived CR/ADR Markdown | `.lanes/records/{cr,adr}/archived/` |
 
 Worktrees resolve the common repository's store. Product documentation and
 source remain committed repository state. GitHub collaboration stays opt-in,

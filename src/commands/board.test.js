@@ -37,6 +37,6 @@ describe('read-only board CLI contract', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-no-board-'));
     paths.push(repo);
     execFileSync('git', ['init', '-q', repo]);
-    expect(() => readCurrentBoard(repo)).toThrow(/clips init/i);
+    expect(() => readCurrentBoard(repo)).toThrow(/lanes init/i);
   });
 });

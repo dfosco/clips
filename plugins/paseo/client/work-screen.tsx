@@ -3,11 +3,12 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { ActivityIndicator, Linking, Pressable, Text, TextInput, View } from "react-native";
 import {
-  boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc,
-  type AgentConfiguration, type Goal, type Lane, type LaneClosureData, type LabelChange, type Project, type StartMode, type Work,
+  attachmentReadRpc, boardRpc, collaborationRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc,
+  type AgentConfiguration, type Attachment, type AttachmentReadData, type CollaborationCapability,
+  type Goal, type Lane, type LaneClosureData, type LabelChange, type Project, type StartMode, type Work,
 } from "../shared/contracts";
 import { executionFor, executionForManagers, isActiveAgent, type AgentInfo, type Execution } from "../shared/work";
 import { AgentLaunchDialog } from "./agent-configuration";
@@ -105,10 +106,180 @@ function RecordContext({ work, theme }: { work: Lane | Goal; theme: Theme }) {
   );
 }
 
+function safeExternalUrl(value: unknown, httpsOnly = false): string | null {
+  if (typeof value !== "string" || !value.trim() || /[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    const normalized = new URL(value).toString();
+    const match = normalized.match(/^(https?):\/\/([^/?#]+)/i);
+    if (!match || match[2].includes("@") || (httpsOnly && match[1].toLowerCase() !== "https")) return null;
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+function markdownInline(source: string, theme: Theme, onOpenUrl: (url: string) => void) {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
+  let cursor = 0;
+  let index = 0;
+  for (const match of source.matchAll(pattern)) {
+    const position = match.index ?? 0;
+    if (position > cursor) nodes.push(source.slice(cursor, position));
+    if (match[2] !== undefined) {
+      const href = safeExternalUrl(match[3]);
+      nodes.push(href
+        ? <Text key={index++} accessibilityRole="link" onPress={() => onOpenUrl(href)}
+            style={{ color: theme.colors.accent, textDecorationLine: "underline" }}>{match[2]}</Text>
+        : <Text key={index++}>{match[2]}</Text>);
+    } else if (match[4] !== undefined) {
+      nodes.push(<Text key={index++} style={{ fontFamily: "monospace" }}>{match[4]}</Text>);
+    } else if (match[5] !== undefined) {
+      nodes.push(<Text key={index++} style={{ fontWeight: "700" }}>{match[5]}</Text>);
+    } else {
+      nodes.push(<Text key={index++} style={{ fontStyle: "italic" }}>{match[6]}</Text>);
+    }
+    cursor = position + match[0].length;
+  }
+  if (cursor < source.length) nodes.push(source.slice(cursor));
+  return nodes;
+}
+
+function MarkdownContent({ source, theme, onOpenUrl }: {
+  source: string;
+  theme: Theme;
+  onOpenUrl: (url: string) => void;
+}) {
+  return (
+    <View style={{
+      gap: 3, maxWidth: 720, padding: 9, borderWidth: 1, borderColor: theme.colors.border,
+      borderRadius: 7, backgroundColor: theme.colors.surface1,
+    }}>
+      {source.split(/\r?\n/).map((line, index) => {
+        const heading = line.match(/^#{1,6}\s+(.+)$/);
+        const list = line.match(/^\s*([-*+]|\d+\.)\s+(.+)$/);
+        const content = heading?.[1] ?? list?.[2] ?? line.replace(/^\s*>\s?/, "");
+        return (
+          <Text key={index} selectable style={{
+            color: theme.colors.foreground,
+            fontSize: heading ? 14 : 12,
+            fontWeight: heading ? "700" : "400",
+            lineHeight: 18,
+          }}>
+            {list ? "• " : ""}{markdownInline(content, theme, onOpenUrl)}
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
+function attachmentType(type: Attachment["type"]) {
+  return ({ markdown: "Markdown", url: "URL", github_issue: "GitHub issue", github_pr: "GitHub pull request" })[type];
+}
+
+function attachmentStatus(status: Attachment["status"]) {
+  return ({ available: "Available", missing: "Missing", unreadable: "Unreadable", remote: "External", invalid: "Invalid reference" })[status ?? "available"];
+}
+
+function RecordAttachments({ work, projectId, theme, readAttachment, onOpenUrl }: {
+  work: Work;
+  projectId: string;
+  theme: Theme;
+  readAttachment: (input: { projectId: string; ref: string; attachmentId: string }) => Promise<AttachmentReadData>;
+  onOpenUrl: (url: string) => void;
+}) {
+  const [reads, setReads] = useState<Record<string, Attachment | null>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [reading, setReading] = useState<Record<string, boolean>>({});
+  const pendingReads = useRef(new Set<string>());
+  const attachments = work.attachments ?? [];
+  if (!attachments.length) return null;
+  const readCurrent = async (attachment: Attachment) => {
+    if (pendingReads.current.has(attachment.id)) return;
+    pendingReads.current.add(attachment.id);
+    setReading((previous) => ({ ...previous, [attachment.id]: true }));
+    setReads((previous) => ({ ...previous, [attachment.id]: null }));
+    setErrors((previous) => ({ ...previous, [attachment.id]: "" }));
+    try {
+      const result = await readAttachment({ projectId, ref: work.ref, attachmentId: attachment.id });
+      if (result.ref !== work.ref || result.attachment.id !== attachment.id) {
+        throw new Error("Lanes returned a different record or attachment.");
+      }
+      setReads((previous) => ({ ...previous, [attachment.id]: result.attachment }));
+    } catch (error) {
+      setErrors((previous) => ({ ...previous, [attachment.id]: message(error) }));
+    } finally {
+      pendingReads.current.delete(attachment.id);
+      setReading((previous) => ({ ...previous, [attachment.id]: false }));
+    }
+  };
+  return (
+    <View accessibilityLabel={`Attachments for ${work.ref}`} style={{ gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
+      <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>Attachments</Text>
+      {attachments.map((attachment) => {
+        const url = attachment.type === "github_issue" || attachment.type === "github_pr"
+          ? safeExternalUrl(attachment.url, true)
+          : attachment.type === "url" ? safeExternalUrl(attachment.url) : null;
+        const current = reads[attachment.id];
+        const status = current?.status ?? attachment.status;
+        const error = errors[attachment.id];
+        return (
+          <View key={attachment.id} style={{ gap: 5 }}>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {url ? (
+                <Pressable accessibilityRole="link" accessibilityLabel={`Open ${attachment.title || attachmentType(attachment.type)}`}
+                  onPress={() => onOpenUrl(url)}>
+                  <Text style={{ color: theme.colors.accent, fontSize: 13 }}>{attachment.title || url}</Text>
+                </Pressable>
+              ) : (
+                <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{attachment.title || "Untitled reference"}</Text>
+              )}
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 11 }}>{attachmentType(attachment.type)}</Text>
+              {status ? <Text accessibilityLabel={`${attachmentStatus(status)} attachment status`}
+                style={{ color: status === "missing" || status === "unreadable" || status === "invalid" ? theme.colors.statusWarning : theme.colors.foregroundMuted, fontSize: 11 }}>
+                {attachmentStatus(status)}
+              </Text> : null}
+              {!url && attachment.url ? <Text style={{ color: theme.colors.statusWarning, fontSize: 11 }}>Unsafe link omitted</Text> : null}
+            </View>
+            {attachment.identity_error ? <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>{attachment.identity_error}</Text> : null}
+            {attachment.type === "markdown" ? (
+              <>
+                <Pressable accessibilityRole="button"
+                  accessibilityLabel={`${current ? "Refresh" : "Read"} current Markdown for ${work.ref}: ${attachment.title}`}
+                  accessibilityState={{ disabled: reading[attachment.id] || !attachment.id }}
+                  disabled={reading[attachment.id] || !attachment.id}
+                  onPress={() => { void readCurrent(attachment); }}
+                  style={{ alignSelf: "flex-start", paddingVertical: 4, paddingRight: 8 }}>
+                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
+                    {reading[attachment.id] ? "Reading…" : current ? "Refresh current Markdown" : "Read current Markdown"}
+                  </Text>
+                </Pressable>
+                {error ? <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, fontSize: 12 }}>
+                  Could not read current Markdown: {error}
+                </Text> : null}
+                {current?.status === "available" && typeof current.content === "string" ? (
+                  <MarkdownContent source={current.content} theme={theme} onOpenUrl={onOpenUrl} />
+                ) : current || status === "missing" || status === "unreadable" || status === "invalid" ? (
+                  <Text accessibilityRole="text" style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
+                    {current?.error || (status === "missing" ? "The attached Markdown file is missing." :
+                      status === "unreadable" ? "The attached Markdown file cannot be read." : "The Markdown reference is invalid.")}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 function WorkRow({
   work, level, execution, loaded, expanded, onToggle, onStart, onOpen, onOpenAgent, onClose, onFocusLane,
   onToggleClosedGoals, closedGoalsCount = 0, closedGoalsVisible = false,
   busy, theme, compact, onLabels, currentWorkspaceId, workspaceMatchesProject, availableWorkspaces, detailsOnly = false,
+  projectId, attachmentRevision, readAttachment, onOpenUrl,
 }: {
   work: Work;
   level: number;
@@ -131,6 +302,10 @@ function WorkRow({
   workspaceMatchesProject: boolean;
   availableWorkspaces: { id: string; name: string }[];
   detailsOnly?: boolean;
+  projectId: string;
+  attachmentRevision: string;
+  readAttachment: (input: { projectId: string; ref: string; attachmentId: string }) => Promise<AttachmentReadData>;
+  onOpenUrl: (url: string) => void;
   onLabels: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -284,6 +459,8 @@ function WorkRow({
         </View>
       </View>
       {work.kind === "goal" ? <RecordContext key={work.ref} work={work} theme={theme} /> : null}
+      {work.attachments?.length ? <RecordAttachments key={`${attachmentRevision}:${work.ref}`} work={work} projectId={projectId}
+        theme={theme} readAttachment={readAttachment} onOpenUrl={onOpenUrl} /> : null}
       {managed ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
         Managers: {managerOwners.map((owner) => owner.contact || `${owner.runtime} ${owner.session_id} on ${owner.host}`).join("; ")}
       </Text> : null}
@@ -458,7 +635,7 @@ function CloseWorkDialog({ work, onOpenChange, onConfirm, busy, theme }: {
           </>
         ) : (
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 }}>
-            This marks the Goal closed in Clips. It does not record engineering acceptance.
+            This marks the Goal closed in Lanes. It does not record engineering acceptance.
           </Text>
         )}
         <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
@@ -535,7 +712,7 @@ function FilterChip({
     <Pressable
       accessibilityRole="button"
       aria-pressed={selected}
-      accessibilityLabel={`Show ${title.toLowerCase()} Clips work`}
+      accessibilityLabel={`Show ${title.toLowerCase()} Lanes work`}
       onPress={onPress}
       style={{
         paddingVertical: 7, paddingHorizontal: 11,
@@ -551,6 +728,37 @@ function FilterChip({
   );
 }
 
+function CollaborationControl({ capability, pending, error, theme, onToggle }: {
+  capability: CollaborationCapability | null | undefined;
+  pending: boolean;
+  error: string;
+  theme: Theme;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const enabled = capability?.enabled;
+  const available = typeof enabled === "boolean" && capability?.state !== "invalid";
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+      <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
+        GitHub collaboration: {available ? enabled ? "On" : "Off" : "Unavailable"}
+      </Text>
+      <Action
+        label={available ? enabled ? "Turn off" : "Turn on" : "Unavailable"}
+        accessibilityLabel={`${available ? enabled ? "Turn off" : "Turn on" : "Unavailable"} GitHub collaboration`}
+        theme={theme}
+        subtle
+        disabled={pending || !available}
+        onPress={() => onToggle(!enabled)}
+      />
+      <Text style={{ flexBasis: "100%", color: theme.colors.foregroundMuted, fontSize: 12 }}>
+        Local-only setting. Toggling does not publish; later supported record changes may sync while enabled.
+      </Text>
+      {capability?.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{capability.error}</Text> : null}
+      {error ? <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
+    </View>
+  );
+}
+
 export function WorkScreen({
   theme, layout, host, navigation, onOpenSettings, onOpenLanePanel, preferredProjectId,
   currentWorkspaceId, currentWorkspaceProjectId,
@@ -563,6 +771,8 @@ export function WorkScreen({
 }) {
   const fetchProjects = useRpc(projectsRpc);
   const fetchBoard = useRpc(boardRpc);
+  const fetchAttachment = useRpc(attachmentReadRpc);
+  const updateCollaboration = useRpc(collaborationRpc);
   const launch = useRpc(startRpc);
   const close = useRpc(closeRpc);
   const settings = useSettings(preferences);
@@ -592,6 +802,14 @@ export function WorkScreen({
     enabled: Boolean(projectId),
     refetchInterval: 15_000,
   });
+  const attachmentRevision = `${host.id}:${projectId ?? ""}:${board.data?.generatedAt ?? ""}`;
+  const [collaborationRequest, setCollaborationRequest] = useState<{
+    projectId: string; pending: boolean; error: string;
+  } | null>(null);
+  const collaborationPending = Boolean(collaborationRequest &&
+    collaborationRequest.projectId === projectId && collaborationRequest.pending);
+  const collaborationError = collaborationRequest && collaborationRequest.projectId === projectId
+    ? collaborationRequest.error : "";
   const runtime = useRuntime(host.id);
   const [filter, setFilter] = useState<WorkFilter>("open");
   const [search, setSearch] = useState("");
@@ -730,6 +948,30 @@ export function WorkScreen({
     },
   });
 
+  const toggleCollaboration = async (enabled: boolean) => {
+    const selectedProjectId = projectId;
+    if (!selectedProjectId || collaborationPending) return;
+    setCollaborationRequest({ projectId: selectedProjectId, pending: true, error: "" });
+    try {
+      const data = await updateCollaboration({ projectId: selectedProjectId, enabled });
+      cache.setQueryData(["clips.board", host.id, selectedProjectId], data);
+      setCollaborationRequest({ projectId: selectedProjectId, pending: false, error: "" });
+      toast.show(`GitHub collaboration ${enabled ? "enabled" : "disabled"} in local project configuration.`, { variant: "success" });
+    } catch (error) {
+      const text = message(error);
+      setCollaborationRequest({ projectId: selectedProjectId, pending: false, error: text });
+      toast.show(`Could not update local collaboration configuration: ${text}`, { variant: "error" });
+    }
+  };
+  const readAttachment = (input: { projectId: string; ref: string; attachmentId: string }) => fetchAttachment(input);
+  const openAttachmentUrl = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      toast.show(`Could not open attachment link: ${message(error)}`, { variant: "error" });
+    }
+  };
+
   const requestStart = (ref: string, mode: StartMode, workspaceId?: string) => {
     if (mode === "workspace") {
       create.mutate({ ref, mode });
@@ -800,6 +1042,10 @@ export function WorkScreen({
         .filter((workspace) => project?.projectIds.includes(workspace.projectId))
         .map(({ id, name }) => ({ id, name }))}
       detailsOnly={detailsOnly}
+      projectId={projectId!}
+      attachmentRevision={attachmentRevision}
+      readAttachment={readAttachment}
+      onOpenUrl={(url) => { void openAttachmentUrl(url); }}
       onLabels={() => setLabelTarget({ hostId: host.id, projectId: projectId!, ref: work.ref })}
     />
   );
@@ -836,11 +1082,11 @@ export function WorkScreen({
       padding: layout.compact ? 14 : 24, gap: 16, paddingBottom: 64,
     }}>
       {laneInFocus ? (
-        <Pressable accessibilityRole="button" accessibilityLabel="Back to Clips"
+        <Pressable accessibilityRole="button" accessibilityLabel="Back to Lanes"
           onPress={() => selectFocus(null)}
           style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 }}>
           <Icon name="ArrowLeft" size={15} color={theme.colors.foregroundMuted} />
-          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Back to Clips</Text>
+          <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Back to Lanes</Text>
         </Pressable>
       ) : null}
       {labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork} projectId={projectId}
@@ -849,9 +1095,9 @@ export function WorkScreen({
         onClose={() => setLabelTarget(null)} /> : null}
       <View style={{ flexDirection: "row", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={{ color: theme.colors.foreground, fontSize: 21, fontWeight: "700" }}>{laneInFocus?.title ?? "Clips"}</Text>
+          <Text style={{ color: theme.colors.foreground, fontSize: 21, fontWeight: "700" }}>{laneInFocus?.title ?? "Lanes"}</Text>
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
-            {laneInFocus ? `${laneInFocus.ref} · Goals and Tasks` : "Plan in Clips · Execute in Paseo"}
+            {laneInFocus ? `${laneInFocus.ref} · Goals and Tasks` : "Plan in Lanes · Execute in Paseo"}
           </Text>
           {laneInFocus ? <LabelChips labels={laneInFocus.labels ?? []} theme={theme} /> : null}
         </View>
@@ -878,7 +1124,7 @@ export function WorkScreen({
           </View> : null}
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Refresh Clips and Paseo"
+            accessibilityLabel="Refresh Lanes and Paseo"
             onPress={() => {
               void cache.invalidateQueries({ queryKey: ["clips.projects", host.id] });
               void cache.invalidateQueries({ queryKey: ["clips.board", host.id] });
@@ -890,29 +1136,44 @@ export function WorkScreen({
           </Pressable>
         </View>
         {onOpenSettings ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Clips settings" onPress={onOpenSettings} style={{ padding: 8 }}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Lanes settings" onPress={onOpenSettings} style={{ padding: 8 }}>
             <Icon name="Settings" size={18} color={theme.colors.foregroundMuted} />
           </Pressable>
         ) : null}
       </View>
       {laneInFocus ? <RecordContext key={laneInFocus.ref} work={laneInFocus} theme={theme} /> : null}
+      {laneInFocus && projectId ? <RecordAttachments
+        key={`${attachmentRevision}:${laneInFocus.ref}`}
+        work={laneInFocus}
+        projectId={projectId}
+        theme={theme}
+        readAttachment={readAttachment}
+        onOpenUrl={(url) => { void openAttachmentUrl(url); }}
+      /> : null}
       {projects.isLoading ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
-      {projects.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not find Clips projects: {message(projects.error)}</Text> : null}
+      {projects.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not find Lanes projects: {message(projects.error)}</Text> : null}
       {projects.data && !projects.data.projects.length ? (
         <Text style={{ color: theme.colors.foregroundMuted, lineHeight: 21 }}>
-          No Paseo Git project on this host has an initialized .clips/ store. Add a project to Paseo and run clips init inside it.
+          No Paseo Git project on this host has an initialized Lanes store. Add a project to Paseo and run lanes init inside it.
         </Text>
       ) : null}
       {projects.data && project ? (
         <ProjectPicker projects={projects.data.projects} selected={project.projectId}
           onSelect={setSelected} theme={theme} />
       ) : null}
+      {project ? <CollaborationControl
+        capability={board.data?.collaboration}
+        pending={Boolean(collaborationPending)}
+        error={collaborationError}
+        theme={theme}
+        onToggle={(enabled) => { void toggleCollaboration(enabled); }}
+      /> : null}
       {project ? (
         <>
           {currentWorkspaceId && project && currentWorkspaceProjectId &&
           !project.projectIds.includes(currentWorkspaceProjectId) ? (
             <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>
-              Switch to this workspace’s project before running Clips work here.
+              Switch to this workspace’s project before running Lanes work here.
             </Text>
           ) : null}
           <View style={{
@@ -928,7 +1189,7 @@ export function WorkScreen({
               </Text>
             ) : null}
             <TextInput
-              accessibilityLabel="Search Clips work"
+              accessibilityLabel="Search Lanes work"
               placeholder={laneInFocus ? "Search this lane’s Goals and Tasks" : "Search Lanes, Goals and Tasks"}
               value={search}
               onChangeText={setSearch}
@@ -982,10 +1243,10 @@ export function WorkScreen({
             </View>
           ) : null}
           {board.isPending ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
-          {board.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not read Clips: {message(board.error)}</Text> : null}
+          {board.isError ? <Text style={{ color: theme.colors.statusDanger }}>Could not read Lanes: {message(board.error)}</Text> : null}
           {board.data?.warnings.length ? (
             <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>
-              Clips reported {board.data.warnings.length} data warning(s): {short(board.data.warnings.join("; "), 300)}
+              Lanes reported {board.data.warnings.length} data warning(s): {short(board.data.warnings.join("; "), 300)}
             </Text>
           ) : null}
           {laneInFocus && focusGroup ? (
@@ -1110,7 +1371,7 @@ export function WorkScreen({
           )}
           {!laneInFocus && noResults ? (
             <Text style={{ padding: 14, color: theme.colors.foregroundMuted }}>
-              No Clips work matches this filter. The Running filter only counts active Paseo agents, not Clips records marked in_progress.
+              No Lanes work matches this filter. The Running filter only counts active Paseo agents, not Lanes records marked in_progress.
             </Text>
           ) : null}
           <CloseWorkDialog key={closingWork?.ref ?? "none"} work={closingWork} onOpenChange={(open) => {

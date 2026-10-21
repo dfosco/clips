@@ -7,9 +7,22 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { WorkScreen } from "./work-screen";
 import { branchName } from "../shared/work";
 
-const state = vi.hoisted(() => ({ projects: [] as any[], board: { lanes: [] as any[], goals: [] as any[], warnings: [] }, runtime: { workspaces: [] as any[], agents: [] as any[] }, runtimeError: null as Error | null, mutation: undefined as any, invalidations: [] as any[] }));
+const state = vi.hoisted(() => ({
+  projects: [] as any[],
+  board: { lanes: [] as any[], goals: [] as any[], warnings: [] },
+  runtime: { workspaces: [] as any[], agents: [] as any[] },
+  runtimeError: null as Error | null,
+  mutation: undefined as any,
+  invalidations: [] as any[],
+  readAttachment: vi.fn(),
+  updateCollaboration: vi.fn(),
+  openUrl: vi.fn(),
+  toast: vi.fn(),
+}));
 vi.mock("@getpaseo/plugin/client", () => ({
-  useRpc: () => vi.fn(), useSettings: () => ({ status: "ready", values: {} }),
+  useRpc: (rpc: { name?: string }) => rpc.name === "clips.attachment.read" ? state.readAttachment
+    : rpc.name === "clips.collaboration.set" ? state.updateCollaboration : vi.fn(),
+  useSettings: () => ({ status: "ready", values: {} }),
 }));
 vi.mock("@getpaseo/plugin/client/react-native", () => ({
   Icon: () => null,
@@ -17,29 +30,37 @@ vi.mock("@getpaseo/plugin/client/react-native", () => ({
     Content: ({ children }: any) => createElement("div", null, children),
   }),
   TextInput: ({ accessibilityLabel, placeholder }: any) => createElement("input", { "aria-label": accessibilityLabel, placeholder }),
-  useToast: () => ({ show: vi.fn() }),
+  useToast: () => ({ show: state.toast }),
   ScrollView: ({ children, accessibilityLabel, style }: any) => createElement("section", {
     "aria-label": accessibilityLabel,
     "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
   }, children),
 }));
 vi.mock("react-native", () => ({
-  View: ({ children, accessibilityRole, style }: any) => createElement("div", {
+  View: ({ children, accessibilityRole, accessibilityLabel, style }: any) => createElement("div", {
     role: accessibilityRole,
+    "aria-label": accessibilityLabel,
     "data-position": style?.position,
     "data-max-width": style?.maxWidth == null ? undefined : String(style.maxWidth),
     "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
   }, children),
-  Text: ({ children }: any) => createElement("span", null, children),
+  Text: ({ children, accessibilityRole, accessibilityLabel, onPress }: any) =>
+    createElement("span", { role: accessibilityRole, "aria-label": accessibilityLabel, onClick: onPress }, children),
   Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, role: accessibilityRole, disabled, onClick: onPress }, children),
   TextInput: ({ accessibilityLabel, value, onChangeText }: any) => createElement("input", {
     "aria-label": accessibilityLabel, value, onInput: (event: any) => onChangeText?.(event.currentTarget.value),
   }),
   ActivityIndicator: () => null,
+  Linking: { openURL: state.openUrl },
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: any) => ({ data: queryKey[0] === "clips.projects" ? { projects: state.projects } : state.board }),
-  useQueryClient: () => ({ invalidateQueries: async ({ queryKey }: any) => { state.invalidations.push(queryKey); } }),
+  useQueryClient: () => ({
+    invalidateQueries: async ({ queryKey }: any) => { state.invalidations.push(queryKey); },
+    setQueryData: (queryKey: any[], value: any) => {
+      if (queryKey[0] === "clips.board") state.board = value;
+    },
+  }),
   useMutation: (options: any) => {
     if (!state.mutation) state.mutation = options;
     return { isPending: false, mutate: vi.fn() };
@@ -60,6 +81,28 @@ const props = { host: { id: "host" }, layout: { compact: false }, theme: { color
 function render(focused = true) {
   return renderToStaticMarkup(createElement(WorkScreen, { ...props, ...(focused ? { currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" } : {}) }));
 }
+async function mountScreen(extra: Record<string, unknown> = {}) {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const previousAct = (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const renderView = () => root.render(createElement(WorkScreen, {
+    ...props,
+    preferredProjectId: "p1",
+    currentWorkspaceId: undefined,
+    currentWorkspaceProjectId: undefined,
+    ...extra,
+  }));
+  await act(async () => { renderView(); });
+  return {
+    container,
+    rerender: async () => { await act(async () => { renderView(); }); },
+    unmount: async () => {
+      await act(async () => { root.unmount(); });
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = previousAct;
+    },
+  };
+}
 
 beforeEach(() => {
   state.projects = [{ projectId: "p1", projectIds: ["p1"], label: "Project" }];
@@ -68,6 +111,220 @@ beforeEach(() => {
   state.mutation = undefined;
   state.runtimeError = null;
   state.invalidations = [];
+  state.readAttachment.mockReset();
+  state.updateCollaboration.mockReset();
+  state.openUrl.mockReset();
+  state.toast.mockReset();
+});
+
+describe("attachments and collaboration", () => {
+  it("shows scoped attachment metadata, reads current Markdown on demand, and refreshes away stale content", async () => {
+    const live = {
+      ref: "#l001", revision: 4,
+      attachment: {
+        id: "lane-md", type: "markdown", title: "Runbook", status: "available",
+        content: "# Live runbook\n[safe](https://example.com/docs) [unsafe](javascript:alert(1))\n<script>window.pwned=1</script>",
+        content_semantics: "current_file",
+      },
+    };
+    const laneWithAttachment = {
+      ...lane, attachments: [{
+        id: "lane-md", type: "markdown", title: "Runbook", status: "available",
+        content: "stale board projection must not appear",
+      }],
+    };
+    const goalWithAttachments = {
+      ...goal,
+      attachments: [{
+        id: "github-issue", type: "github_issue", title: "Related issue",
+        url: "https://github.com/dfosco/clips/issues/1", status: "remote",
+      }, {
+        id: "unreadable-md", type: "markdown", title: "Private note", status: "unreadable",
+      }],
+      tasks: [{
+        ...task,
+        attachments: [{
+          id: "unsafe-url", type: "url", title: "Unsafe reference",
+          url: "javascript:alert(1)", status: "remote",
+        }, {
+          id: "missing-md", type: "markdown", title: "Missing file", status: "missing",
+        }],
+      }],
+    };
+    state.board = {
+      lanes: [laneWithAttachment], goals: [goalWithAttachments, outside], warnings: [],
+      generatedAt: "first",
+      collaboration: { enabled: false, state: "disabled", scope: "project", automatic_mutation_sync: false },
+    };
+    state.readAttachment.mockImplementation(async ({ ref }: { ref: string }) => ({
+      ...live, ref,
+    }));
+    const screen = await mountScreen();
+    try {
+      expect(screen.container.querySelector('[aria-label="Attachments for #l001"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Related issue");
+      expect(screen.container.querySelector('[role="link"][aria-label="Open Related issue"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Unreadable");
+      expect(screen.container.textContent).not.toContain("stale board projection");
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click();
+      });
+      expect(screen.container.textContent).toContain("Unsafe link omitted");
+      expect(screen.container.textContent).toContain("The attached Markdown file is missing.");
+
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click();
+      });
+      const focus = [...screen.container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent === "Focus lane");
+      expect(focus).toBeDefined();
+      await act(async () => { focus!.click(); });
+      expect(screen.container.querySelector('[aria-label="Attachments for #l001"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Runbook");
+
+      const read = screen.container.querySelector<HTMLButtonElement>('[aria-label="Read current Markdown for #l001: Runbook"]')!;
+      await act(async () => { read.click(); });
+      expect(state.readAttachment).toHaveBeenCalledWith({ projectId: "p1", ref: "#l001", attachmentId: "lane-md" });
+      expect(screen.container.textContent).toContain("Live runbook");
+      expect(screen.container.textContent).not.toContain("stale board projection");
+      expect(screen.container.querySelector("script")).toBeNull();
+      const inlineSafeLink = [...screen.container.querySelectorAll<HTMLElement>('[role="link"]')]
+        .find((element) => element.textContent === "safe");
+      expect(inlineSafeLink).not.toBeNull();
+      expect(screen.container.querySelector('[role="link"][aria-label="unsafe"]')).toBeNull();
+      await act(async () => { inlineSafeLink!.click(); });
+      expect(state.openUrl).toHaveBeenCalledWith("https://example.com/docs");
+
+      state.board = {
+        ...state.board, generatedAt: "second",
+        lanes: [{ ...laneWithAttachment, attachments: [{ ...laneWithAttachment.attachments[0], status: "missing", content: null }] }],
+      };
+      live.attachment = { ...live.attachment, status: "missing", content: null, error: "File no longer exists." };
+      await screen.rerender();
+      expect(screen.container.textContent).not.toContain("Live runbook");
+      expect(screen.container.textContent).toContain("Missing");
+      expect(screen.container.querySelector('[aria-label="Read current Markdown for #l001: Runbook"]')).not.toBeNull();
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Read current Markdown for #l001: Runbook"]')!.click();
+      });
+      expect(screen.container.textContent).toContain("File no longer exists.");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps an attachment read pending while another attachment resolves", async () => {
+    let resolveA!: (value: any) => void;
+    let resolveB!: (value: any) => void;
+    const firstA = new Promise<any>((resolve) => { resolveA = resolve; });
+    const readB = new Promise<any>((resolve) => { resolveB = resolve; });
+    let aReads = 0;
+    state.readAttachment.mockImplementation(({ attachmentId }: { attachmentId: string }) => {
+      if (attachmentId === "lane-a") {
+        aReads += 1;
+        return aReads === 1 ? firstA : Promise.resolve({
+          ref: "#l001", revision: 3,
+          attachment: { id: "lane-a", type: "markdown", title: "A", status: "available", content: "Latest A content" },
+        });
+      }
+      return readB;
+    });
+    state.board = {
+      lanes: [{
+        ...lane,
+        attachments: [
+          { id: "lane-a", type: "markdown", title: "A", status: "available" },
+          { id: "lane-b", type: "markdown", title: "B", status: "available" },
+        ],
+      }],
+      goals: [goal, outside], warnings: [],
+    };
+    const screen = await mountScreen();
+    const button = (title: string) => screen.container.querySelector<HTMLButtonElement>(
+      `[aria-label="Read current Markdown for #l001: ${title}"]`,
+    )!;
+    try {
+      await act(async () => { button("A").click(); });
+      await act(async () => { button("B").click(); });
+      expect(button("A").disabled).toBe(true);
+      expect(button("B").disabled).toBe(true);
+
+      await act(async () => {
+        resolveB({
+          ref: "#l001", revision: 2,
+          attachment: { id: "lane-b", type: "markdown", title: "B", status: "available", content: "B content" },
+        });
+        await readB;
+      });
+      expect(screen.container.textContent).toContain("B content");
+      expect(button("A").disabled).toBe(true);
+      expect(state.readAttachment).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        resolveA({
+          ref: "#l001", revision: 1,
+          attachment: { id: "lane-a", type: "markdown", title: "A", status: "available", content: "First A content" },
+        });
+        await firstA;
+      });
+      expect(screen.container.textContent).toContain("First A content");
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh current Markdown for #l001: A"]')!.click();
+      });
+      expect(screen.container.textContent).toContain("Latest A content");
+      expect(screen.container.textContent).not.toContain("First A content");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps collaboration project-local, preserves the focused record, and displays toggle failures", async () => {
+    state.board = {
+      lanes: [lane], goals: [goal, outside], warnings: [],
+      collaboration: { enabled: false, state: "disabled", scope: "project", automatic_mutation_sync: false },
+    };
+    state.updateCollaboration.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({
+      ...state.board,
+      collaboration: {
+        ...state.board.collaboration,
+        enabled, state: enabled ? "enabled" : "disabled", automatic_mutation_sync: enabled,
+      },
+    }));
+    const screen = await mountScreen();
+    try {
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click();
+      });
+      const focus = [...screen.container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent === "Focus lane");
+      await act(async () => { focus!.click(); });
+      expect(screen.container.textContent).toContain("Publish releases");
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Turn on GitHub collaboration"]')!.click();
+      });
+      expect(state.updateCollaboration).toHaveBeenCalledWith({ projectId: "p1", enabled: true });
+      expect(screen.container.textContent).toContain("GitHub collaboration: On");
+      expect(screen.container.textContent).toContain("later supported record changes may sync while enabled");
+      expect(screen.container.textContent).toContain("Publish releases");
+      expect(state.toast).toHaveBeenCalledWith(
+        "GitHub collaboration enabled in local project configuration.",
+        { variant: "success" },
+      );
+
+      state.updateCollaboration.mockRejectedValueOnce(new Error("local config write failed"));
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Turn off GitHub collaboration"]')!.click();
+      });
+      expect(screen.container.textContent).toContain("local config write failed");
+      expect(state.toast).toHaveBeenCalledWith(
+        "Could not update local collaboration configuration: local config write failed",
+        { variant: "error" },
+      );
+      expect(state.invalidations.some((key) => key[0] === "clips.board")).toBe(false);
+    } finally {
+      await screen.unmount();
+    }
+  });
 });
 
 describe("focused lane rendering", () => {
@@ -126,7 +383,7 @@ describe("focused lane rendering", () => {
 
       // The screenshot shows only #g146 while the full Lane includes #g144 too.
       // Search narrows the rendered view and its count; clearing search restores both.
-      const search = container.querySelector<HTMLInputElement>('[aria-label="Search Clips work"]')!;
+      const search = container.querySelector<HTMLInputElement>('[aria-label="Search Lanes work"]')!;
       await act(async () => {
         search.value = "#g146";
         search.dispatchEvent(new Event("input", { bubbles: true }));
@@ -249,7 +506,7 @@ describe("focused lane rendering", () => {
       await click("Hide Goal details #g001");
       expect(container.textContent).not.toContain("Ship package");
       expect(container.textContent).toContain("Second Task");
-      await click("Back to Clips");
+      await click("Back to Lanes");
       expect(container.querySelector('[aria-label="Project lanes"]')).not.toBeNull();
       expect(container.textContent).not.toContain("Ship package");
       expect(container.textContent).toContain("Second Task");
@@ -277,7 +534,7 @@ describe("focused lane rendering", () => {
       await act(async () => { root.render(createElement(WorkScreen, { ...props, currentWorkspaceId: "w1", currentWorkspaceProjectId: "p1" })); });
       await act(async () => {
         if (filter === "search") {
-          const input = container.querySelector<HTMLInputElement>('[aria-label="Search Clips work"]')!;
+          const input = container.querySelector<HTMLInputElement>('[aria-label="Search Lanes work"]')!;
           input.value = "Ship package";
           input.dispatchEvent(new Event("input", { bubbles: true }));
         } else {
@@ -351,7 +608,7 @@ describe("focused lane rendering", () => {
       }
       expect(container.querySelector('[aria-label="More actions for lane #l001"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Labels for #l001"]')).toBeNull();
-      expect(container.querySelector('[aria-label="Back to Clips"]')).not.toBeNull();
+      expect(container.querySelector('[aria-label="Back to Lanes"]')).not.toBeNull();
       expect(container.querySelector('[aria-label="Run"]')).not.toBeNull();
       expect(container.textContent).not.toContain("Ship package");
     } finally {
@@ -497,7 +754,7 @@ describe("focused lane rendering", () => {
 
   it("places Back above lane title and exposes collapsed goal columns", () => {
     const html = render();
-    expect(html.indexOf("Back to Clips")).toBeLessThan(html.indexOf("Publish releases"));
+    expect(html.indexOf("Back to Lanes")).toBeLessThan(html.indexOf("Publish releases"));
     expect(html).toContain('aria-label="Lane goals"');
     expect(html).toContain("Package publishing");
     expect(html).not.toContain("Ship package");
@@ -579,7 +836,7 @@ describe("focused lane rendering", () => {
     const html = render(false);
     expect(html).toContain('aria-label="Project lanes"');
     expect(html).toContain("Unrelated goal");
-    expect(html).not.toContain("Back to Clips");
+    expect(html).not.toContain("Back to Lanes");
   });
 
   it("offers Show closed goals for an all-closed lane and names empty lanes", () => {
@@ -598,7 +855,7 @@ describe("focused lane rendering", () => {
     const html = renderToStaticMarkup(createElement(WorkScreen, { ...props, layout: { ...props.layout, compact: true }, currentWorkspaceId: "w1" }));
     expect(html).toContain("Package publishing");
     expect(html).not.toContain("Ship package");
-    expect(html).toContain("Back to Clips");
+    expect(html).toContain("Back to Lanes");
   });
 
   it.each(["running", "initializing", "attention"])("replaces goal launch and workspace actions while %s", (status) => {

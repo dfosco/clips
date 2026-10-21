@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, realpath, rm, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { createCanvasService as realCreateCanvasService } from './service.mjs';
 import { CANVAS_BRIDGE_VERSION } from '../src/canvas-build.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { discoverClipsProjects, resolveClipsProject } from '../src/project-discovery.js';
+import { readCurrentBoard } from '../../../src/commands/board.js';
 const fixtureProjects = ['/repo','/initial','/chosen','/explicit/project','/A','/B'].map((root) => ({ id: `project:${root}`, name: root, projectRoot: root, storeRoot: `${root}/.clips`, username: null }));
 const fixtureDiscovery = { async discoverClipsProjects() { return { projects: fixtureProjects, userScope: 'user-one', diagnostics: [] }; }, async resolveClipsProject(id) { const project = fixtureProjects.find((p) => p.id === id); if (!project) throw new Error('Unknown project'); return project; } };
 const createCanvasService = (options) => realCreateCanvasService({ projectDiscovery: fixtureDiscovery, ...options });
@@ -15,9 +17,11 @@ function fixture() {
   const calls = [];
   const sessions = [];
   const board = {
-    lanes: [{ ref: '#l001', lane_id: 'l001', title: 'Lane', status: 'in_progress', description: 'Lane context', labels: [], manager_claim: { revision: 0, owners: [] }, goal_refs: ['#g001'] }],
-    goals: [{ ref: '#g001', goal_id: 'g001', lane_id: 'l001', title: 'Goal', status: 'open', description: 'Goal context', labels: [], blocked_by: [], tasks: [
-      { ref: '#g001#t01', goal_id: 'g001', goal_ref: '#g001', goal_title: 'Goal', task_id: 't01', title: 'Task', status: 'open', description: 'Task context', labels: [] },
+    generated_at: '2026-10-20T12:00:00.000Z',
+    collaboration: { enabled: false, state: 'disabled', scope: 'project', automatic_mutation_sync: false, control: { command: 'untrusted descriptor' } },
+    lanes: [{ ref: '#l001', lane_id: 'l001', title: 'Lane', status: 'in_progress', description: 'Lane context', labels: [], attachments: [{ id: 'att-123e4567-e89b-12d3-a456-426614174000', type: 'markdown', title: 'Lane notes', status: 'available' }], manager_claim: { revision: 0, owners: [] }, goal_refs: ['#g001'] }],
+    goals: [{ ref: '#g001', goal_id: 'g001', lane_id: 'l001', title: 'Goal', status: 'open', description: 'Goal context', labels: [], blocked_by: [], attachments: [{ id: 'att-url', type: 'url', title: 'Design', url: 'https://example.com' }], tasks: [
+      { ref: '#g001#t01', goal_id: 'g001', goal_ref: '#g001', goal_title: 'Goal', task_id: 't01', title: 'Task', status: 'open', description: 'Task context', labels: [], attachments: [{ id: 'att-123e4567-e89b-12d3-a456-426614174001', type: 'markdown', title: 'Task notes', status: 'missing' }] },
     ] }],
     labels: [{ id: 'urgent', name: 'Urgent', color: '#ff0000' }],
     warnings: [],
@@ -27,6 +31,17 @@ function fixture() {
     async listBoard(projectPath) { calls.push(['listBoard', projectPath]); return board; },
     async viewRecord(ref, projectPath) { calls.push(['viewRecord', ref, projectPath]); return { ref, title: 'Full record' }; },
     async recordCommand(args, projectPath) { calls.push(['recordCommand', args, projectPath]); return { ok: true }; },
+    async readAttachment(ref, attachmentId, projectPath) {
+      calls.push(['readAttachment', ref, attachmentId, projectPath]);
+      return { id: attachmentId, type: 'markdown', title: 'Live notes', status: 'available', content: '# Current content', content_semantics: 'current_file' };
+    },
+    async setCollaboration(enabled, projectPath) {
+      calls.push(['setCollaboration', enabled, projectPath]);
+      board.collaboration.enabled = enabled;
+      board.collaboration.state = enabled ? 'enabled' : 'disabled';
+      board.collaboration.automatic_mutation_sync = enabled;
+      return 'updated locally';
+    },
     async listSessions(projectPath) { calls.push(['listSessions', projectPath]); return { sessions }; },
     async launchRecord(input) {
       calls.push(['launchRecord', input]);
@@ -95,10 +110,74 @@ test('human and agent actions share canonical record operations and reject unsaf
   assert.equal(taskCreate[2], '#g001');
   assert.deepEqual(JSON.parse(taskCreate[3]).acceptance_criteria, ['The action is observable.']);
   await assert.rejects(service.dispatch('actions', 'create_task', { goal_ref: '#g001', title: 'Weak Task' }), /needs 1–12 observable acceptance criteria/);
-  await assert.rejects(service.dispatch('actions', 'set_status', { ref: '#g001', status: 'force' }), /Unsupported Clips status/);
+  await assert.rejects(service.dispatch('actions', 'set_status', { ref: '#g001', status: 'force' }), /Unsupported Lanes status/);
   await assert.rejects(service.dispatch('actions', 'set_status', { ref: '#l001', status: 'closed' }), /Unsupported Lane status/);
   await assert.rejects(service.dispatch('actions', 'run_shell', { command: 'echo nope' }), /Unsupported canvas action/);
-  await assert.rejects(service.action({ instanceId: 'other', actionName: 'refresh' }), /Open Clips Work/);
+  await assert.rejects(service.action({ instanceId: 'other', actionName: 'refresh' }), /Open Lanes in this canvas instance first/);
+});
+
+test('live attachment reads are record-scoped and collaboration toggles only local configuration', async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), 'clips-canvas-attachments-'));
+  const f = fixture();
+  const service = createCanvasService({ runtime: f.runtime, dataDir });
+  t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+  await service.open({ instanceId: 'references', sessionId: 'host', session: { workingDirectory: '/repo' } });
+  await service.dispatch('references', 'focus', { ref: '#g001' });
+
+  const read = await service.dispatch('references', 'read_attachment', {
+    ref: '#g001#t01', attachmentId: 'att-123e4567-e89b-12d3-a456-426614174001',
+  });
+  assert.deepEqual(read, {
+    id: 'att-123e4567-e89b-12d3-a456-426614174001',
+    type: 'markdown', title: 'Live notes', status: 'available',
+    content: '# Current content', content_semantics: 'current_file',
+  });
+  assert.deepEqual(f.calls.find((call) => call[0] === 'readAttachment').slice(1), [
+    '#g001#t01', 'att-123e4567-e89b-12d3-a456-426614174001', '/repo',
+  ]);
+  await assert.rejects(service.dispatch('references', 'read_attachment', {
+    ref: '#g001#t01', attachmentId: 'att-123e4567-e89b-12d3-a456-426614174001', path: '/etc/passwd',
+  }), /only the exact record reference and attachment ID/);
+  await assert.rejects(service.dispatch('references', 'read_attachment', {
+    ref: '#g001#t01', attachmentId: 'att-not-associated',
+  }), /not associated/);
+
+  const updated = await service.dispatch('references', 'set_collaboration', { enabled: true });
+  assert.equal(updated.state.projectPath, '/repo');
+  assert.equal(updated.state.focus, '#g001');
+  assert.equal(updated.state.collaboration.enabled, true);
+  assert.deepEqual(f.calls.find((call) => call[0] === 'setCollaboration').slice(1), [true, '/repo']);
+  assert.equal(f.calls.some((call) => call[0] === 'recordCommand' && call[1][0] === 'sync'), false);
+  await assert.rejects(service.dispatch('references', 'set_collaboration', { enabled: true, command: 'sync' }), /only an enabled boolean/);
+
+  f.board.collaboration = { enabled: null, state: 'invalid', error: 'Malformed project config' };
+  await assert.rejects(service.dispatch('references', 'set_collaboration', { enabled: false }), /Malformed project config/);
+  assert.equal(f.calls.filter((call) => call[0] === 'setCollaboration').length, 1);
+});
+
+test('collaboration revalidates the selected project before runtime access', async (t) => {
+  for (const invalidation of ['registry', 'user scope']) {
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), `clips-canvas-collaboration-${invalidation.replace(' ', '-')}-`));
+    const f = fixture();
+    let projects = [...fixtureProjects];
+    let userScope = 'user-one';
+    const projectDiscovery = {
+      ...fixtureDiscovery,
+      async discoverClipsProjects() { return { projects, userScope, diagnostics: [] }; },
+    };
+    const service = createCanvasService({ runtime: f.runtime, dataDir, projectDiscovery });
+    t.after(async () => { await service.shutdown(); await rm(dataDir, { recursive: true, force: true }); });
+    await service.open({ instanceId: `collaboration-${invalidation}`, sessionId: 'host', session: { workingDirectory: '/repo' } });
+    if (invalidation === 'registry') projects = projects.filter((project) => project.projectRoot !== '/repo');
+    else userScope = 'user-two';
+
+    const callsBefore = f.calls.length;
+    await assert.rejects(
+      service.dispatch(`collaboration-${invalidation}`, 'set_collaboration', { enabled: true }),
+      invalidation === 'registry' ? /no longer available/ : /user scope changed/,
+    );
+    assert.deepEqual(f.calls.slice(callsBefore), [], 'a stale project cannot trigger runtime reads or config writes');
+  }
 });
 
 test('sends associate the actual session without using or replacing Lane ownership', async (t) => {
@@ -167,7 +246,7 @@ test('missing host directory defaults to first available only before explicit pr
   await service.open({ instanceId: 'no-cwd', sessionId: 'host', session: {} });
   assert.equal((await service.state('no-cwd')).projectPath, '/repo');
   assert.equal((await service.dispatch('no-cwd', 'context')).selectionSource, 'first_available');
-  await assert.rejects(service.dispatch('no-cwd', 'set_project', { projectPath: 'relative/path' }), /exact discovered Clips project ID/);
+  await assert.rejects(service.dispatch('no-cwd', 'set_project', { projectPath: 'relative/path' }), /exact discovered Lanes project ID/);
   const selected = await service.dispatch('no-cwd', 'set_project', { projectId: 'project:/explicit/project' });
   assert.equal(selected.projectPath, '/explicit/project');
 });
@@ -222,7 +301,7 @@ test('minimal initialization targets only actual session directory without a boa
   };
   f.runtime.initializeProject = async target => {
     calls++; assert.equal(target, dir); entered(); await gate;
-    execFileSync(process.execPath, [fileURLToPath(new URL('../../../src/cli.js', import.meta.url)), 'init', '--store-only'], { cwd: target, env: { ...process.env, CLIPS_HOME: path.join(dir, 'home') } });
+    execFileSync(process.execPath, [fileURLToPath(new URL('../../../src/cli.js', import.meta.url)), 'init', '--store-only'], { cwd: target, env: { ...process.env, LANES_HOME: path.join(dir, 'home'), CLIPS_HOME: path.join(dir, 'home') } });
     projects = [current];
   };
   const service = createCanvasService({ runtime: f.runtime, dataDir: path.join(dir, 'data'), projectDiscovery });
@@ -241,7 +320,69 @@ test('minimal initialization targets only actual session directory without a boa
   assert.equal(calls, 1); assert.equal(result.projectId, current.id); assert.equal(result.state.projectPath, dir);
   assert.equal(result.state.canInitializeCurrentDirectory, false);
   assert.equal((await service.dispatch('init', 'list_projects')).currentProjectId, current.id);
-  await assert.rejects(service.dispatch('init', 'initialize_current_directory'), /already has a Clips store/);
+  await assert.rejects(service.dispatch('init', 'initialize_current_directory'), /already has a Lanes store/);
+});
+
+test('saved explicit project and focus survive real project/default-home migration', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lanes-canvas-migration-')));
+  const previous = Object.fromEntries(['HOME', 'LANES_HOME', 'CLIPS_HOME'].map(key => [key, process.env[key]]));
+  const services = [];
+  t.after(async () => {
+    await Promise.all(services.map(service => service.shutdown()));
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await rm(root, { recursive: true, force: true });
+  });
+  const home = path.join(root, 'user');
+  process.env.HOME = home;
+  delete process.env.LANES_HOME;
+  delete process.env.CLIPS_HOME;
+  await mkdir(path.join(home, '.clips'), { recursive: true });
+  const projects = [];
+  for (const name of ['current', 'chosen']) {
+    const repo = path.join(root, name);
+    await mkdir(path.join(repo, '.clips', 'db'), { recursive: true });
+    execFileSync('git', ['init', '--quiet', repo]);
+    await writeFile(path.join(repo, '.clips', 'clips.config.json'), '{}');
+    await writeFile(path.join(repo, '.clips', 'db', 'g001.jsonl'), JSON.stringify({
+      event: 'goal_created', goal_id: 'g001', title: name, timestamp: '2026-01-01T00:00:00.000Z',
+    }) + '\n');
+    projects.push(repo);
+  }
+  await writeFile(path.join(home, '.clips', 'projects.json'), JSON.stringify({ projects: projects.map(repo => ({ path: repo })) }));
+  const make = () => {
+    const f = fixture();
+    f.runtime.listBoard = async repo => readCurrentBoard(repo);
+    const service = realCreateCanvasService({ runtime: f.runtime, dataDir: path.join(root, 'canvas-data'),
+      projectDiscovery: { discoverClipsProjects, resolveClipsProject } });
+    services.push(service);
+    return service;
+  };
+  const context = { instanceId: 'persisted', sessionId: 'actual-fixture', session: { workingDirectory: projects[0] } };
+  const before = make();
+  await before.open(context);
+  const catalog = await before.dispatch('persisted', 'list_projects');
+  const chosen = catalog.projects.find(project => project.projectRoot === projects[1]);
+  await before.dispatch('persisted', 'set_project', { projectId: chosen.id });
+  await before.dispatch('persisted', 'focus', { ref: '#g001' });
+  await before.shutdown();
+  execFileSync(process.execPath, [fileURLToPath(new URL('../../../src/cli.js', import.meta.url)),
+    'init', '--skills-scope', 'project'], {
+    cwd: projects[1], env: { ...process.env, LANES_SWITCH_INIT: '1', CLIPS_SWITCH_INIT: '1' }, stdio: 'pipe',
+  });
+  const after = make();
+  await after.open(context);
+  const state = await after.state('persisted');
+  assert.equal(state.selectionSource, 'saved');
+  assert.equal(state.selectedProject.id, chosen.id);
+  assert.equal(state.projectPath, projects[1], 'saved choice must win over the current directory');
+  assert.equal(state.selectedProject.storeRoot, path.join(projects[1], '.lanes'));
+  assert.equal(state.focus, '#g001');
+  assert.equal(state.canInitializeCurrentDirectory, false, 'legacy current project is already initialized');
+  const reopened = make();
+  await reopened.open({ ...context, instanceId: 'canonical-current', session: { workingDirectory: projects[1] } });
+  assert.equal((await reopened.state('canonical-current')).canInitializeCurrentDirectory, false);
 });
 
 test('the actual joined session is required but absent host and unreadable ownership are advisory', async (t) => {
@@ -417,7 +558,7 @@ test('user scope isolates persisted choice/focus and removed selected source nev
   const first = make(); await first.open(ctx); await first.dispatch('panel', 'set_project', { projectId: 'project:/B' }); await first.dispatch('panel', 'focus', { ref: '#g001' }); await first.shutdown();
   userScope = 'second'; const second = make(); await second.open(ctx); assert.equal((await second.state('panel')).projectPath, '/A'); assert.equal((await second.state('panel')).focus, null); await second.shutdown();
   userScope = 'first'; available = available.filter((p) => p.projectRoot !== '/B');
-  const reopened = make(); await reopened.open(ctx); await assert.rejects(reopened.state('panel'), /selected Clips project is no longer available/);
+  const reopened = make(); await reopened.open(ctx); await assert.rejects(reopened.state('panel'), /selected Lanes project is no longer available/);
   assert.equal((await reopened.dispatch('panel', 'context')).projectPath, null);
   const selected = await reopened.dispatch('panel', 'set_project', { projectId: 'project:/A' }); assert.equal(selected.projectPath, '/A');
   await assert.rejects(reopened.dispatch('panel', 'set_project', { projectPath: '/A' }), /exact discovered/);
@@ -474,7 +615,7 @@ test('JSON-valid malformed persisted selections open the chooser without TypeErr
     await writeFile(path.join(dataDir, 'projects', file), JSON.stringify(bad));
     const service = make(); await service.open(ctx);
     assert.equal((await service.dispatch('panel', 'context')).projectPath, null);
-    await assert.rejects(service.state('panel'), /Saved Clips project selection is invalid/);
+    await assert.rejects(service.state('panel'), /Saved Lanes project selection is invalid/);
     assert.ok((await service.dispatch('panel', 'list_projects')).projects.length);
     await service.shutdown();
   }

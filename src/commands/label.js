@@ -132,36 +132,36 @@ export function runLabelCommand([action, ...args]) {
   let result;
   switch (action) {
     case 'list':
-      if (args.some((a) => a !== '--json')) throw new Error('Use clips label list [--json]');
+      if (args.some((a) => a !== '--json')) throw new Error('Use lanes label list [--json]');
       result = labelCatalog(readLabelConfig()); break;
     case 'create': result = createLabel(readJsonInput(args)); break;
     case 'edit':
     case 'update': result = updateLabel(args[0], readJsonInput(args.slice(1))); break;
     case 'recolor':
-      if (args.length !== 2) throw new Error('Use clips label recolor <id> <#RRGGBB>');
+      if (args.length !== 2) throw new Error('Use lanes label recolor <id> <#RRGGBB>');
       result = updateLabel(args[0], { color: args[1] }); break;
     case 'uses':
-      if (args.length < 1 || args.slice(1).some((arg) => arg !== '--json')) throw new Error('Use clips label uses <id> [--json]');
+      if (args.length < 1 || args.slice(1).some((arg) => arg !== '--json')) throw new Error('Use lanes label uses <id> [--json]');
       result = labelUses(args[0]); break;
     case 'delete': {
-      if (!args.length) throw new Error('Use clips label delete <id> [--replace-with <active-id> | --remove-assignments]');
+      if (!args.length) throw new Error('Use lanes label delete <id> [--replace-with <active-id> | --remove-assignments]');
       let replacement;
       for (let index = 1; index < args.length; index += 1) {
         if (args[index] === '--replace-with' && args[index + 1] && !replacement) {
           replacement = { kind: 'label', id: args[index + 1] };
           index += 1;
         } else if (args[index] === '--remove-assignments' && !replacement) replacement = { kind: 'none' };
-        else throw new Error('Use clips label delete <id> [--replace-with <active-id> | --remove-assignments]');
+        else throw new Error('Use lanes label delete <id> [--replace-with <active-id> | --remove-assignments]');
       }
       result = deleteLabel(args[0], replacement); break;
     }
     case 'add':
     case 'remove':
-      if (args.length !== 2) throw new Error(`Use clips label ${action} <ref> <id>`);
+      if (args.length !== 2) throw new Error(`Use lanes label ${action} <ref> <id>`);
       result = assignLabel(args[0], args[1], action === 'add'); break;
     default:
       if (action && !['--help', '-h'].includes(action)) throw new Error(`Unknown label command: ${action}`);
-      console.log(`Usage: clips label <command>
+      console.log(`Usage: lanes label <command>
 
   list [--json]             List the project catalog
   create <json>             Create {id?, name, color}; default id is a name slug

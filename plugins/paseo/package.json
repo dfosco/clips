@@ -1,13 +1,14 @@
 {
-  "name": "@dfosco/clips-paseo",
+  "name": "@dfosco/lanes-paseo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.18.0"
   },
-  "description": "Paseo workspace integration for @dfosco/clips",
+  "description": "Paseo workspace integration for @dfosco/lanes",
   "scripts": {
+    "lanes-paseo": "node cli.js",
     "clips-paseo": "node cli.js",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.server.json",
     "test": "vitest run"
@@ -31,7 +32,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/dfosco/clips.git",
+    "url": "git+https://github.com/dfosco/lanes.git",
     "directory": "plugins/paseo"
   }
 }

@@ -26,6 +26,9 @@ describe('Lane Manager review handoff contract', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-review-rule-'));
     const previous = process.cwd();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.stubEnv('HOME', root);
+    vi.stubEnv('LANES_HOME', path.join(root, 'user-store'));
+    vi.stubEnv('CLIPS_HOME', path.join(root, 'user-store'));
     try {
       execFileSync('git', ['init', '-q', root]);
       fs.mkdirSync(path.join(root, '.clips', 'db'), { recursive: true });
@@ -33,8 +36,8 @@ describe('Lane Manager review handoff contract', () => {
         event: 'goal_created', goal_id: 'g001', title: 'Review fixture', status: 'in_progress',
       }) + '\n');
       process.chdir(root);
-      const create = rule.match(/^clips label create '(.+)'$/m);
-      const assign = rule.match(/^clips label add '([^']+)' ([a-z0-9-]+)$/m);
+      const create = rule.match(/^(?:lanes|clips) label create '(.+)'$/m);
+      const assign = rule.match(/^(?:lanes|clips) label add '([^']+)' ([a-z0-9-]+)$/m);
       expect(create).toBeTruthy();
       expect(assign).toBeTruthy();
       runLabelCommand(['create', create[1]]);
@@ -46,6 +49,7 @@ describe('Lane Manager review handoff contract', () => {
       expect(goal.acceptance).toBeUndefined();
     } finally {
       log.mockRestore();
+      vi.unstubAllEnvs();
       process.chdir(previous);
       fs.rmSync(root, { recursive: true, force: true });
     }
