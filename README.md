@@ -1,3 +1,9 @@
+<picture>
+  <source media="(prefers-color-scheme: light)" src="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165">
+  <source media="(prefers-color-scheme: dark)" src="https://github.com/user-attachments/assets/609e7caf-ada8-45c5-82b1-be14480f3223">
+   <img alt="Lanes logo" src="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165"
+</picture>
+
 # Lanes
 
 Lanes gives AI agents a shared structure of goals, tasks, and clear checks for
