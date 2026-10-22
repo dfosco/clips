@@ -71,7 +71,9 @@ it("preserves project IDs and board selection through actual init and aliases", 
   execFileSync(process.execPath, [cli, "init", "--skills-scope", "project"], {
     cwd: repo, env: { ...process.env, LANES_SWITCH_INIT: "1", CLIPS_SWITCH_INIT: "1" }, stdio: "pipe",
   });
-  expect(await localProjects(paseo)).toEqual(before);
+  const after = await localProjects(paseo);
+  expect(after).toMatchObject(before.map(({ projectId, projectIds, root, label }) => ({ projectId, projectIds, root, label })));
+  expect(after[0].configPath).toBe(path.join(repo, ".lanes", "lanes.config.json"));
   expect((await readProjectBoard(paseo, "project-1")).goals[0].title).toBe("migrating");
   expect(fs.existsSync(path.join(repo, ".lanes", "lanes.config.json"))).toBe(true);
   expect(fs.existsSync(path.join(home, ".lanes", "projects.json"))).toBe(true);

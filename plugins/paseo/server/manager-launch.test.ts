@@ -25,7 +25,10 @@ it("both launch paths acquire the actual session before sending, and reject repl
     const send = vi.fn(async (prompt: string) => {
       const claim = JSON.parse(run("lane", "manager", "inspect", currentRef, "--json"));
       expect(claim.owners).toMatchObject([{ host: "observed-host", runtime: "paseo", session_id: `manager-${currentRef}`, workspace_id: "w1" }]);
-      expect(prompt).toContain("Do not implement or run validation yourself");
+      expect(prompt).toContain("Developers own technical implementation");
+      expect(prompt).toContain("Review their evidence without taking over implementation");
+      expect(prompt).toContain("Own manager analysis, mediation, evidence review, and continued delivery");
+      expect(prompt).toContain("Assign bounded technical implementation, validation, and authorized commits");
     });
     const create = vi.fn(async (options: any) => {
       expect(options.prompt).toBeUndefined();
@@ -62,9 +65,10 @@ it("both launch paths acquire the actual session before sending, and reject repl
     paseo.workspaces.list = async () => ({ entries: [], pageInfo: { hasMore: false } });
     const createWorkspace = vi.fn(async (options: any) => {
       const context = options.firstAgentContext.attachments[0].text;
-      expect(context).toContain("Before strategic management, inspect its manager claim");
-      expect(context).toContain("acquire a claim with the inspected revision and your actual observed host/runtime/session identity");
-      expect(context).toContain("do not begin management or take over ownership");
+      expect(context).toContain("Developers own technical implementation, resolve routine conflicts, run checks and make authorized local commits");
+      expect(context).toContain("Mediate competing approaches with the developers");
+      expect(context).toContain("Review their evidence without taking over implementation");
+      expect(context).toContain("plan concurrency in identified Task contracts before assignment");
       return { id: "manual-workspace" };
     });
     paseo.workspaces.create = createWorkspace;

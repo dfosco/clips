@@ -35,7 +35,7 @@ export async function launchLaneManager<T extends { id: string; workspaceId: str
     throw new Error(`Idle agent ${created.id} was created but did not claim ${ref}; its manager prompt was not sent. ${String(error)}`);
   }
   try {
-    await created.send(`${prompt}\n\nYour observed Lane manager identity is ${JSON.stringify(actor)}. The launch acquired your claim for ${ref} before sending this prompt. Inspect the current claim and coordinate with any shared managers before overlapping decisions. Do not implement or run validation yourself; hand the complete engineering outcome to a verified top-level workspace dev agent the user can steer directly. Do not create child agents or babysit execution. Stopping your agent does not release ownership.`);
+    await created.send(`${prompt}\n\nYour observed Lane manager identity is ${JSON.stringify(actor)}. The launch acquired your claim for ${ref} before sending this prompt. Inspect the current claim and coordinate with any shared managers before overlapping decisions. Own manager analysis, mediation, evidence review, and continued delivery. Assign bounded technical implementation, validation, and authorized commits to verified top-level workspace dev agents the user can steer directly. Review their evidence, resolve competing approaches with them, and direct agreed follow-up work without taking over technical execution. Do not create child agents. Stopping your agent does not release ownership.`);
   } catch (error) {
     throw new Error(`Agent ${created.id} owns ${ref}, but its manager prompt could not be delivered. Resume that agent; do not start a replacement or clear its claim automatically. ${String(error)}`);
   }

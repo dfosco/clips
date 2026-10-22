@@ -9,8 +9,10 @@ import path from "node:path";
 import { execCommand, type PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   attachment, attachmentReadData, collaborationCapability, label, labelUsesData, laneClosureData,
+  reviewDetail, reviewListData, preferences as preferencesSchema,
   type AttachmentReadData, type LabelChange, type AgentConfiguration, type Goal, type Lane,
   type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode,
+  type AgentRole, type ReviewCandidate, type RoleModelDefaults,
 } from "../shared/contracts";
 import {
   FULL_ACCESS_MODE, resolvePermissionMode, type ProviderPermissionMode,
@@ -21,7 +23,7 @@ import {
 } from "../shared/work";
 
 type Paseo = PluginHandlerContext["paseo"];
-type LocalProject = Project & { root: string };
+type LocalProject = Project & { root: string; configPath: string };
 const command = (bin: string, args: string[], cwd?: string) => execCommand(bin, args, { cwd, timeout: 60_000 });
 const asText = (value: unknown): string => typeof value === "string" ? value : value == null ? "" : JSON.stringify(value);
 const asItems = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -51,7 +53,10 @@ export async function localProjects(paseo: Paseo): Promise<LocalProject[]> {
       }
       if (!fs.existsSync(path.join(paths.storeDir, "db")) && !fs.existsSync(paths.configPath)) return null;
       const root = paths.repoRoot;
-      return { id: p.projectId, label: p.projectCustomName || p.projectDisplayName, root: fs.realpathSync(root) };
+      return {
+        id: p.projectId, label: p.projectCustomName || p.projectDisplayName,
+        root: fs.realpathSync(root), configPath: paths.configPath,
+      };
     } catch (error) {
       console.warn(`Cannot discover Lanes project ${p.projectId}: ${errorText(error)}`);
       return null;
@@ -70,6 +75,7 @@ export async function localProjects(paseo: Paseo): Promise<LocalProject[]> {
       label: item.label,
       projectIds: [item.id],
       root: item.root,
+      configPath: item.configPath,
     });
   }
   return [...grouped.values()].sort((a, b) => a.label.localeCompare(b.label));
@@ -239,6 +245,219 @@ export async function setProjectCollaboration(
   return normalizeBoard(await clipsBoard(paseo, project.root));
 }
 
+const DEFAULT_ROLE_MODEL: Record<AgentRole, string> = { manager: "gpt-6.1-sol", dev: "gpt-6-luna" };
+const DEFAULT_ROLE_EFFORT = "high";
+const rolePreferenceKeys = (role: AgentRole) => ({
+  model: `lane_${role === "manager" ? "manager" : "dev"}_model`,
+  reasoningEffort: `lane_${role === "manager" ? "manager" : "dev"}_reasoning_effort`,
+});
+
+async function userPreference(paseo: Paseo, key: string): Promise<string | null> {
+  const cli = await findClips(paseo);
+  const { stdout } = await command(cli.bin, [...cli.prefix, "config", "--user", key]);
+  const value = stdout.trim();
+  return value && value !== "(not set)" ? value : null;
+}
+
+function projectPreference(project: LocalProject, key: string): string | null {
+  try {
+    const config = JSON.parse(fs.readFileSync(project.configPath, "utf8"));
+    return typeof config?.[key] === "string" && config[key].trim() ? config[key].trim() : null;
+  } catch { return null; }
+}
+
+async function modelAgent(paseo: Paseo, model: string, preferredProvider = ""): Promise<string | undefined> {
+  const entries = (await paseo.providers.snapshot({ cwd: os.homedir() })).entries;
+  const matches = entries.filter((entry) => entry.status === "ready" && entry.enabled !== false)
+    .flatMap((entry) => (entry.models ?? []).filter((item) => item.id === model && item.isSelectable !== false)
+      .map(() => `${entry.provider}/${model}`));
+  return matches.find((value) => value.startsWith(`${preferredProvider}/`)) ?? matches[0];
+}
+
+function legacyModelId(agent: string): string {
+  const slash = agent.indexOf("/");
+  return slash >= 0 ? agent.slice(slash + 1) : agent;
+}
+
+/** Read the user-scoped model defaults. Project settings still override these at launch. */
+export async function readRoleModelDefaults(
+  paseo: Paseo,
+  role: AgentRole,
+  legacy: Pick<Preferences, "agent" | "thinkingOptionId"> = { agent: "", thinkingOptionId: "" },
+  options: { projectId?: string; legacyDisabled?: boolean } = {},
+): Promise<RoleModelDefaults> {
+  const keys = rolePreferenceKeys(role);
+  const [userModel, userEffort] = await Promise.all([
+    userPreference(paseo, keys.model), userPreference(paseo, keys.reasoningEffort),
+  ]);
+  const project = options.projectId ? await findProject(paseo, options.projectId) : null;
+  const projectModel = project ? projectPreference(project, keys.model) : null;
+  const projectEffort = project ? projectPreference(project, keys.reasoningEffort) : null;
+  const source = projectModel || projectEffort ? "project" : userModel || userEffort ? "user" : null;
+  if (source) {
+    const model = projectModel ?? userModel ?? DEFAULT_ROLE_MODEL[role];
+    const reasoningEffort = projectEffort ?? userEffort ?? DEFAULT_ROLE_EFFORT;
+    return { role, model: model ?? DEFAULT_ROLE_MODEL[role], reasoningEffort: reasoningEffort ?? DEFAULT_ROLE_EFFORT,
+      source, agent: await modelAgent(paseo, model ?? DEFAULT_ROLE_MODEL[role]) };
+  }
+  if (!options.legacyDisabled && legacy.agent) {
+    return {
+      role,
+      model: legacyModelId(legacy.agent),
+      reasoningEffort: legacy.thinkingOptionId || "",
+      source: "legacy",
+      agent: legacy.agent,
+    };
+  }
+  return { role, model: DEFAULT_ROLE_MODEL[role], reasoningEffort: DEFAULT_ROLE_EFFORT, source: "built_in",
+    agent: await modelAgent(paseo, DEFAULT_ROLE_MODEL[role]) };
+}
+
+export async function saveRoleModelDefaults(
+  paseo: Paseo,
+  input: { role: AgentRole; model: string; reasoningEffort: string },
+): Promise<RoleModelDefaults> {
+  const model = input.model.trim();
+  const reasoningEffort = input.reasoningEffort.trim();
+  if (model) {
+    const catalog = (await paseo.providers.snapshot({ cwd: os.homedir() })).entries;
+    const available = catalog.some((entry) => entry.status === "ready" && entry.enabled !== false &&
+      entry.models?.some((candidate) => candidate.id === model && candidate.isSelectable !== false &&
+        (!reasoningEffort || candidate.thinkingOptions?.some((option) => option.id === reasoningEffort))));
+    if (!available) throw new Error(`Model ${model} or reasoning effort ${reasoningEffort} is unavailable from ready Paseo providers.`);
+  }
+  const cli = await findClips(paseo);
+  const keys = rolePreferenceKeys(input.role);
+  const write = async (key: string, value: string) => command(cli.bin, [
+    ...cli.prefix, "config", "--user", key, ...(value ? [value] : ["--unset"]),
+  ]);
+  const completed: string[] = [];
+  try {
+    await write(keys.model, model); completed.push(keys.model);
+    await write(keys.reasoningEffort, reasoningEffort); completed.push(keys.reasoningEffort);
+  } catch (error) {
+    const failed = completed.length
+      ? `Partial save: ${completed.join(" and ")} changed, but ${completed.length === 1 ? keys.reasoningEffort : "another setting"} failed. `
+      : "No model preference was changed. ";
+    throw new Error(`${failed}User-scoped Lanes ${input.role} defaults: ${errorText(error)}`);
+  }
+  return {
+    role: input.role,
+    model: model || DEFAULT_ROLE_MODEL[input.role],
+    reasoningEffort: reasoningEffort || DEFAULT_ROLE_EFFORT,
+    agent: model ? await modelAgent(paseo, model) : undefined,
+    source: model || reasoningEffort ? "user" : "built_in",
+  };
+}
+
+export async function readProjectReviews(paseo: Paseo, projectId: string) {
+  const project = await findProject(paseo, projectId);
+  const cli = await findClips(paseo);
+  try {
+    const { stdout } = await command(cli.bin, [...cli.prefix, "review", "list", "--json"], project.root);
+    return reviewListData.parse(JSON.parse(stdout));
+  } catch (error) {
+    throw new Error(`Cannot read the selected project's Lanes review inbox: ${errorText(error)}`);
+  }
+}
+
+async function readReviewDetails(paseo: Paseo, projectRoot: string, id: string) {
+  const cli = await findClips(paseo);
+  try {
+    const { stdout } = await command(cli.bin, [...cli.prefix, "review", "show", id, "--json"], projectRoot);
+    const detail = reviewDetail.parse(JSON.parse(stdout));
+    if (detail.id !== id) throw new Error("Lanes returned a different review than requested.");
+    return detail;
+  } catch (error) {
+    throw new Error(`Cannot read Lanes review ${id}: ${errorText(error)}`);
+  }
+}
+
+export async function readProjectReview(
+  paseo: Paseo,
+  input: { projectId: string; id: string },
+) {
+  const project = await findProject(paseo, input.projectId);
+  return readReviewDetails(paseo, project.root, input.id);
+}
+
+export async function decideProjectReview(
+  paseo: Paseo,
+  input: {
+    projectId: string;
+    id: string;
+    decision: "approved" | "changes_requested" | "deferred";
+    actor: string;
+    candidate: ReviewCandidate;
+    comment: string;
+    expectedRevision: number;
+  },
+) {
+  const project = await findProject(paseo, input.projectId);
+  const detail = await readReviewDetails(paseo, project.root, input.id);
+  if (detail.revision !== input.expectedRevision) {
+    throw new Error("This review changed after it was opened. Refresh it and confirm the current candidate before deciding.");
+  }
+  if (detail.status !== "awaiting_review" && detail.status !== "changes_requested" && detail.status !== "deferred") {
+    throw new Error(`Review ${input.id} is ${detail.status}; only actionable reviews can receive a decision.`);
+  }
+  if (detail.stale || detail.stale_reasons.length) {
+    throw new Error(`Review ${input.id} is stale and cannot be decided: ${detail.stale_reasons.join("; ") || "refresh the review first"}`);
+  }
+  if (typeof detail.attachment.content !== "string" || detail.attachment.read_identity == null || detail.content_identity == null) {
+    throw new Error(`Review ${input.id} has no readable, pinned CR content and cannot be decided.`);
+  }
+  if (detail.candidate.base !== input.candidate.base || detail.candidate.head !== input.candidate.head) {
+    throw new Error("The reviewed candidate changed. Refresh the review and inspect the current base/head pins.");
+  }
+  const actor = input.actor.trim();
+  if (!actor) throw new Error("Enter the reviewer identity to record this asserted decision.");
+
+  const cli = await findClips(paseo);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lanes-review-decision-"));
+  const payloadPath = path.join(tempDir, "decision.json");
+  const payload = {
+    decision: input.decision,
+    actor,
+    candidate: { base: detail.candidate.base, head: detail.candidate.head },
+    comment: input.comment,
+    expected_revision: detail.revision,
+  };
+  try {
+    fs.writeFileSync(payloadPath, `${JSON.stringify(payload)}\n`, { encoding: "utf8", mode: 0o600 });
+    await command(cli.bin, [...cli.prefix, "review", "decide", input.id, "--file", payloadPath], project.root);
+  } catch (error) {
+    throw new Error(`Cannot record the review decision: ${errorText(error)}`);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+  return readReviewDetails(paseo, project.root, input.id);
+}
+
+export async function importProjectReviewDecision(
+  paseo: Paseo,
+  input: { projectId: string; id: string; eventId: string },
+) {
+  const project = await findProject(paseo, input.projectId);
+  const current = await readReviewDetails(paseo, project.root, input.id);
+  if (current.stale || current.stale_reasons.length) {
+    throw new Error(`Review ${input.id} is stale and cannot import a GitHub decision: ${current.stale_reasons.join("; ")}`);
+  }
+  if (typeof current.pull_request !== "object" || current.pull_request === null ||
+      typeof (current.pull_request as { url?: unknown }).url !== "string") {
+    throw new Error(`Review ${input.id} has no linked pull request for GitHub review import.`);
+  }
+  const eventId = input.eventId.trim();
+  if (!eventId) throw new Error("Enter the exact GitHub review node ID.");
+  const cli = await findClips(paseo);
+  try {
+    await command(cli.bin, [...cli.prefix, "review", "pr", "import", input.id, "--event", eventId, "--json"], project.root);
+  } catch (error) {
+    throw new Error(`Cannot import the linked GitHub review event: ${errorText(error)}`);
+  }
+  return readReviewDetails(paseo, project.root, input.id);
+}
+
 export async function changeProjectLabels(paseo: Paseo, input: { projectId: string; change: LabelChange }) {
   const project = await findProject(paseo, input.projectId);
   const cli = await findClips(paseo);
@@ -397,14 +616,25 @@ export async function readAgentOptions(paseo: Paseo, input: { projectId?: string
 async function agentConfiguration(
   paseo: Paseo,
   root: string,
-  preferences: Preferences,
+  preferencesInput: Preferences,
   override?: AgentConfiguration,
+  role: AgentRole = "dev",
+  projectId?: string,
 ) {
-  const preference = override ? override.provider : preferences.agent;
+  const preferences = preferencesSchema.schema.parse(preferencesInput);
+  const rolePreferences = preferences.roles[role];
+  const roleDefaults = override ? null : await readRoleModelDefaults(paseo, role, preferences, {
+    projectId, legacyDisabled: rolePreferences.legacyModelMigrated,
+  });
+  if (roleDefaults && !roleDefaults.agent) {
+    throw new Error(`The ${roleDefaults.source} ${role} model ${roleDefaults.model} is not currently available from Paseo providers.`);
+  }
+  const preference = override ? override.provider : roleDefaults?.agent || rolePreferences.provider || preferences.agent;
   const { selected, provider, entry, model } = await selectedProvider(paseo, root, preference);
-  const thinkingOptionId = override ? override.thinkingOptionId || undefined : preferences.thinkingOptionId || undefined;
-  const featureValues = override ? override.featureValues : preferences.featureValues;
-  const requestedModeId = override?.modeId ?? preferences.modeId ?? FULL_ACCESS_MODE;
+  const thinkingOptionId = override ? override.thinkingOptionId || undefined : roleDefaults?.reasoningEffort || preferences.thinkingOptionId || undefined;
+  const featureValues = override ? override.featureValues : Object.keys(rolePreferences.featureValues).length
+    ? rolePreferences.featureValues : preferences.featureValues;
+  const requestedModeId = override?.modeId ?? rolePreferences.modeId ?? preferences.modeId ?? FULL_ACCESS_MODE;
   if (thinkingOptionId && !model.thinkingOptions?.some((option) => option.id === thinkingOptionId)) {
     throw new Error(`Thinking option ${thinkingOptionId} is unavailable for ${selected}.`);
   }
@@ -510,7 +740,8 @@ export async function startWork(
       if (!workspace || !project.projectIds.includes(workspace.projectId)) {
         throw new Error("Choose a workspace that belongs to this Lanes project.");
       }
-      const config = await agentConfiguration(paseo, project.root, prefs, input.agentConfig);
+      const config = await agentConfiguration(paseo, project.root, prefs, input.agentConfig,
+        target.kind === "lane" ? "manager" : "dev", project.projectId);
       const created = await createAgent(paseo.workspaces.ref(workspace.id), config);
       return {
         workspaceId: workspace.id, branch: workspace.branch, agentId: created.id,
@@ -519,7 +750,8 @@ export async function startWork(
     }
     // A configured provider is checked before any new workspace is created.
     const config = input.mode === "agent" && running.status !== "running"
-      ? await agentConfiguration(paseo, project.root, prefs, input.agentConfig) : null;
+      ? await agentConfiguration(paseo, project.root, prefs, input.agentConfig,
+        target.kind === "lane" ? "manager" : "dev", project.projectId) : null;
     const prompt = config ? promptFor(target) : null;
 
     const existing = running.workspaceId

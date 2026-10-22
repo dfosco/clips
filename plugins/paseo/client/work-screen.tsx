@@ -6,12 +6,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, Text, TextInput, View } from "react-native";
 import {
-  attachmentReadRpc, boardRpc, collaborationRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc,
-  type AgentConfiguration, type Attachment, type AttachmentReadData, type CollaborationCapability,
+  attachmentReadRpc, boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc, roleModelDefaultsRpc,
+  type AgentConfiguration, type Attachment, type AttachmentReadData,
   type Goal, type Lane, type LaneClosureData, type LabelChange, type Project, type StartMode, type Work,
 } from "../shared/contracts";
 import { executionFor, executionForManagers, isActiveAgent, type AgentInfo, type Execution } from "../shared/work";
 import { AgentLaunchDialog } from "./agent-configuration";
+import { ReviewInbox } from "./review-inbox";
 import { navigateToAgent, useRuntime } from "./runtime";
 import { focusScope, focusedLane, goalGroup, isActive, revealStartedWorkspace, workspaceLane, type LaneFocus, type WorkFilter } from "./lane-focus";
 import { getFocusIntent, getWorkspaceFocusIntent, projectAfterFocusIntent, requestLaneFocus, subscribeFocusIntent } from "./focus-intent";
@@ -728,37 +729,6 @@ function FilterChip({
   );
 }
 
-function CollaborationControl({ capability, pending, error, theme, onToggle }: {
-  capability: CollaborationCapability | null | undefined;
-  pending: boolean;
-  error: string;
-  theme: Theme;
-  onToggle: (enabled: boolean) => void;
-}) {
-  const enabled = capability?.enabled;
-  const available = typeof enabled === "boolean" && capability?.state !== "invalid";
-  return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-      <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" }}>
-        GitHub collaboration: {available ? enabled ? "On" : "Off" : "Unavailable"}
-      </Text>
-      <Action
-        label={available ? enabled ? "Turn off" : "Turn on" : "Unavailable"}
-        accessibilityLabel={`${available ? enabled ? "Turn off" : "Turn on" : "Unavailable"} GitHub collaboration`}
-        theme={theme}
-        subtle
-        disabled={pending || !available}
-        onPress={() => onToggle(!enabled)}
-      />
-      <Text style={{ flexBasis: "100%", color: theme.colors.foregroundMuted, fontSize: 12 }}>
-        Local-only setting. Toggling does not publish; later supported record changes may sync while enabled.
-      </Text>
-      {capability?.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{capability.error}</Text> : null}
-      {error ? <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{error}</Text> : null}
-    </View>
-  );
-}
-
 export function WorkScreen({
   theme, layout, host, navigation, onOpenSettings, onOpenLanePanel, preferredProjectId,
   currentWorkspaceId, currentWorkspaceProjectId,
@@ -772,8 +742,8 @@ export function WorkScreen({
   const fetchProjects = useRpc(projectsRpc);
   const fetchBoard = useRpc(boardRpc);
   const fetchAttachment = useRpc(attachmentReadRpc);
-  const updateCollaboration = useRpc(collaborationRpc);
   const launch = useRpc(startRpc);
+  const getRoleModelDefaults = useRpc(roleModelDefaultsRpc);
   const close = useRpc(closeRpc);
   const settings = useSettings(preferences);
   const updateLabels = useRpc(labelsRpc);
@@ -803,13 +773,6 @@ export function WorkScreen({
     refetchInterval: 15_000,
   });
   const attachmentRevision = `${host.id}:${projectId ?? ""}:${board.data?.generatedAt ?? ""}`;
-  const [collaborationRequest, setCollaborationRequest] = useState<{
-    projectId: string; pending: boolean; error: string;
-  } | null>(null);
-  const collaborationPending = Boolean(collaborationRequest &&
-    collaborationRequest.projectId === projectId && collaborationRequest.pending);
-  const collaborationError = collaborationRequest && collaborationRequest.projectId === projectId
-    ? collaborationRequest.error : "";
   const runtime = useRuntime(host.id);
   const [filter, setFilter] = useState<WorkFilter>("open");
   const [search, setSearch] = useState("");
@@ -819,6 +782,26 @@ export function WorkScreen({
   const [pending, setPending] = useState<string | null>(null);
   const [closingWork, setClosingWork] = useState<Lane | Goal | null>(null);
   const [launchRequest, setLaunchRequest] = useState<{ ref: string; title: string; workspaceId?: string } | null>(null);
+  const [reviewInboxOpen, setReviewInboxOpen] = useState(false);
+  const launchTarget = launchRequest && board.data ? [
+    ...board.data.lanes, ...board.data.goals, ...board.data.goals.flatMap((goal) => goal.tasks),
+  ].find((work) => work.ref === launchRequest.ref) : undefined;
+  const launchRole = launchTarget?.kind === "lane" ? "manager" as const : "dev" as const;
+  const storedSettings = preferences.schema.parse(settings.status === "ready" ? settings.values : {});
+  const launchRolePreference = storedSettings.roles[launchRole];
+  const launchRoleDefaults = useQuery({
+    queryKey: ["clips.role-defaults.launch", projectId, launchRole, launchRolePreference?.legacyModelMigrated],
+    queryFn: () => getRoleModelDefaults({ projectId, role: launchRole, legacyDisabled: launchRolePreference?.legacyModelMigrated }),
+    enabled: Boolean(launchRequest && projectId && launchTarget),
+  });
+  const roleSettings = storedSettings.roles[launchRole];
+  const launchDefaults = {
+    ...storedSettings,
+    agent: launchRoleDefaults.data?.agent ?? roleSettings.provider ?? "",
+    thinkingOptionId: launchRoleDefaults.data?.reasoningEffort ?? "",
+    featureValues: roleSettings.featureValues,
+    modeId: roleSettings.modeId,
+  };
   const [viewportWidth, setViewportWidth] = useState(0);
   const [focus, setFocus] = useState<LaneFocus | null>(null);
   const [focusedLaneMenuOpen, setFocusedLaneMenuOpen] = useState(false);
@@ -948,21 +931,6 @@ export function WorkScreen({
     },
   });
 
-  const toggleCollaboration = async (enabled: boolean) => {
-    const selectedProjectId = projectId;
-    if (!selectedProjectId || collaborationPending) return;
-    setCollaborationRequest({ projectId: selectedProjectId, pending: true, error: "" });
-    try {
-      const data = await updateCollaboration({ projectId: selectedProjectId, enabled });
-      cache.setQueryData(["clips.board", host.id, selectedProjectId], data);
-      setCollaborationRequest({ projectId: selectedProjectId, pending: false, error: "" });
-      toast.show(`GitHub collaboration ${enabled ? "enabled" : "disabled"} in local project configuration.`, { variant: "success" });
-    } catch (error) {
-      const text = message(error);
-      setCollaborationRequest({ projectId: selectedProjectId, pending: false, error: text });
-      toast.show(`Could not update local collaboration configuration: ${text}`, { variant: "error" });
-    }
-  };
   const readAttachment = (input: { projectId: string; ref: string; attachmentId: string }) => fetchAttachment(input);
   const openAttachmentUrl = async (url: string) => {
     try {
@@ -1081,7 +1049,7 @@ export function WorkScreen({
       style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{
       padding: layout.compact ? 14 : 24, gap: 16, paddingBottom: 64,
     }}>
-      {laneInFocus ? (
+      {!reviewInboxOpen && laneInFocus ? (
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Lanes"
           onPress={() => selectFocus(null)}
           style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingVertical: 4 }}>
@@ -1089,21 +1057,25 @@ export function WorkScreen({
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Back to Lanes</Text>
         </Pressable>
       ) : null}
-      {labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork} projectId={projectId}
+      {!reviewInboxOpen && labelWork && projectId ? <LabelManager key={`${host.id}:${projectId}:${labelWork.ref}`} work={labelWork} projectId={projectId}
         catalog={board.data?.labels ?? []} theme={theme} busy={labelMutation.isPending}
         onChange={(change) => labelMutation.mutateAsync({ hostId: host.id, projectId, change })}
         onClose={() => setLabelTarget(null)} /> : null}
       <View style={{ flexDirection: "row", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
         <View style={{ flex: 1, gap: 4 }}>
-          <Text style={{ color: theme.colors.foreground, fontSize: 21, fontWeight: "700" }}>{laneInFocus?.title ?? "Lanes"}</Text>
+          <Text style={{ color: theme.colors.foreground, fontSize: 21, fontWeight: "700" }}>{reviewInboxOpen ? "Review inbox" : laneInFocus?.title ?? "Lanes"}</Text>
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>
-            {laneInFocus ? `${laneInFocus.ref} · Goals and Tasks` : "Plan in Lanes · Execute in Paseo"}
+            {reviewInboxOpen ? "Project review requests · pinned candidate decisions" : laneInFocus ? `${laneInFocus.ref} · Goals and Tasks` : "Plan in Lanes · Execute in Paseo"}
           </Text>
           {laneInFocus ? <LabelChips labels={laneInFocus.labels ?? []} theme={theme} /> : null}
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4, position: "relative",
           zIndex: focusedLaneMenuOpen ? 10 : undefined, elevation: focusedLaneMenuOpen ? 10 : undefined }}>
-          {laneInFocus && projectId ? <Pressable
+          <Pressable accessibilityRole="button" accessibilityLabel={reviewInboxOpen ? "Back to Lanes work" : "Open review inbox"}
+            onPress={() => setReviewInboxOpen((open) => !open)} style={{ padding: 8 }}>
+            <Text style={{ color: theme.colors.accent, fontSize: 12 }}>{reviewInboxOpen ? "Work" : "Reviews"}</Text>
+          </Pressable>
+          {!reviewInboxOpen && laneInFocus && projectId ? <Pressable
             accessibilityRole="button"
             accessibilityLabel={`More actions for lane ${laneInFocus.ref}`}
             accessibilityState={{ expanded: focusedLaneMenuOpen }}
@@ -1112,7 +1084,7 @@ export function WorkScreen({
           >
             <Icon name="MoreVertical" size={17} color={theme.colors.foregroundMuted} />
           </Pressable> : null}
-          {focusedLaneMenuOpen && laneInFocus && projectId ? <View accessibilityRole="menu" style={{
+          {!reviewInboxOpen && focusedLaneMenuOpen && laneInFocus && projectId ? <View accessibilityRole="menu" style={{
             position: "absolute", top: 36, right: 0, zIndex: 20, elevation: 20,
             width: 190, maxWidth: "100%", padding: 5, gap: 2,
             borderWidth: 1, borderColor: theme.colors.border, borderRadius: 8, backgroundColor: theme.colors.surface0,
@@ -1122,7 +1094,7 @@ export function WorkScreen({
               setLabelTarget({ hostId: host.id, projectId, ref: laneInFocus.ref });
             }} />
           </View> : null}
-          <Pressable
+          {!reviewInboxOpen ? <Pressable
             accessibilityRole="button"
             accessibilityLabel="Refresh Lanes and Paseo"
             onPress={() => {
@@ -1133,7 +1105,7 @@ export function WorkScreen({
             style={{ padding: 8 }}
           >
             <Icon name="RefreshCw" size={18} color={theme.colors.foregroundMuted} />
-          </Pressable>
+          </Pressable> : null}
         </View>
         {onOpenSettings ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Lanes settings" onPress={onOpenSettings} style={{ padding: 8 }}>
@@ -1141,6 +1113,7 @@ export function WorkScreen({
           </Pressable>
         ) : null}
       </View>
+      {reviewInboxOpen ? <ReviewInbox theme={theme} initialProjectId={project?.projectId} /> : <>
       {laneInFocus ? <RecordContext key={laneInFocus.ref} work={laneInFocus} theme={theme} /> : null}
       {laneInFocus && projectId ? <RecordAttachments
         key={`${attachmentRevision}:${laneInFocus.ref}`}
@@ -1161,13 +1134,6 @@ export function WorkScreen({
         <ProjectPicker projects={projects.data.projects} selected={project.projectId}
           onSelect={setSelected} theme={theme} />
       ) : null}
-      {project ? <CollaborationControl
-        capability={board.data?.collaboration}
-        pending={Boolean(collaborationPending)}
-        error={collaborationError}
-        theme={theme}
-        onToggle={(enabled) => { void toggleCollaboration(enabled); }}
-      /> : null}
       {project ? (
         <>
           {currentWorkspaceId && project && currentWorkspaceProjectId &&
@@ -1381,7 +1347,8 @@ export function WorkScreen({
             key={`${launchRequest?.ref ?? "none"}:${launchRequest?.workspaceId ?? "new"}`}
             open={Boolean(launchRequest)}
             workTitle={launchRequest ? `${launchRequest.ref} · ${launchRequest.title}` : ""}
-            defaults={settings.status === "ready" ? settings.values : preferences.schema.parse({})}
+            defaults={launchDefaults}
+            defaultsError={launchRoleDefaults.isError ? `Role defaults unavailable: ${message(launchRoleDefaults.error)}` : null}
             theme={theme}
             hostId={host.id}
             projectId={projectId}
@@ -1393,6 +1360,7 @@ export function WorkScreen({
           />
         </>
       ) : null}
+      </>}
     </ScrollView>
   );
 }

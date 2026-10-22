@@ -46,7 +46,7 @@ vi.mock("react-native", () => ({
   }, children),
   Text: ({ children, accessibilityRole, accessibilityLabel, onPress }: any) =>
     createElement("span", { role: accessibilityRole, "aria-label": accessibilityLabel, onClick: onPress }, children),
-  Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, role: accessibilityRole, disabled, onClick: onPress }, children),
+  Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress, ["aria-selected"]: ariaSelected }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, "aria-selected": ariaSelected, role: accessibilityRole, disabled, onClick: onPress }, children),
   TextInput: ({ accessibilityLabel, value, onChangeText }: any) => createElement("input", {
     "aria-label": accessibilityLabel, value, onInput: (event: any) => onChangeText?.(event.currentTarget.value),
   }),
@@ -71,6 +71,8 @@ vi.mock("./runtime", async (importOriginal) => ({
   useRuntime: () => ({ data: state.runtime, isError: Boolean(state.runtimeError), error: state.runtimeError }),
 }));
 vi.mock("./agent-configuration", () => ({ AgentLaunchDialog: () => null }));
+vi.mock("./review-inbox", () => ({ ReviewInbox: ({ initialProjectId }: { initialProjectId?: string }) =>
+  createElement("div", { "aria-label": "Review inbox content", "data-project-id": initialProjectId }) }));
 
 const base = { description: "", status: "open", scope: "", plan: "", decisions: "", acceptanceCriteria: [] };
 const lane = { ...base, kind: "lane", ref: "#l001", title: "Publish releases", goalRefs: ["#g001", "#g002"], productGoals: [] };
@@ -105,7 +107,10 @@ async function mountScreen(extra: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  state.projects = [{ projectId: "p1", projectIds: ["p1"], label: "Project" }];
+  state.projects = [
+    { projectId: "p1", projectIds: ["p1"], label: "Project 1" },
+    { projectId: "p2", projectIds: ["p2"], label: "Project 2" },
+  ];
   state.board = { lanes: [lane], goals: [goal, outside], warnings: [] };
   state.runtime = { workspaces: [{ id: "w1", projectId: "p1", name: "Lane work", branch: branchName(lane), status: "ready" }], agents: [] };
   state.mutation = undefined;
@@ -118,6 +123,30 @@ beforeEach(() => {
 });
 
 describe("attachments and collaboration", () => {
+  it("opens Reviews on the selected project, hides board controls, and returns to that project", async () => {
+    const screen = await mountScreen();
+    try {
+      await act(async () => {
+        [...screen.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          .find((button) => button.textContent === "Project 2")!.click();
+      });
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Open review inbox"]')!.click(); });
+      const inbox = screen.container.querySelector<HTMLElement>('[aria-label="Review inbox content"]');
+      expect(inbox?.dataset.projectId).toBe("p2");
+      expect(screen.container.querySelector('[aria-label="Project lanes"]')).toBeNull();
+      expect(screen.container.querySelector('[aria-label="Search Lanes work"]')).toBeNull();
+      expect(screen.container.querySelector('[role="tab"]')).toBeNull();
+
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Back to Lanes work"]')!.click(); });
+      expect(screen.container.querySelector('[aria-label="Review inbox content"]')).toBeNull();
+      expect(screen.container.querySelector('[aria-label="Project lanes"]')).not.toBeNull();
+      expect([...screen.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        .find((button) => button.textContent === "Project 2")?.getAttribute("aria-selected")).toBe("true");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("shows scoped attachment metadata, reads current Markdown on demand, and refreshes away stale content", async () => {
     const live = {
       ref: "#l001", revision: 4,
@@ -278,18 +307,11 @@ describe("attachments and collaboration", () => {
     }
   });
 
-  it("keeps collaboration project-local, preserves the focused record, and displays toggle failures", async () => {
+  it("keeps project collaboration controls in Settings instead of the work board", async () => {
     state.board = {
       lanes: [lane], goals: [goal, outside], warnings: [],
       collaboration: { enabled: false, state: "disabled", scope: "project", automatic_mutation_sync: false },
     };
-    state.updateCollaboration.mockImplementation(async ({ enabled }: { enabled: boolean }) => ({
-      ...state.board,
-      collaboration: {
-        ...state.board.collaboration,
-        enabled, state: enabled ? "enabled" : "disabled", automatic_mutation_sync: enabled,
-      },
-    }));
     const screen = await mountScreen();
     try {
       await act(async () => {
@@ -299,28 +321,9 @@ describe("attachments and collaboration", () => {
         .find((button) => button.textContent === "Focus lane");
       await act(async () => { focus!.click(); });
       expect(screen.container.textContent).toContain("Publish releases");
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="Turn on GitHub collaboration"]')!.click();
-      });
-      expect(state.updateCollaboration).toHaveBeenCalledWith({ projectId: "p1", enabled: true });
-      expect(screen.container.textContent).toContain("GitHub collaboration: On");
-      expect(screen.container.textContent).toContain("later supported record changes may sync while enabled");
+      expect(screen.container.textContent).not.toContain("GitHub collaboration:");
       expect(screen.container.textContent).toContain("Publish releases");
-      expect(state.toast).toHaveBeenCalledWith(
-        "GitHub collaboration enabled in local project configuration.",
-        { variant: "success" },
-      );
-
-      state.updateCollaboration.mockRejectedValueOnce(new Error("local config write failed"));
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="Turn off GitHub collaboration"]')!.click();
-      });
-      expect(screen.container.textContent).toContain("local config write failed");
-      expect(state.toast).toHaveBeenCalledWith(
-        "Could not update local collaboration configuration: local config write failed",
-        { variant: "error" },
-      );
-      expect(state.invalidations.some((key) => key[0] === "clips.board")).toBe(false);
+      expect(state.updateCollaboration).not.toHaveBeenCalled();
     } finally {
       await screen.unmount();
     }

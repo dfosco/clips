@@ -211,11 +211,12 @@ export function AgentConfigFields({
 }
 
 export function AgentLaunchDialog({
-  open, workTitle, defaults, theme, hostId, projectId, busy, onOpenChange, onSubmit,
+  open, workTitle, defaults, defaultsError, theme, hostId, projectId, busy, onOpenChange, onSubmit,
 }: {
   open: boolean;
   workTitle: string;
   defaults: AgentDefaults;
+  defaultsError?: string | null;
   theme: Theme;
   hostId: string;
   projectId?: string;
@@ -250,6 +251,7 @@ export function AgentLaunchDialog({
           <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, lineHeight: 18 }}>
             These choices apply to this new session. They do not change Lanes settings.
           </Text>
+          {defaultsError ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{defaultsError}</Text> : null}
           <AgentConfigFields
             theme={theme}
             hostId={hostId}

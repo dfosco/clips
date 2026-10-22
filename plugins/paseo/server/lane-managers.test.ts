@@ -26,7 +26,8 @@ describe("Lane manager launch ordering", () => {
     } });
     expect(send).toHaveBeenCalledOnce();
     expect(send.mock.calls[0][0]).toContain("Stopping your agent does not release ownership");
-    expect(send.mock.calls[0][0]).toContain("verified top-level workspace dev agent the user can steer directly");
+    expect(send.mock.calls[0][0]).toContain("Assign bounded technical implementation, validation, and authorized commits to verified top-level workspace dev agents the user can steer directly");
+    expect(send.mock.calls[0][0]).toContain("Review their evidence, resolve competing approaches with them, and direct agreed follow-up work");
     expect(send.mock.calls[0][0]).toContain("Do not create child agents");
   });
 
