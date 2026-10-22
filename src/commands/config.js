@@ -58,7 +58,7 @@ function runUserConfigCommand(args) {
 
 function showAllConfig() {
   const repoRoot = getRepoRoot();
-  const config = readConfig(repoRoot);
+  const config = readConfig(repoRoot, { strict: true });
   config.lane_max_active_agents = getConfigValue('lane_max_active_agents', repoRoot);
   config.project_id = effectiveProjectId(repoRoot);
   const configPath = getConfigPath(repoRoot);
@@ -103,6 +103,21 @@ The --user forms work outside a Git repository. Reading a model key without
 Model identifiers are stored as provided; availability is determined at dispatch.
 Keys: lane_manager_model, lane_manager_reasoning_effort, lane_dev_model,
 lane_dev_reasoning_effort.
+
+Delivery preferences:
+lane_dev_max_tasks defaults to 3 Tasks per Lane Dev assignment. A worker's
+assignment ends and it retires when its assigned Tasks are complete, even when
+the cap has not been reached. lane_validation_mode defaults to human and may be
+agent. Human validation is the default for Goal review; agent mode is an explicit
+opt-out only where no named human gate applies. lane_commit_mode defaults to
+after_validation and may be manual.
+lane_pr_mode defaults to none and may be prepare, draft, or ready. These settings
+guide workflow; they do not enforce scheduling, approve commits, or authorize
+external actions. PR modes describe desired output only. Manual commit mode
+leaves an explicit commit handoff for the designated coordinator.
+
+Read and set delivery preferences with lanes config <key> [value]. Invalid
+values and malformed stored delivery settings fail visibly and remain on disk.
 
 lane_max_active_agents defaults to 5 concurrent active workers, excluding
 the Lane Manager. N must be a positive safe integer (decimal digits).

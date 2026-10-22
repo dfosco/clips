@@ -173,6 +173,48 @@ configured cap. An explicit user ceiling for the Lane and native host quotas
 or resource limits still apply. Do not infer cloud from a hostname, SSH,
 container, environment variable, remote repository or workspace path.
 
+## Delivery configuration
+
+Project delivery preferences bound Lane Dev assignments and define validation,
+commit and pull request handling defaults:
+
+| Key | Default | Accepted values |
+|---|---|---|
+| `lane_dev_max_tasks` | `3` | Any positive safe integer |
+| `lane_validation_mode` | `human` | `human`, `agent` |
+| `lane_commit_mode` | `after_validation` | `after_validation`, `manual` |
+| `lane_pr_mode` | `none` | `none`, `prepare`, `draft`, `ready` |
+
+Read or set a preference with `lanes config <key> [value]`. For example:
+
+```bash
+lanes config lane_dev_max_tasks
+lanes config lane_dev_max_tasks 2
+lanes config lane_validation_mode human
+lanes config lane_commit_mode manual
+lanes config lane_pr_mode prepare
+```
+
+The Task limit caps the number of Tasks assigned to one Lane Dev session. Its
+assignment ends when those Tasks finish, even if it handled fewer than the cap;
+the cap does not authorize indefinite worker reuse. Validation defaults to a
+named human reviewing the Goal's attached change request for the exact committed
+candidate. An authorized agent can accept engineering Tasks when their own gate
+is satisfied; that does not replace a selected human Goal review. `agent` is an
+explicit opt-out only when no named human gate applies. Commit mode describes
+the handoff: `after_validation` means after automated dev checks and before
+manager analysis or user validation; the dev may commit its checked, scoped
+changes when the task contract authorizes it. `manual` leaves an explicit
+commit handoff. The setting alone does not grant commit authority.
+
+PR mode describes the desired result (`none`, prepared material, a draft PR, or
+a ready PR). It never authorizes creating or changing a PR, posting messages,
+requesting reviewers, or taking any other external action. Those actions still
+require explicit user authorization. These preferences guide Lane Manager and
+Lane Dev procedures; the CLI does not enforce scheduler, validation, commit, or
+publication gates. Invalid delivery values and malformed stored delivery
+settings fail visibly. A rejected update leaves the stored file unchanged.
+
 ## Lane execution model preferences
 
 Model preferences resolve from project configuration, then user configuration,

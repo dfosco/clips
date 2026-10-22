@@ -160,6 +160,15 @@ The manager applies this limit when dispatching work. It is not an operating-sys
 process limit. See [worker-budget details](docs/cli-reference.md#lane-worker-budget)
 for readback and overrides.
 
+Delivery defaults bound each Lane Dev assignment to **3 Tasks**. The worker retires
+when its assigned Tasks finish, even if it used fewer than three. Validation
+defaults to `human` (`human` or `agent`); commit handling defaults to
+`after_validation` (`after_validation` or `manual`); pull request handling
+defaults to `none` (`none`, `prepare`, `draft`, or `ready`). These are workflow
+preferences, not scheduler enforcement or authority. In particular, PR modes
+never authorize external actions. `manual` commit mode leaves an explicit commit
+handoff for the designated coordinator. See [delivery configuration](docs/cli-reference.md#delivery-configuration).
+
 Set model preferences per user, then override them for one project when needed:
 
 ```bash

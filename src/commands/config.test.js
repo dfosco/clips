@@ -23,7 +23,12 @@ function run(cwd, ...args) {
 function runCli(cwd, ...args) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd, encoding: 'utf8',
-    env: { ...process.env, HOME: path.join(cwd, 'home-dir'), LANES_HOME: '', CLIPS_HOME: path.join(cwd, 'home') },
+    env: {
+      ...process.env,
+      HOME: path.join(cwd, 'home-dir'),
+      LANES_HOME: path.join(cwd, 'home'),
+      CLIPS_HOME: path.join(cwd, 'legacy-home'),
+    },
   });
 }
 
@@ -145,5 +150,78 @@ describe('Lane worker limit CLI', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Could not read config file');
     expect(fs.readFileSync(projectConfig, 'utf8')).toBe(malformed);
+  });
+});
+
+describe('delivery policy CLI', () => {
+  it('documents defaults and round-trips supported values through isolated project config', () => {
+    const cwd = workspace();
+    const configPath = path.join(cwd, '.lanes', 'lanes.config.json');
+    const help = run(cwd, '--help');
+    expect(help.stdout).toContain('lane_dev_max_tasks defaults to 3');
+    expect(help.stdout).toContain('lane_validation_mode defaults to human');
+    expect(help.stdout).toContain('PR modes describe desired output only');
+    expect(run(cwd, 'lane_dev_max_tasks')).toMatchObject({ status: 0, stdout: '3\n' });
+    expect(run(cwd, 'lane_validation_mode')).toMatchObject({ status: 0, stdout: 'human\n' });
+    expect(run(cwd, 'lane_commit_mode')).toMatchObject({ status: 0, stdout: 'after_validation\n' });
+    expect(run(cwd, 'lane_pr_mode')).toMatchObject({ status: 0, stdout: 'none\n' });
+
+    expect(run(cwd, 'lane_dev_max_tasks', '2').status).toBe(0);
+    expect(run(cwd, 'lane_validation_mode', 'human').status).toBe(0);
+    expect(run(cwd, 'lane_commit_mode', 'manual').status).toBe(0);
+    expect(run(cwd, 'lane_pr_mode', 'draft').status).toBe(0);
+    expect(run(cwd, 'lane_dev_max_tasks').stdout).toBe('2\n');
+    expect(run(cwd, 'lane_validation_mode').stdout).toBe('human\n');
+    expect(run(cwd, 'lane_commit_mode').stdout).toBe('manual\n');
+    expect(run(cwd, 'lane_pr_mode').stdout).toBe('draft\n');
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8'))).toMatchObject({
+      lane_dev_max_tasks: 2,
+      lane_validation_mode: 'human',
+      lane_commit_mode: 'manual',
+      lane_pr_mode: 'draft',
+    });
+  });
+
+  it.each([
+    ['lane_dev_max_tasks', '0'], ['lane_dev_max_tasks', '1.5'],
+    ['lane_validation_mode', 'automatic'], ['lane_commit_mode', 'always'],
+    ['lane_pr_mode', 'publish'],
+  ])('rejects invalid %s input without changing stored configuration', (key, value) => {
+    const cwd = workspace();
+    const file = path.join(cwd, '.clips', 'clips.config.json');
+    const before = '{"custom":"preserve"}\n';
+    fs.writeFileSync(file, before);
+    const result = run(cwd, key, value);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/must be|positive safe integer/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it.each([
+    ['lane_dev_max_tasks', 0], ['lane_validation_mode', 'other'],
+    ['lane_commit_mode', false], ['lane_pr_mode', ['ready']],
+  ])('fails individual and all-values reads for invalid stored %s without overwriting', (key, value) => {
+    const cwd = workspace();
+    const file = path.join(cwd, '.clips', 'clips.config.json');
+    const stored = JSON.stringify({ custom: 'keep', [key]: value }) + '\n';
+    fs.writeFileSync(file, stored);
+    expect(run(cwd, key).status).toBe(1);
+    const all = run(cwd);
+    expect(all.status).toBe(1);
+    expect(all.stderr).toMatch(/must be|positive safe integer/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(stored);
+    const write = run(cwd, 'username', 'changed');
+    expect(write.status).toBe(1);
+    expect(fs.readFileSync(file, 'utf8')).toBe(stored);
+  });
+
+  it('rejects malformed project JSON and leaves it intact', () => {
+    const cwd = workspace();
+    const file = path.join(cwd, '.clips', 'clips.config.json');
+    const malformed = '{"lane_pr_mode":"draft",\n';
+    fs.writeFileSync(file, malformed);
+    expect(run(cwd, 'lane_pr_mode').status).toBe(1);
+    expect(run(cwd, 'lane_pr_mode', 'ready').status).toBe(1);
+    expect(fs.readFileSync(file, 'utf8')).toBe(malformed);
   });
 });

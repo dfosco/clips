@@ -22,6 +22,10 @@ export const DEFAULT_CONFIG = {
   agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
   project_id: null,             // stable project identifier; repository name when unset
   lane_max_active_agents: 5,    // concurrent workers per Lane, excluding its manager
+  lane_dev_max_tasks: 3,         // maximum Tasks assigned to one Lane Dev session
+  lane_validation_mode: 'human',
+  lane_commit_mode: 'after_validation',
+  lane_pr_mode: 'none',
   view: {
     hide_goal_statuses: [],
     hide_task_statuses: [],
@@ -37,6 +41,10 @@ export const MODEL_PREFERENCE_DEFAULTS = {
 };
 
 export const MODEL_PREFERENCE_KEYS = Object.keys(MODEL_PREFERENCE_DEFAULTS);
+
+export const DELIVERY_CONFIG_KEYS = [
+  'lane_dev_max_tasks', 'lane_validation_mode', 'lane_commit_mode', 'lane_pr_mode',
+];
 
 function modelPreferencePath(scope, repoRoot) {
   if (scope === 'user') return configPathIn(getUserStoreDir());
@@ -151,6 +159,7 @@ export function readConfig(repoRoot, { strict = false } = {}) {
     if (strict && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) {
       throw new Error('Configuration must be a JSON object');
     }
+    if (strict) validateDeliveryConfig(parsed);
     return { ...DEFAULT_CONFIG, ...parsed };
   } catch (e) {
     if (strict) throw new Error(`Could not read config file: ${e.message}`, { cause: e });
@@ -166,6 +175,7 @@ export function writeConfig(config, repoRoot) {
   if (Object.hasOwn(config, 'lane_max_active_agents')) {
     validateLaneLimit(config.lane_max_active_agents);
   }
+  validateDeliveryConfig(config);
   const configPath = getConfigPath(repoRoot);
   if (fs.existsSync(configPath)) readConfig(repoRoot, { strict: true });
   writeConfigFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -175,14 +185,48 @@ export function writeConfig(config, repoRoot) {
  * Get a single config value
  */
 export function getConfigValue(key, repoRoot) {
-  const config = readConfig(repoRoot, { strict: key === 'lane_max_active_agents' });
+  const config = readConfig(repoRoot, {
+    strict: key === 'lane_max_active_agents' || DELIVERY_CONFIG_KEYS.includes(key),
+  });
   if (key === 'lane_max_active_agents') validateLaneLimit(config[key]);
+  if (DELIVERY_CONFIG_KEYS.includes(key)) validateDeliveryValue(key, config[key]);
   return config[key];
 }
 
 function validateLaneLimit(value) {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error('lane_max_active_agents must be a positive safe integer');
+  }
+}
+
+function validateDeliveryConfig(config) {
+  for (const key of DELIVERY_CONFIG_KEYS) {
+    if (Object.hasOwn(config, key)) validateDeliveryValue(key, config[key]);
+  }
+}
+
+function validateDeliveryValue(key, value) {
+  switch (key) {
+    case 'lane_dev_max_tasks':
+      if (!Number.isSafeInteger(value) || value < 1) {
+        throw new Error('lane_dev_max_tasks must be a positive safe integer');
+      }
+      return;
+    case 'lane_validation_mode':
+      if (!['agent', 'human'].includes(value)) {
+        throw new Error("lane_validation_mode must be 'agent' or 'human'");
+      }
+      return;
+    case 'lane_commit_mode':
+      if (!['after_validation', 'manual'].includes(value)) {
+        throw new Error("lane_commit_mode must be 'after_validation' or 'manual'");
+      }
+      return;
+    case 'lane_pr_mode':
+      if (!['none', 'prepare', 'draft', 'ready'].includes(value)) {
+        throw new Error("lane_pr_mode must be 'none', 'prepare', 'draft', or 'ready'");
+      }
+      return;
   }
 }
 
@@ -206,6 +250,15 @@ function setConfigValueLocked(key, value, repoRoot) {
     case 'lane_max_active_agents':
       if (typeof value === 'string' && /^\d+$/.test(value)) value = Number(value);
       validateLaneLimit(value);
+      break;
+    case 'lane_dev_max_tasks':
+      if (typeof value === 'string' && /^\d+$/.test(value)) value = Number(value);
+      validateDeliveryValue(key, value);
+      break;
+    case 'lane_validation_mode':
+    case 'lane_commit_mode':
+    case 'lane_pr_mode':
+      validateDeliveryValue(key, value);
       break;
     case 'project_id':
       validateProjectId(value);

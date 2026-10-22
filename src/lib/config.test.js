@@ -14,7 +14,10 @@ function workspace(content = JSON.stringify(existing)) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clips-config-'));
   roots.push(root);
   fs.mkdirSync(path.join(root, '.clips'));
-  const file = path.join(root, '.clips', 'clips.config.json');
+  const file = content === null
+    ? path.join(root, '.lanes', 'lanes.config.json')
+    : path.join(root, '.clips', 'clips.config.json');
+  if (content === null) fs.mkdirSync(path.dirname(file));
   if (content !== null) fs.writeFileSync(file, content);
   return { root, file };
 }
@@ -31,6 +34,56 @@ describe('Lane worker configuration', () => {
     expect(getConfigValue('lane_max_active_agents', root)).toBe(5);
     expect(fs.existsSync(file)).toBe(false);
     expect(initConfig({}, root).lane_max_active_agents).toBe(5);
+  });
+
+  describe('delivery policy preferences', () => {
+    it('uses documented defaults and round-trips supported values while preserving unknown config', () => {
+      const defaults = workspace(null);
+      expect(getConfigValue('lane_dev_max_tasks', defaults.root)).toBe(3);
+      expect(getConfigValue('lane_validation_mode', defaults.root)).toBe('human');
+      expect(getConfigValue('lane_commit_mode', defaults.root)).toBe('after_validation');
+      expect(getConfigValue('lane_pr_mode', defaults.root)).toBe('none');
+
+      const { root, file } = workspace(JSON.stringify(existing));
+
+      setConfigValue('lane_dev_max_tasks', '2', root);
+      setConfigValue('lane_validation_mode', 'human', root);
+      setConfigValue('lane_commit_mode', 'manual', root);
+      setConfigValue('lane_pr_mode', 'prepare', root);
+      expect(getConfigValue('lane_dev_max_tasks', root)).toBe(2);
+      expect(getConfigValue('lane_validation_mode', root)).toBe('human');
+      expect(getConfigValue('lane_commit_mode', root)).toBe('manual');
+      expect(getConfigValue('lane_pr_mode', root)).toBe('prepare');
+      expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({
+        ...existing,
+        lane_dev_max_tasks: 2,
+        lane_validation_mode: 'human',
+        lane_commit_mode: 'manual',
+        lane_pr_mode: 'prepare',
+      });
+    });
+
+    it.each([
+      ['lane_dev_max_tasks', 0], ['lane_dev_max_tasks', '1.5'],
+      ['lane_dev_max_tasks', Number.MAX_SAFE_INTEGER + 1], ['lane_validation_mode', 'auto'],
+      ['lane_commit_mode', 'always'], ['lane_pr_mode', 'publish'],
+    ])('rejects invalid %s writes without changing the file', (key, value) => {
+      const { root, file } = workspace();
+      const before = fs.readFileSync(file, 'utf8');
+      expect(() => setConfigValue(key, value, root)).toThrow();
+      expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    });
+
+    it.each([
+      ['lane_dev_max_tasks', 0], ['lane_validation_mode', 'other'],
+      ['lane_commit_mode', null], ['lane_pr_mode', ['draft']],
+    ])('fails strict reads and writes for invalid stored %s without overwriting', (key, value) => {
+      const { root, file } = workspace(JSON.stringify({ ...existing, [key]: value }));
+      const before = fs.readFileSync(file, 'utf8');
+      expect(() => getConfigValue(key, root)).toThrow();
+      expect(() => setConfigValue('username', 'changed', root)).toThrow();
+      expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    });
   });
 
   describe('layered model preferences', () => {
