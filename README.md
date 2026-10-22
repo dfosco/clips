@@ -6,10 +6,12 @@
 
 # Lanes
 
-Lanes gives AI agents a shared structure of goals, tasks, and clear checks for
+Lanes gives AI agents a shared structure of lanes, goals, tasks, and clear checks for
 what "done" means. Its Lane Manager turns a broad idea into that structure,
 coordinates the agents doing the work, and keeps their results tied to the
 agreed goals.
+
+Lanes are broad workstreams (think epics), Goals are project-wide goals, Tasks are implementation tasks.
 
 ## Install and get started
 
