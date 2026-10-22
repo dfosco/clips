@@ -9,7 +9,7 @@ description: >-
   optional Paseo work-record/execution association, and GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.21.2"
+  version: "2026.10.22.1"
 ---
 
 # Lanes
@@ -109,6 +109,15 @@ Preparation against a settled interface needs an explicit bounded contract and
 a separate final integration obligation. Do not treat a blocked implementation
 as ready, or prepared work as accepted. These are agent procedures, not a CLI
 scheduler, execution lock or evidence of future agent compliance.
+
+Before dispatch, the manager also reads the effective bounded-assignment,
+validation, commit and PR preferences and defines the return and acceptance
+gates. Follow the shared
+[bounded delivery and publication gate procedure](references/delivery.md#bounded-delivery-validation-and-publication-gates)
+for finite per-session Task assignments, durable final context, host retirement,
+candidate-specific evidence, failure disposition, truthful closure and the
+external authorization boundary. These settings describe policy; they do not
+create a native scheduler, human approval, or publication authority.
 
 ## Reuse existing plans and attachments
 
@@ -438,6 +447,23 @@ explicit IDs for later edits. Use named sections or `extensions` for optional
 notes, risk descriptions, migration details, or project-specific relationships.
 
 ## Preserve workflow state and coordinate writers
+
+Use the shared
+[delivery gate procedure](references/delivery.md#bounded-delivery-validation-and-publication-gates)
+when coordinating Task/Goal acceptance, worker retirement, local commits or PR
+endpoints. The Lane Manager owns shared Lanes records and cross-Task integration
+oversight by default; assigned devs resolve conflicts and execute their own
+integration, checks and commits. Workers return evidence and proposed updates.
+Default human Goal review attaches a CR pinned to the exact candidate, content
+and covered scope, then requires a separate pinned request; attachment alone is
+not a review request. The user can coalesce selected Goals in a Lane CR without
+duplicate approval for covered scope. A review inbox holds actionable requests;
+a generic waiting label does not. ADR approval settles a decision, not
+implementation acceptance. Goal completion requires approval of the exact
+candidate plus its delivery endpoint. `changes_requested` requires bounded
+affected rework and a new request; `deferred` leaves an explicit user wait.
+Acceptance must match the exact candidate checked, and any material source
+change requires reassessment of affected evidence.
 
 Treat host identity, Lane claims, management roles, and previous session
 associations as advisory metadata, not prerequisites for authorized work. The

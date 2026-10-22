@@ -8,7 +8,7 @@ description: >-
   This is the developer role, not the Lane Manager or a recurring monitor.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.21.2"
+  version: "2026.10.22.1"
 ---
 
 # Lane Dev
@@ -250,6 +250,21 @@ When delegated work, apply Lane Dev only within the assignment and its ownership
 rules. Return results and unresolved decisions to the parent. Do not widen the
 scope or appoint yourself another writer to shared Lanes state.
 
+Treat the manager's Task batch as finite. The default is one explicit Task; a
+few may be assigned together only when they form a bounded, reviewable request.
+Respect the effective `lane_dev_max_tasks` total for this session in the Lane,
+including earlier assignments visible in known history. Finish or hand back the
+batch when its return condition is met, even below the cap. Do not turn rework
+into open-ended session reuse or evade a host lifetime quota. Before retirement,
+return the final context described in the shared
+[bounded assignment procedure](../lanes/references/delivery.md#bounded-worker-assignments-and-retirement):
+request refs/revisions, exact artifact and changed paths, criterion-level checks
+and results, commands/environment, decisions, blockers/remaining inputs, and
+whether writes or external effects remain active. Preserve recoverable work and
+let the manager review and confirm quiescence before it uses a supported,
+authorized host retirement action. Do not claim a stop/archive succeeded without
+native readback.
+
 Keep the work contract complete, whether requested directly or handed off:
 
 - Expected outcome, task ref, criteria, and relevant component agreements.
@@ -315,6 +330,16 @@ lessons with their conditions. Do not expand scope, lower acceptance, or restart
 the team merely to obtain fresh contexts.
 
 ## Tie acceptance to the delivered result
+
+Follow the shared
+[validation, acceptance, commit and PR gates](../lanes/references/delivery.md#bounded-delivery-validation-and-publication-gates)
+and the effective policy passed by the manager. A worker's verification does not
+itself accept a shared Goal or Task unless the assignment explicitly gives it
+that authority. Return exact candidate identity and evidence. A failed check
+blocks acceptance and downstream commit/PR work; do not mark a failed candidate
+ready-to-review. Source changes invalidate affected evidence. Do not commit or
+perform external publication from a worker assignment unless that authority is
+explicitly included in the contract.
 
 For each criterion, preserve what was checked, how, the observed result, and the
 source or artifact checked. Include environment details when they matter. Record

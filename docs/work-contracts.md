@@ -415,6 +415,185 @@ Administrative `status closed` creates no receipt and is not evidence of
 acceptance. Reopening work also invalidates its prior current acceptance.
 Status is useful for coordination, while evidence supports the completion claim.
 
+## Bounded delivery, validation, and publication gates
+
+Before dispatch, the Lane Manager reads the effective project settings with
+`lanes config lane_dev_max_tasks`, `lanes config lane_validation_mode`,
+`lanes config lane_commit_mode`, and `lanes config lane_pr_mode`. Defaults are
+`3`, `human`, `after_validation`, and `none`. These settings describe the
+intended delivery workflow. They are not a scheduler, proof of host capability,
+acceptance authority, or permission for an external action. Record the effective
+values, any explicit user override, the actual acceptance authority, and desired
+delivery endpoint in the plan or handoff.
+
+### Bounded worker assignments and retirement
+
+Assign each Lane Dev session one bounded batch of explicit, persisted Tasks. The
+default batch is one Task; combine a few only when they remain a clear, reviewable
+assignment. The total number of Tasks assigned to that session in the Lane must
+not exceed `lane_dev_max_tasks`. Retire the assignment as soon as its batch ends,
+even when the numeric cap was not reached. Reassignment does not reset the
+count: include known earlier assignments from session history and associations.
+Permit bounded rework only against the same persisted contract, with a defined
+change or evidence request and a finite return condition. If the host lifetime
+quota is reached or unknown, do not keep reusing the session to evade it; report
+the limitation and use a permitted fresh dispatch path only when available and
+within the active-worker budget.
+
+Before retirement, the dev returns durable final context containing the exact
+Goal/Task refs and pinned request revisions; final artifact identity and changed
+paths; each acceptance criterion with check/scenario, observed result and
+evidence location; verification commands and environment; material decisions;
+known failures, blockers and remaining inputs; and whether writes or external
+effects remain in flight. Preserve a recoverable transcript or worktree when the
+host provides it. The manager reads and reviews this handoff, reconciles the
+candidate and criteria, and confirms that no writes or side effects remain
+active before retirement. Then discover and use the host's supported, authorized
+non-destructive close/archive/stop action, and read back the session state to
+confirm the result. Preserve source, worktree, transcript and association
+history. Never infer a close capability or terminate an active writer. If the
+host has no suitable action or requires unavailable approval, report that exact
+limit and the actual session state. When a human validation wait begins after a
+stable handoff, archive/close an idle worker then; do not retain it merely to
+wait for a human response.
+
+### Validation and acceptance gate
+
+For each candidate, name the exact checked artifact (commit plus any dirty-diff
+identity, tree, or immutable artifact ref), each required check or scenario, its
+actual result, the accepting actor and authority, and the action taken on pass or
+failure. A failed check blocks acceptance and downstream commit/PR work; repair
+and rerun affected checks, or report the blocker. Later source changes invalidate
+the affected evidence and require reassessment. `ready-to-review` is only an
+actionable request for human validation, never a substitute for acceptance or a
+default holding state.
+
+Human validation is the default for the integrated Goal. The manager attaches a
+Goal CR that identifies the exact candidate, covered scope, criteria and checks,
+then separately submits a pinned review request. Attaching a CR alone does not
+request review; ask for explicit `approved`, `changes_requested`, or `deferred`
+disposition. The user may coalesce selected Goals in one Lane CR. A covered
+scope receives one review decision, not duplicate Goal and Lane approvals.
+Attachments have an explicit purpose: CR for candidate review, ADR for a
+decision. ADR approval settles a decision; it does not accept implementation.
+The review inbox contains actionable requests pinned to candidate, content and
+coverage; a generic waiting label is not a review request. Never record human
+approval until the user responds. If the candidate changes before approval,
+refresh the request and checks.
+
+An agent may accept an engineering Task only when the contract authorizes that
+agent as accepting actor and the evidence satisfies every criterion. Record the
+real actor and per-criterion evidence. Task acceptance does not close its Goal.
+The manager reviews cross-Task evidence and prepares the human Goal review; it
+does not stand in for user validation. `lane_validation_mode=agent` is an
+explicit opt-out only where no named human gate applies. Do not use an
+administrative status change as acceptance.
+
+Goal completion requires approval of the exact candidate and fulfillment of the
+configured delivery endpoint. The manager records attributed evidence/receipt
+and closes the Goal only then. `changes_requested` sends bounded affected work
+to a dev and requires a new candidate-bound review request. `deferred` leaves
+an explicit user wait with its next owner and action; it does not permit endless
+building. Deferral is not final: the assigned reviewer may later record a new
+decision against the same still-current candidate. A pending Goal review does
+not keep an idle dev assigned after its handoff has been confirmed stable.
+
+### Commit and PR endpoint
+
+`lane_commit_mode=after_validation` means the dev commits after its automated
+checks pass, before manager analysis and user validation. The Task contract
+must authorize that dev-owned local commit. Stage only scoped, checked paths,
+inspect the staged diff, and preserve unrelated user changes. Never commit after
+failed or stale checks. Record the resulting commit identity and rerun checks
+affected by commit hooks or generated files. Under `lane_commit_mode=manual`,
+leave an explicit handoff naming the verified paths, candidate identity and
+next commit owner; do not imply a commit exists.
+
+`lane_pr_mode` selects a desired endpoint: `none` stops before PR preparation;
+`prepare` produces a local review brief or exact proposed title/body;
+`draft` or `ready` permits PR materialization only with GitHub collaboration
+enabled, the explicit `--confirm` flag, and the user's required external-action
+authorization. Materialization is allowed while review is awaiting a decision,
+uses `gh pr create --draft` for draft mode and `gh pr create` for ready mode,
+and requires local/remote branch tips to match the pinned base/head commits.
+It stores a separate pull-request association and leaves review status unchanged.
+PR creation is a review surface only. It is not approval, merge, delivery
+completion, Task acceptance or Goal acceptance. `none` and `prepare` prohibit
+materialization. No setting authorizes a push.
+
+`lanes attachment add <Lane|Goal|Task> '<json>'` accepts optional
+`purpose: "cr"` or `"adr"`, which only labels use. Remote CR/ADR references
+remain attachable, but review pinning requires readable local Markdown with
+purpose `cr`. Goal coverage pins the Goal and required Task obligations; Task
+coverage includes only that Task; Lane coverage requires explicit selected
+in-Lane Goal/Task refs. Fully covered active requests coalesce into one journal
+event. Partial overlaps reject with the uncovered obligations. Idempotent
+request reuse compares reviewer, summary, validation, delivery intent,
+attachment identity/content, coverage pins, candidate commits and branch refs.
+
+Use `lanes review request <record-ref> --file payload.json` to submit a
+candidate-bound request for a CR attachment; attaching the CR alone is not a
+request. `lanes review show <id> --json` returns a numeric `revision` to pass as
+`expected_revision` when deciding or completing. It returns pinned
+`attachment.content`; when stale, it also returns `current_content`, pinned and
+current SHA-256 identities, and read identities. This lets the reviewer see the
+original pin and current-content warning together.
+
+Use `lanes review decide <id> --file payload.json` with numeric
+`expected_revision`, the exact candidate, and an actor matching the assigned
+reviewer. `awaiting_review`, `changes_requested`, and `deferred` are actionable.
+Deferred permits an explicit subsequent decision without an edit; superseded and
+delivered reviews are terminal, and exact retries do not resurrect them.
+
+Use `lanes review pr preview <id> --json` to inspect materialization, then
+`lanes review pr materialize <id> --confirm` only after the required authority.
+Candidate data includes base/head commit SHAs and matching `base_ref`/`head_ref`
+branch names. The head must still equal Git `HEAD`, and base must be its
+ancestor. `gh` receives branch names only after local and remote branch tips are
+verified against the pinned SHAs. Materialization records a separate
+pull-request association and leaves review status unchanged, including while
+awaiting review.
+
+`lanes review complete <id> --file payload.json` records an approved candidate's
+endpoint evidence from `{actor, candidate:{base,head}, endpoint,
+expected_revision?}`. URL endpoints use `{type:"github_pr"|"url",url}`;
+`github_pr` requires an HTTPS GitHub pull URL and `url` an absolute HTTP/HTTPS
+URL. These are evidence links, not merge proof, and require a non-stale
+candidate. Local Git proof uses `{type:"git",ref:"main",commit:"<full SHA>"}`.
+It requires a local branch name, a commit equal to that branch's current tip,
+the approved head as an ancestor, and identical delivered/approved trees. This
+form accounts for expected HEAD/base-ref movement from a real merge or
+fast-forward. Changes to the attachment, CR, coverage, or Lane contract, and
+missing candidate objects still reject. Completion does not perform a merge.
+It records `delivered_by` and endpoint evidence only, does not authenticate the
+actor, and does not accept or close a Goal or Task automatically. A delivered
+review is a historical receipt: `review show` reports `stale:false` after
+delivery, and later unrelated HEAD/base movement does not reclassify its
+evidence.
+
+`lanes review pr import <id> --event <PullRequestReview-GraphQL-node-ID> --json`
+imports one decision event from an already linked PR through read-only
+`gh api graphql`. It verifies the linked PR URL, base/head OIDs, event commit
+OID, valid submission time, author login against the assigned reviewer, and
+event ID against the pinned local review. Only `APPROVED` and
+`CHANGES_REQUESTED` GitHub review events import. The local journal records the GitHub
+review node ID, login, state, commit OID, PR URL, `submittedAt`, and body.
+It queries only the supplied GraphQL review node ID. Reimporting
+the same event is idempotent;
+reusing an event ID with changed data rejects. Stale candidates reject. PR
+creation, merge, and aggregate `reviewDecision` do not imply approval. Import
+does not write to GitHub or run a continuous sync. It records a decision on the
+existing pinned review, not a second approval surface. A human decision or
+GitHub import uses the same approval surface for covered obligations.
+
+The Lane Manager owns shared Lanes records and cross-Task coordination and
+integration oversight. Assigned devs execute their technical conflicts,
+integration, checks and authorized commits. Workers return evidence and proposed updates. A completed worker assignment is not complete
+delivery until automated validation, engineering acceptance, the configured
+commit behavior, and the requested human review/PR endpoint are each either
+reached or left with an explicit next owner and action. Human Goal validation
+may remain pending after engineering Tasks are accepted and the dev is retired.
+
 ## Dependencies and coordination
 
 Use Lanes for strategic grouping and narrative continuity across related goals.

@@ -11,7 +11,7 @@ description: >-
   attention, intake, PR preparation and proposed routing belong to lane-radar.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.21.2"
+  version: "2026.10.22.1"
 ---
 
 # Lane Manager
@@ -185,7 +185,11 @@ making the user author the technical breakdown.
 
 - **Lane Manager** owns strategic scope, priorities, cross-Goal dependencies,
   product decisions, Task coverage assessment and review of returned outcomes.
-  It may coordinate several Lanes. A Lane is a durable work object, not a session.
+  It mediates competing technical approaches by connecting the developers,
+  helping them resolve overrides and record an agreed decision, then amends
+  contracts and directs the agreed work. It does not remove the dev owner's
+  technical decision authority or take over implementation. It may coordinate
+  several Lanes. A Lane is a durable work object, not a session.
 - **Lanes** owns durable records, command support and acceptance mechanics.
   Read the [Lanes skill](../lanes/SKILL.md) rather than duplicating its schemas.
 - **Lane Radar** owns on-demand external attention, intake, PR preparation and
@@ -434,6 +438,27 @@ authorization remains a real blocker; do not relabel it as a model fallback.
 | Launch result may have created a session | Read back host state and reconcile before another launch | No retry while ambiguous |
 | Native launch capability or credentials are missing or denied | Report the actual blocker; model fallback does not replace the capability | Stop affected dispatch |
 
+## Resolve delivery policy before dispatch
+
+Read the effective project settings before dispatch or resuming assigned work:
+
+```bash
+lanes config lane_dev_max_tasks
+lanes config lane_validation_mode
+lanes config lane_commit_mode
+lanes config lane_pr_mode
+```
+
+The defaults are `3`, `human`, `after_validation`, and `none`. Apply explicit
+user or assignment authority where it is more specific, and record the effective
+values, acceptance actor/authority and requested endpoint in the handoff or plan.
+Settings express workflow preferences; they do not create scheduler enforcement,
+acceptance authority, native host capabilities or permission for external
+actions. Follow the shared
+[bounded delivery and gate procedure](../lanes/references/delivery.md#bounded-delivery-validation-and-publication-gates)
+for finite Task batches, final context, candidate checks, acceptance, commit and
+PR boundaries.
+
 ## Read and announce the Lane worker budget
 
 Before dispatching work for each Lane, read its canonical project's configuration:
@@ -456,6 +481,16 @@ existing Lane context, such as its description; do not overwrite unrelated
 content or invent a new CLI field. Otherwise use the configured project default.
 Respect stricter host or user resource limits. Read the correct project's
 configuration, not an unrelated repository where the manager happens to run.
+
+Concurrent worker capacity does not bound lifetime session reuse. Each Lane Dev
+session receives one finite assignment of persisted Tasks, defaulting to one and
+never exceeding the effective `lane_dev_max_tasks` total for that Lane. Retire
+the assignment when its batch ends, even below the cap; count prior Tasks from
+known history and associations if the session is reassigned. Allow only finite
+rework against the same contract. Read the shared
+[bounded assignment and retirement procedure](../lanes/references/delivery.md#bounded-worker-assignments-and-retirement)
+before dispatch and require its final-context checklist before closing an idle
+host session.
 
 Announce the effective budget before dispatch, including any tighter constraint
 and how to override it. For example: "This Lane can use up to 3 concurrent
@@ -537,6 +572,13 @@ verification and shared-record coordinator. Sequence real prerequisites and
 coupled edits; never invent filler Tasks or worker quotas. A single dev session
 can serialize a bounded cut. Generic delegation guidance does not override
 host-specific session topology or user resource limits.
+
+Developers own resolving routine technical conflicts, automated validation and
+authorized local commits. The manager connects owners to hash out competing
+approaches and overrides, records their decision, and revises the contract if
+scope changes. `after_validation` means after automated dev checks, before
+manager analysis and user validation. Do not postpone an authorized commit for
+manager or user approval.
 
 After the initial mode choice or explicit user direction, do not ask routine
 approval for necessary authorized sessions or continuation.
@@ -777,46 +819,32 @@ are recommendations, not new Lanes statuses or permission to reduce scope.
 
 ## Hand completed Goals to human validation
 
-When an execution agent reports that a Goal's implementation is complete, reconcile
-its changed artifact, required Tasks, checks, and unresolved issues. If the required
-implementation and verification are complete and you are presenting that result
-to a human for validation, add the project label **`ready-to-review`** to that Goal.
-Do this as part of the handoff, before claiming the review-ready label was applied.
-Do not add it merely because work started, a Task closed, or an agent stopped.
-Unfinished or blocked Goals and Goals with current acceptance are not eligible.
+Use the shared [validation and acceptance gate](../lanes/references/delivery.md#validation-acceptance-and-user-review).
+When a Goal's implementation is complete, reconcile its changed artifact,
+required Tasks, checks, and unresolved issues. If implementation and
+verification are complete, present the exact committed candidate to a human for
+validation with a separate pinned review request. Unfinished or blocked Goals
+and Goals with current acceptance are not eligible for a new review request.
 
-With local Lanes access, check `lanes label --help`, then inspect the Goal and the
-project catalog. The canonical name is exactly `ready-to-review`; its initial
-default ID is `ready-to-review`. Existing catalog identity takes precedence:
-reuse the ID returned for that name, including one generated after an earlier ID
-was retired. Do not rename or recolor an existing project label to enforce defaults.
+Attaching a CR alone does not request review. The manager separately submits a
+pinned request naming the reviewer, exact candidate, covered scope, criteria,
+checks and results, requested response, and next owner. A user may coalesce
+selected Goals into a Lane CR; do not request another approval for obligations
+already covered. The review inbox contains actionable candidate-bound requests.
+If the candidate changes, refresh the request and affected checks. For stale CR
+content, show the immutable pinned text alongside current text, both content
+identities and read identities. Never record user approval before the user
+responds.
 
-```bash
-lanes view '#g1' --json
-lanes label list --json
-```
+An approved exact candidate plus a fulfilled configured delivery endpoint lets
+the manager record attributed evidence or a receipt and close the Goal. A
+`changes_requested` decision leads to bounded rework for affected scope and a
+new candidate review. A `deferred` decision is an explicit user wait, not a
+reason to keep building indefinitely. After confirmed handoff, pending human
+review does not prevent retiring idle developers.
 
-If that name is absent, create it once. Use the **returned ID**, rather than
-assuming it equals the name. If another writer created it first, reread the
-catalog and reuse that definition; do not create a duplicate. For example, in a
-fresh project catalog these supported commands create and assign it:
+A review request is not acceptance and does not change a Goal lifecycle status.
 
-```bash
-lanes label create '{"name":"ready-to-review","color":"#8b5cf6"}'
-lanes label add '#g1' ready-to-review
-```
-
-Replace `#g1` with the actual Goal ref, retaining its namespace. Confirm the label
-in `lanes view '<actual-goal-ref>' --json`. If an existing label has ID
-`review-handoff`, for example, use `lanes label add '#g1' review-handoff`.
-If work becomes unfinished or blocked again, remove the readiness assignment with
-`lanes label remove '#g1' <returned-id>` and explain the remaining work.
-
-This label is a request for human validation, **not acceptance** and not a Goal
-lifecycle status. Preserve the actual status, receipts, and accepting actor. Do
-not close or accept a Goal just to produce the label. If local commands are
-unavailable or fail, report that the label was not applied; never infer it from a
-Lanes status or claim a Paseo agent is running without runtime evidence.
-This procedure requires the labels capability. If this checkout does not yet
-support it, report that limitation; do not import an unrelated feature branch
-just to add the label.
+Use a `ready-to-review` label only when the human CR request is complete and the
+local capability supports it. It is optional metadata, not acceptance, a generic
+blocked status, or a default endpoint for agent validation.

@@ -94,19 +94,22 @@ describe("Paseo work mapping", () => {
     expect(promptFor(task)).toContain("clips view '#alice#g001#t01' --json");
     expect(promptFor({ kind: "lane", ref: "#l001", title: "Vision" })).toContain("strategic product frame");
     const managerPrompt = promptFor({ kind: "lane", ref: "#l001", title: "Vision" });
-    expect(managerPrompt).toContain("Before strategic management, inspect its manager claim");
-    expect(managerPrompt).toContain("acquire a claim with the inspected revision and your actual observed host/runtime/session identity");
-    expect(managerPrompt).toContain("If this session already owns the Lane, reuse that claim");
-    expect(managerPrompt).toContain("do not begin management or take over ownership");
+    expect(managerPrompt).toContain("claims and registrations are advisory metadata, not prerequisites for authorized work");
+    expect(managerPrompt).toContain("Mediate competing approaches with the developers");
+    expect(managerPrompt).toContain("record decisions and amend contracts");
+    expect(managerPrompt).toContain("make authorized local commits before manager analysis and user validation");
+    expect(managerPrompt).toContain("default human review is a Goal-attached CR for the exact candidate");
+    expect(managerPrompt).not.toContain("do not begin management");
     expect(managerPrompt).toContain("verified top-level workspace dev agents the user can steer directly");
-    expect(managerPrompt).toContain("Do not create child agents");
+    expect(managerPrompt).toContain("Review their evidence without taking over implementation");
   });
 });
 
 describe("generated work execution contexts", () => {
   it.each(["goal", "task"] as const)("gives %s dev owners tracked Task parallelism and integrated evidence duties", (kind) => {
     const prompt = promptFor({ ...task, kind });
-    expect(prompt).toMatch(/Use sub-agents.*assigning each worker Task IDs and contracts/);
+    expect(prompt).toMatch(/Use other workers only when the task contracts authorize it and the host supports it/);
+    expect(prompt).not.toContain("Use sub-agents for as much useful feasible work as possible");
     expect(prompt).toMatch(/dependency-ready, non-conflicting Tasks concurrently; sequence prerequisites and conflicting writes/);
     expect(prompt).toMatch(/one dev coordinator for integration, verification and workflow-record writes/);
     expect(prompt).toMatch(/results and checks mapped to Task IDs and the actual source\/artifact checked/);
@@ -118,8 +121,15 @@ describe("generated work execution contexts", () => {
     const prompt = promptFor({ kind: "lane", ref: "#l001", title: "Vision" });
     expect(prompt).toMatch(/In every handoff, instruct the top-level dev owner.*Plan and execute parallel Tasks/);
     expect(prompt).toContain("Do not create or direct the owner's sub-agents yourself");
-    expect(prompt).toContain("Do not create child agents, implement, run validation or babysit workers yourself");
+    expect(prompt).toContain("Mediate competing approaches with the developers");
+    expect(prompt).not.toContain("run validation or babysit workers yourself");
     expect(prompt).not.toContain("assigning each worker Task IDs and contracts");
+  });
+
+  it("keeps worker retirement independent of a pending human Goal review", () => {
+    const prompt = promptFor(task);
+    expect(prompt).toContain("Return the finite batch after durable handoff");
+    expect(prompt).toContain("a pending human Goal review does not keep an idle worker assigned");
   });
 
   it("passes the same Goal/Task context through CLI previews, CLI/server agents and workspace attachments", async () => {

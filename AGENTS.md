@@ -158,6 +158,17 @@ commit alone does not identify dirty work. If a later change can affect a prior
 result, recheck the affected criteria. Keep waived scope distinct from delivered
 behavior and preserve the authority for exceptions.
 
+The delivery defaults are `lane_validation_mode=human`,
+`lane_commit_mode=after_validation`, and `lane_pr_mode=none`. Here,
+`after_validation` means the dev's automated checks passed: an authorized dev
+commits its scoped changes before manager analysis and user validation. The
+default human gate is a Goal-attached CR for the exact committed candidate; a
+user may coalesce covered Goals in a Lane CR without duplicate approval. The
+manager mediates competing technical approaches and records agreed decisions;
+the dev owns implementation and routine conflict resolution. An idle worker can
+be retired after the manager confirms a durable handoff, even while Goal review
+is pending. See the packaged [delivery procedure](.agents/skills/lanes/references/delivery.md).
+
 ## Storage and ownership
 
 Work ownership is advisory coordination metadata, not an execution lock.

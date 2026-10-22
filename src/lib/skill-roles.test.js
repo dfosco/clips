@@ -101,6 +101,42 @@ afterEach(() => {
 });
 
 describe('documented role decisions (not live model compliance)', () => {
+  it('packages consistent delivery gates with portable skill links', () => {
+    const delivery = fs.readFileSync(path.resolve('.agents/skills/lanes/references/delivery.md'), 'utf8');
+    for (const name of ['lanes', 'lane-manager', 'lane-dev']) {
+      expect(skills[name]).not.toContain('../../../docs/work-contracts.md');
+      expect(skills[name]).toContain('references/delivery.md');
+    }
+    expect(compact(delivery)).toContain('defaults are `3`, `human`, `after_validation`, and `none`');
+    expect(compact(delivery)).toContain('commits after automated checks pass and before manager analysis or user validation');
+    expect(delivery).toContain('The manager attaches a Goal CR');
+    expect(compact(delivery)).toContain('may coalesce selected Goal reviews into one Lane CR');
+    expect(compact(delivery)).toContain('not duplicate Goal and Lane approvals');
+    expect(compact(delivery)).toContain('A generic waiting label is not a review request');
+    expect(compact(delivery)).toContain('confirms the handoff is stable before using');
+    expect(compact(delivery)).toContain('A human review wait does not require keeping an idle worker alive');
+    expect(compact(delivery)).toContain('Attaching a CR alone does not request review');
+    expect(compact(delivery)).toContain('ADR approval settles a decision and does not accept');
+    expect(compact(delivery)).toContain('review pr import <id> --event <PullRequestReview-GraphQL-node-ID> --json');
+    expect(compact(delivery)).toContain('Only GitHub `APPROVED` and `CHANGES_REQUESTED` events import');
+    expect(compact(delivery)).toContain('aggregate `reviewDecision` do not imply approval');
+    expect(compact(delivery)).toContain('same still-current candidate');
+    expect(compact(delivery)).toContain('closes the Goal only then');
+    expect(compact(delivery)).toContain('`deferred` leaves an explicit user wait');
+    expect(compact(delivery)).toContain('PR creation is only a review surface');
+    expect(compact(delivery)).toContain('approved head to be an ancestor');
+    expect(compact(delivery)).toContain('identical delivered and approved trees');
+    expect(compact(delivery)).toContain('Completion does not perform a merge');
+    expect(compact(delivery)).toContain('`review show` reports `stale:false` after delivery');
+    expect(compact(delivery)).toContain('They are evidence links, not proof of merge');
+
+    const manager = compact(skills['lane-manager']);
+    expect(manager).toContain('mediates competing technical approaches by connecting the developers');
+    expect(manager).toContain("does not remove the dev owner's technical decision authority");
+    expect(manager).toContain('Developers own resolving routine technical conflicts, automated validation and authorized local commits');
+    expect(manager).toContain('before manager analysis and user validation');
+  });
+
   it('applies model preferences only to new sessions and preserves bounded fallback decisions', () => {
     const preferences = compact(section(skills['lane-manager'], 'Resolve model preferences and fallbacks'));
     expect(preferences).toContain('project > user > built-in');
