@@ -1,5 +1,5 @@
 import { readJsonInput } from '../lib/json-input.js';
-import { completeReview, decideReview, importReviewPrDecision, listReviews, materializeReviewPr, previewReviewPr, requestReview, showReview } from '../lib/reviews.js';
+import { completeReview, decideReview, importReviewPrDecision, listReviews, materializeReviewPr, openReview, previewReviewPr, requestReview, showReview } from '../lib/reviews.js';
 
 function print(value) { console.log(JSON.stringify(value, null, 2)); }
 
@@ -12,6 +12,7 @@ function showHelp() {
 
 Commands:
   request <Lane|Goal|Task-ref> --file <payload>  Create or reuse a pinned review request
+  open <record-ref|review-id> [--json]            Export the exact pinned Markdown and print its path
   list --json                                     List review requests and stale state
   show <review-id> --json                         Show the pinned review candidate and CR content
   decide <review-id> --file <payload>             Record an explicit reviewer decision
@@ -54,6 +55,15 @@ export function runReviewCommand(args) {
   if (action === 'list') {
     requireJsonFlag(rest, 'lanes review list --json');
     print(listReviews());
+    return;
+  }
+  if (action === 'open') {
+    if (rest.length < 1 || rest.length > 2 || (rest.length === 2 && rest[1] !== '--json')) {
+      throw new Error('Usage: lanes review open <record-ref|review-id> [--json]');
+    }
+    const result = openReview(rest[0]);
+    if (rest[1] === '--json') print(result);
+    else console.log(result.path);
     return;
   }
   if (action === 'show') {

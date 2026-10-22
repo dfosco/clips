@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { decideProjectReview, readProjectReview } from "./backend";
+import { decideProjectReview, openProjectReview, readProjectReview } from "./backend";
 
 const rootPath = fileURLToPath(new URL("../../../src/cli.js", import.meta.url));
 const tempDirs: string[] = [];
@@ -55,8 +55,34 @@ it("reads the CLI review detail attachment nesting and pinned CR identity", asyn
     summary: "Review this exact candidate.", validation: { status: "passed" },
   }));
   const requested = JSON.parse(cli(root, env, "review", "request", "#g1", "--file", requestFile));
-  const paseo = { projects: { list: async () => ({ projects: [{ projectId: "fixture", projectKind: "git",
-    projectRootPath: root, projectDisplayName: "Fixture", projectCustomName: null }] }) } } as any;
+  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lanes-paseo-review-other-project-"));
+  tempDirs.push(secondRoot);
+  git(secondRoot, "init", "--quiet", "-b", "main");
+  git(secondRoot, "config", "user.email", "fixture@example.test");
+  git(secondRoot, "config", "user.name", "Review Fixture");
+  fs.mkdirSync(path.join(secondRoot, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(secondRoot, "docs", "request.md"), "# Other project request\n\nOther pinned body.\n");
+  fs.writeFileSync(path.join(secondRoot, "source.txt"), "other base\n");
+  git(secondRoot, "add", ".");
+  git(secondRoot, "commit", "--quiet", "-m", "base");
+  const otherBase = git(secondRoot, "rev-parse", "HEAD");
+  git(secondRoot, "switch", "--quiet", "-c", "feature");
+  fs.writeFileSync(path.join(secondRoot, "source.txt"), "other candidate\n");
+  git(secondRoot, "commit", "--quiet", "-am", "candidate");
+  const otherHead = git(secondRoot, "rev-parse", "HEAD");
+  cli(secondRoot, env, "init", "--skills-scope", "project");
+  cli(secondRoot, env, "goal", "create", JSON.stringify({ title: "Other project review target" }));
+  const otherAttachment = JSON.parse(cli(secondRoot, env, "attachment", "add", "#g1", JSON.stringify({
+    type: "markdown", path: "docs/request.md", title: "Other project CR", purpose: "cr",
+  })));
+  const otherPayload = path.join(secondRoot, "review-request.json");
+  fs.writeFileSync(otherPayload, JSON.stringify({ attachment_id: otherAttachment.attachment.id, reviewer: "reviewer",
+    candidate: { base: otherBase, head: otherHead }, summary: "Other project candidate.", validation: { status: "passed" } }));
+  const otherReview = JSON.parse(cli(secondRoot, env, "review", "request", "#g1", "--file", otherPayload));
+  const paseo = { projects: { list: async () => ({ projects: [
+    { projectId: "fixture", projectKind: "git", projectRootPath: root, projectDisplayName: "Fixture", projectCustomName: null },
+    { projectId: "other", projectKind: "git", projectRootPath: secondRoot, projectDisplayName: "Other", projectCustomName: null },
+  ] }) } } as any;
 
   process.env.LANES_CLI_PATH = rootPath;
   const detail = await readProjectReview(paseo, { projectId: "fixture", id: requested.id });
@@ -67,6 +93,28 @@ it("reads the CLI review detail attachment nesting and pinned CR identity", asyn
   });
   expect(detail.attachment.read_identity).toMatchObject({ pinned: { status: "available" } });
   expect(detail.content_identity).toMatchObject({ sha256: expect.any(String) });
+  const opened = await openProjectReview(paseo, { projectId: "fixture", ref: "#g001" });
+  expect(opened).toMatchObject({
+    review: { id: requested.id, candidate: { base, head }, stale: false },
+    path: path.join(fs.realpathSync(root), ".lanes", "reviews", "opened", `${requested.id}.md`),
+  });
+  expect(opened.markdown).toContain("Pinned CR content.");
+  const otherOpened = await openProjectReview(paseo, { projectId: "other", ref: "#g001" });
+  expect(otherOpened).toMatchObject({ review: { id: otherReview.id, candidate: { base: otherBase, head: otherHead } } });
+  expect(otherOpened.markdown).toContain("Other pinned body.");
+  expect(otherOpened.path).not.toBe(opened.path);
+  const forgedCli = path.join(root, "forged-lanes.js");
+  const forgedResult = {
+    ...opened,
+    requested_ref: "#g2",
+    review: { ...opened.review, ref: "#g2", covered_refs: ["#g2"] },
+  };
+  fs.writeFileSync(forgedCli, `#!/usr/bin/env node\nconst path = require("node:path");\nif (process.argv.includes("--version")) process.exit(0);\nif (process.argv[2] === "paths") { const root = process.cwd(); process.stdout.write(JSON.stringify({ repoRoot: root, storeDir: path.join(root, ".lanes"), configPath: path.join(root, ".lanes", "lanes.config.json") })); process.exit(0); }\nprocess.stdout.write(${JSON.stringify(JSON.stringify(forgedResult))});\n`);
+  fs.chmodSync(forgedCli, 0o700);
+  process.env.LANES_CLI_PATH = forgedCli;
+  await expect(openProjectReview(paseo, { projectId: "fixture", ref: "#g001" }))
+    .rejects.toThrow("different pinned review");
+  process.env.LANES_CLI_PATH = rootPath;
   const decided = await decideProjectReview(paseo, {
     projectId: "fixture", id: requested.id, decision: "approved", actor: "reviewer",
     candidate: { base, head }, comment: "Reviewed the pinned request.", expectedRevision: detail.revision,

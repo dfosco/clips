@@ -414,3 +414,73 @@ describe('durable review requests', () => {
     }))).toContain('is stale');
   });
 });
+
+describe('pinned review Markdown export', () => {
+  it('exports the immutable pinned CR with candidate and stale context without changing the request journal', () => {
+    const { root, env, base, head } = workspace();
+    const attachment_id = makeGoal(root, env);
+    const review = request(root, env, requestPayload({ attachment_id, base, head }));
+    const journalPath = path.join(root, '.clips', 'db', 'reviews.jsonl');
+    const before = fs.readFileSync(journalPath, 'utf8');
+
+    fs.writeFileSync(path.join(root, 'docs', 'CR-001.md'), '# Changed request\n\nCurrent live text.\n');
+    const opened = run(root, env, 'review', 'open', '#g1', '--json');
+    const normalOutput = invoke(root, env, 'review', 'open', '#g1');
+    expect(normalOutput.status).toBe(0);
+    expect(normalOutput.stdout.trim()).toBe(opened.path);
+    expect(opened).toMatchObject({
+      review: { id: review.id, ref: '#g001', status: 'awaiting_review', reviewer: 'reviewer',
+        candidate: { base, head }, stale: true, stale_reasons: ['attachment_content_changed'] },
+      requested_ref: '#g001', content_identity: { sha256: expect.any(String) },
+    });
+    expect(path.isAbsolute(opened.path)).toBe(true);
+    expect(opened.path).toMatch(/\.md$/);
+    expect(fs.readFileSync(opened.path, 'utf8')).toContain('# CR-001: Change request\n\n- Review ID: ' + review.id);
+    expect(fs.readFileSync(opened.path, 'utf8')).toContain(`- Candidate base: ${base} (main)`);
+    expect(fs.readFileSync(opened.path, 'utf8')).toContain('- Stale: Yes (attachment_content_changed)');
+    expect(fs.readFileSync(opened.path, 'utf8')).toContain('## Pinned change request\n\n# Change request\n\nPinned request body.\n');
+    expect(fs.readFileSync(journalPath, 'utf8')).toBe(before);
+    expect(fs.readFileSync(path.join(root, 'docs', 'CR-001.md'), 'utf8')).toContain('Current live text.');
+    expect(invoke(root, env, 'review', 'open', review.id).stdout.trim()).toBe(opened.path);
+
+    fs.writeFileSync(opened.path, 'agent edits do not mutate the review');
+    const reopened = run(root, env, 'review', 'open', review.id, '--json');
+    expect(reopened.path).toBe(opened.path);
+    expect(fs.readFileSync(reopened.path, 'utf8')).toContain('Pinned request body.');
+    expect(fs.readFileSync(journalPath, 'utf8')).toBe(before);
+  });
+
+  it('matches coalesced coverage from the pinned obligations and excludes Tasks added afterward', () => {
+    const { root, env, base, head } = workspace();
+    const attachment_id = makeGoal(root, env);
+    const review = request(root, env, requestPayload({ attachment_id, base, head }));
+    const task = run(root, env, 'task', 'create', '#g1', JSON.stringify({
+      title: 'Added after review', description: 'This task was not in the pinned coverage.',
+    }));
+    const openedGoalReview = run(root, env, 'review', 'open', '#g1#t1', '--json');
+    expect(openedGoalReview.review.id).toBe(review.id);
+    expect(fails(root, env, 'review', 'open', '#g1#t2')).toContain('No actionable CR review found');
+    expect(openedGoalReview.review.stale).toBe(true);
+    expect(openedGoalReview.review.stale_reasons).toContain('coverage_changed');
+  });
+
+  it('reports missing and ambiguous record requests without choosing a review', () => {
+    const { root, env, base, head } = workspace();
+    const attachment_id = makeGoal(root, env);
+    const review = request(root, env, requestPayload({ attachment_id, base, head }));
+    expect(fails(root, env, 'review', 'open', '#g99')).toContain('Goal g99 not found');
+
+    const reviewFile = path.join(root, '.clips', 'db', 'reviews.jsonl');
+    const events = fs.readFileSync(reviewFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    const requestEvent = events.find((event) => event.event === 'review_requested');
+    const duplicate = structuredClone(requestEvent);
+    duplicate.review.id = 'rev-00000000-0000-4000-8000-000000000001';
+    duplicate.review.created_at = new Date().toISOString();
+    duplicate.timestamp = duplicate.review.created_at;
+    fs.appendFileSync(reviewFile, `${JSON.stringify(duplicate)}\n`);
+    const error = fails(root, env, 'review', 'open', '#g1');
+    expect(error).toContain('Multiple actionable CR reviews cover #g001');
+    expect(error).toContain(review.id);
+    expect(error).toContain(duplicate.review.id);
+  });
+});

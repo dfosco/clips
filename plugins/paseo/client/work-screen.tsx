@@ -6,13 +6,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ActivityIndicator, Linking, Pressable, Text, TextInput, View } from "react-native";
 import {
-  attachmentReadRpc, boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc, roleModelDefaultsRpc,
+  attachmentReadRpc, boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc, roleModelDefaultsRpc, reviewListRpc,
   type AgentConfiguration, type Attachment, type AttachmentReadData,
   type Goal, type Lane, type LaneClosureData, type LabelChange, type Project, type StartMode, type Work,
 } from "../shared/contracts";
 import { executionFor, executionForManagers, isActiveAgent, type AgentInfo, type Execution } from "../shared/work";
 import { AgentLaunchDialog } from "./agent-configuration";
 import { ReviewInbox } from "./review-inbox";
+import { ReviewDocument } from "./review-document";
 import { navigateToAgent, useRuntime } from "./runtime";
 import { focusScope, focusedLane, goalGroup, isActive, revealStartedWorkspace, workspaceLane, type LaneFocus, type WorkFilter } from "./lane-focus";
 import { getFocusIntent, getWorkspaceFocusIntent, projectAfterFocusIntent, requestLaneFocus, subscribeFocusIntent } from "./focus-intent";
@@ -278,6 +279,7 @@ function RecordAttachments({ work, projectId, theme, readAttachment, onOpenUrl }
 
 function WorkRow({
   work, level, execution, loaded, expanded, onToggle, onStart, onOpen, onOpenAgent, onClose, onFocusLane,
+  reviewable, onReview,
   onToggleClosedGoals, closedGoalsCount = 0, closedGoalsVisible = false,
   busy, theme, compact, onLabels, currentWorkspaceId, workspaceMatchesProject, availableWorkspaces, detailsOnly = false,
   projectId, attachmentRevision, readAttachment, onOpenUrl,
@@ -291,6 +293,8 @@ function WorkRow({
   onStart: Start;
   onOpen: (id: string) => void;
   onOpenAgent?: (agent: AgentInfo) => void;
+  reviewable: boolean;
+  onReview: () => void;
   onClose: (work: Lane | Goal) => void;
   onFocusLane: (lane: Lane) => void;
   onToggleClosedGoals?: () => void;
@@ -378,6 +382,7 @@ function WorkRow({
           </View>
         </Pressable>
         <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          {reviewable ? <Action label="Review" theme={theme} subtle onPress={onReview} /> : null}
           {managed && loaded && !navigableAgents.length ? (
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>● Manager unavailable</Text>
           ) : managed && execution.status === "idle" ? (
@@ -741,6 +746,7 @@ export function WorkScreen({
 }) {
   const fetchProjects = useRpc(projectsRpc);
   const fetchBoard = useRpc(boardRpc);
+  const fetchReviews = useRpc(reviewListRpc);
   const fetchAttachment = useRpc(attachmentReadRpc);
   const launch = useRpc(startRpc);
   const getRoleModelDefaults = useRpc(roleModelDefaultsRpc);
@@ -772,6 +778,12 @@ export function WorkScreen({
     enabled: Boolean(projectId),
     refetchInterval: 15_000,
   });
+  const reviews = useQuery({
+    queryKey: ["clips.review.list", projectId],
+    queryFn: () => fetchReviews({ projectId: projectId! }),
+    enabled: Boolean(projectId),
+    refetchInterval: 15_000,
+  });
   const attachmentRevision = `${host.id}:${projectId ?? ""}:${board.data?.generatedAt ?? ""}`;
   const runtime = useRuntime(host.id);
   const [filter, setFilter] = useState<WorkFilter>("open");
@@ -783,6 +795,11 @@ export function WorkScreen({
   const [closingWork, setClosingWork] = useState<Lane | Goal | null>(null);
   const [launchRequest, setLaunchRequest] = useState<{ ref: string; title: string; workspaceId?: string } | null>(null);
   const [reviewInboxOpen, setReviewInboxOpen] = useState(false);
+  const [reviewDocument, setReviewDocument] = useState<{ projectId: string; ref: string } | null>(null);
+  useEffect(() => { setReviewDocument(null); }, [projectId]);
+  const reviewableRefs = useMemo(() => new Set((reviews.data?.reviews ?? [])
+    .filter((review) => ["awaiting_review", "changes_requested", "deferred"].includes(review.status))
+    .flatMap((review) => [review.ref, ...review.covered_refs])), [reviews.data]);
   const launchTarget = launchRequest && board.data ? [
     ...board.data.lanes, ...board.data.goals, ...board.data.goals.flatMap((goal) => goal.tasks),
   ].find((work) => work.ref === launchRequest.ref) : undefined;
@@ -996,6 +1013,8 @@ export function WorkScreen({
           void cache.invalidateQueries({ queryKey: ["clips-runtime", host.id] });
         }
       } : undefined}
+      reviewable={reviewableRefs.has(work.ref)}
+      onReview={() => setReviewDocument({ projectId: projectId!, ref: work.ref })}
       onClose={setClosingWork}
       onFocusLane={(lane) => selectFocus(lane.ref)}
       closedGoalsCount={closedGoalOptions?.count}
@@ -1075,6 +1094,11 @@ export function WorkScreen({
             onPress={() => setReviewInboxOpen((open) => !open)} style={{ padding: 8 }}>
             <Text style={{ color: theme.colors.accent, fontSize: 12 }}>{reviewInboxOpen ? "Work" : "Reviews"}</Text>
           </Pressable>
+          {!reviewInboxOpen && laneInFocus && projectId && reviewableRefs.has(laneInFocus.ref) ? <Pressable
+            accessibilityRole="button" accessibilityLabel={`Review pinned CR for ${laneInFocus.ref}`}
+            onPress={() => setReviewDocument({ projectId, ref: laneInFocus.ref })} style={{ padding: 8 }}>
+            <Text style={{ color: theme.colors.accent, fontSize: 12 }}>Review</Text>
+          </Pressable> : null}
           {!reviewInboxOpen && laneInFocus && projectId ? <Pressable
             accessibilityRole="button"
             accessibilityLabel={`More actions for lane ${laneInFocus.ref}`}
@@ -1100,6 +1124,7 @@ export function WorkScreen({
             onPress={() => {
               void cache.invalidateQueries({ queryKey: ["clips.projects", host.id] });
               void cache.invalidateQueries({ queryKey: ["clips.board", host.id] });
+              if (projectId) void cache.invalidateQueries({ queryKey: ["clips.review.list", projectId] });
               void cache.invalidateQueries({ queryKey: ["clips-runtime", host.id] });
             }}
             style={{ padding: 8 }}
@@ -1343,6 +1368,11 @@ export function WorkScreen({
           <CloseWorkDialog key={closingWork?.ref ?? "none"} work={closingWork} onOpenChange={(open) => {
             if (!open && !closeRecord.isPending) setClosingWork(null);
           }} onConfirm={(request) => closeRecord.mutate(request)} busy={closeRecord.isPending} theme={theme} />
+          {reviewDocument && reviewDocument.projectId === projectId ? <ReviewDocument
+            key={`${host.id}:${reviewDocument.projectId}:${reviewDocument.ref}`}
+            theme={theme} projectId={reviewDocument.projectId} ref={reviewDocument.ref}
+            compact={layout.compact}
+            onClose={() => setReviewDocument(null)} /> : null}
           <AgentLaunchDialog
             key={`${launchRequest?.ref ?? "none"}:${launchRequest?.workspaceId ?? "new"}`}
             open={Boolean(launchRequest)}

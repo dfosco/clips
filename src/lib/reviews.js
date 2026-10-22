@@ -336,6 +336,8 @@ function publicReview(review, { detail = false, repoRoot = getRepoRoot() } = {})
     reviewer: review.reviewer,
     candidate: review.candidate,
     covers: review.covers,
+    covered_refs: [...new Set(review.coverage_snapshots.flatMap((snapshot) =>
+      snapshot.obligations.map((obligation) => obligation.ref)))],
     summary: review.summary,
     validation: review.validation,
     ...(review.delivery_intent ? { delivery_intent: review.delivery_intent } : {}),
@@ -379,6 +381,93 @@ export function showReview(id, { repoRoot = getRepoRoot() } = {}) {
   const review = readReviews(repoRoot).find((item) => item.id === id);
   if (!review) throw new Error(`Review ${id} not found`);
   return publicReview(review, { detail: true, repoRoot });
+}
+
+function reviewMarkdown(detail) {
+  const review = detail.review;
+  const stale = review.stale
+    ? `Yes (${review.stale_reasons.join(', ') || 'review candidate is stale'})`
+    : 'No';
+  const coverage = review.covers.length ? review.covers.join(', ') : review.ref;
+  const metadata = [
+    `Review ID: ${review.id}`,
+    `Work record: ${review.ref}`,
+    `Reviewer: ${review.reviewer}`,
+    `Status: ${review.status}`,
+    `Candidate base: ${review.candidate.base} (${review.candidate.base_ref})`,
+    `Candidate head: ${review.candidate.head} (${review.candidate.head_ref})`,
+    `Coverage: ${coverage}`,
+    `Stale: ${stale}`,
+    `Pinned content SHA-256: ${detail.content_identity.sha256}`,
+  ];
+  const body = detail.attachment.content;
+  if (typeof body !== 'string') throw new Error(`Review ${review.id} has no pinned Markdown content`);
+  return `# ${review.title}\n\n${metadata.map((line) => `- ${line}`).join('\n')}\n\n---\n\n## Pinned change request\n\n${body}`;
+}
+
+function reviewExportPath(repoRoot, id) {
+  return path.join(getClipsDir(repoRoot), 'reviews', 'opened', `${id}.md`);
+}
+
+function writeReviewExport(file, content) {
+  const directory = path.dirname(file);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const directoryInfo = fs.lstatSync(directory);
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) {
+    throw new Error(`Review export directory is not a regular directory: ${directory}`);
+  }
+  const temporary = path.join(directory, `.${path.basename(file)}.${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, content, { flag: 'wx', mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } finally {
+    try { fs.unlinkSync(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
+function coversRef(review, ref) {
+  return review.ref === ref || review.coverage_snapshots.some((snapshot) =>
+    snapshot.obligations.some((obligation) => obligation.ref === ref));
+}
+
+/** Materialize a stable, read-only-by-contract Markdown view of a pinned review. */
+export function openReview(subject, { repoRoot = getRepoRoot() } = {}) {
+  const value = requiredText(subject, 'review reference or ID');
+  const reviews = readReviews(repoRoot);
+  let selected;
+  let requestedRef = null;
+  if (REVIEW_ID.test(value)) {
+    selected = reviews.find((review) => review.id === value);
+    if (!selected) throw new Error(`Review ${value} not found`);
+  } else {
+    const target = resolveTarget(value);
+    requestedRef = target.ref;
+    const matches = reviews.filter((review) => REVIEWABLE_STATES.has(review.status) && coversRef(review, target.ref));
+    if (matches.length > 1) {
+      const choices = matches.map((review) => `${review.id} (${review.status})`).join(', ');
+      throw new Error(`Multiple actionable CR reviews cover ${target.ref}: ${choices}. Open one by review ID.`);
+    }
+    if (!matches.length) {
+      const prior = reviews.filter((review) => coversRef(review, target.ref));
+      const detail = prior.length
+        ? ` Existing reviews: ${prior.map((review) => `${review.id} (${review.status})`).join(', ')}.`
+        : ' An attached CR alone is not a submitted review request.';
+      throw new Error(`No actionable CR review found for ${target.ref}.${detail}`);
+    }
+    [selected] = matches;
+  }
+
+  const review = publicReview(selected, { repoRoot });
+  const detail = publicReview(selected, { detail: true, repoRoot });
+  const file = reviewExportPath(repoRoot, selected.id);
+  writeReviewExport(file, reviewMarkdown({ review, attachment: detail.attachment,
+    content_identity: detail.content_identity }));
+  return {
+    review,
+    requested_ref: requestedRef,
+    path: file,
+    content_identity: detail.content_identity,
+  };
 }
 
 export function requestReview(ref, input, { repoRoot = getRepoRoot() } = {}) {

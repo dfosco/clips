@@ -320,6 +320,23 @@ Include the commit, tree/diff identity, or immutable artifact reference with
 verification evidence. A record revision or Git HEAD alone does not identify the
 contents of a dirty working tree.
 
+## Review Markdown handoff
+
+`lanes review open <record-ref|review-id>` exports the exact pinned CR to a
+stable Markdown file under the selected project's excluded workflow store and
+prints its absolute path. `--json` returns the path with the review ID, pinned
+candidate, reviewer, status, coverage and stale reasons. Work refs resolve only
+actionable requests whose request-time coverage includes that exact Lane, Goal
+or Task. A Goal review covers its pinned Task obligations; Tasks created later
+need a refreshed review request. Ambiguous matches require an explicit review
+ID. Opening or editing the exported copy does not change the original CR,
+review journal or approval.
+
+```bash
+lanes review open '#g1#t1'
+lanes review open rev-00000000-0000-4000-8000-000000000000 --json
+```
+
 ## Acceptance and administrative status
 
 `task accept` and `goal accept` record structured receipts tied to a request

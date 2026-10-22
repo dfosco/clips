@@ -2,13 +2,13 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   agentOptionsRpc, attachmentReadRpc, boardRpc, collaborationRpc, labelUsesRpc, labelsRpc,
-  roleModelDefaultsRpc, saveRoleModelDefaultsRpc, reviewListRpc, reviewShowRpc, reviewDecideRpc, reviewImportRpc,
+  roleModelDefaultsRpc, saveRoleModelDefaultsRpc, reviewListRpc, reviewOpenRpc, reviewShowRpc, reviewDecideRpc, reviewImportRpc,
   closeRpc, preferences, projectsRpc, startRpc,
 } from "./shared/contracts";
 import {
   closeWork, changeProjectLabels, projectList, readAgentOptions, readProjectAttachment,
   readProjectBoard, readProjectLabelUses, setProjectCollaboration, startWork,
-  readRoleModelDefaults, saveRoleModelDefaults, readProjectReviews, readProjectReview, decideProjectReview, importProjectReviewDecision,
+  readRoleModelDefaults, saveRoleModelDefaults, readProjectReviews, readProjectReview, openProjectReview, decideProjectReview, importProjectReviewDecision,
 } from "./server/backend";
 
 export default function contribute(server: PluginServerContext) {
@@ -27,6 +27,7 @@ export default function contribute(server: PluginServerContext) {
   });
   server.handle(saveRoleModelDefaultsRpc, (input, { paseo }) => saveRoleModelDefaults(paseo, input));
   server.handle(reviewListRpc, (input, { paseo }) => readProjectReviews(paseo, input.projectId));
+  server.handle(reviewOpenRpc, (input, { paseo }) => openProjectReview(paseo, input));
   server.handle(reviewShowRpc, (input, { paseo }) => readProjectReview(paseo, input));
   server.handle(reviewDecideRpc, (input, { paseo }) => decideProjectReview(paseo, {
     ...input, expectedRevision: input.expectedRevision,

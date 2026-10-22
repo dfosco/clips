@@ -545,6 +545,19 @@ reviewer. `awaiting_review`, `changes_requested`, and `deferred` are actionable.
 Deferred permits an explicit subsequent decision without an edit; superseded and
 delivered reviews are terminal, and exact retries do not resurrect them.
 
+Use `lanes review open <Lane|Goal|Task-ref|review-id>` to materialize the exact
+pinned CR as a stable Markdown file under the selected project's excluded
+workflow store. Normal output is its absolute path; `--json` also returns review
+identity, candidate, reviewer, status, coverage and stale reasons. A work ref
+resolves only actionable requests whose pinned coverage obligations include
+that exact object. Goal requests pin the Tasks present when requested; Tasks
+added later are not implicitly covered. If several actionable requests match,
+the command lists them and asks for an explicit review ID. An attachment alone
+does not create an actionable request. The generated document includes the
+original pinned CR and a stale warning when current content or pins changed.
+Opening it does not alter the CR, review journal or approval; editing the
+generated copy does not alter the pinned review.
+
 Use `lanes review pr preview <id> --json` to inspect materialization, then
 `lanes review pr materialize <id> --confirm` only after the required authority.
 Candidate data includes base/head commit SHAs and matching `base_ref`/`head_ref`

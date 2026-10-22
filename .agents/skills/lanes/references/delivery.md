@@ -48,6 +48,15 @@ refresh the request and affected checks. A stale attachment retains immutable
 identities, and read identities so the reviewer can see the original pin and
 the current-content warning together.
 
+After submitting a review request, run `lanes review open <record-ref|review-id>`
+and give the returned absolute pinned Markdown export path to the user through
+the current harness. This hands off the requested snapshot rather than the live
+attachment path. In the Paseo plugin, the `clips.review.open` RPC reads that
+CLI-exported file into the dedicated read-only Markdown view. The installed
+`@getpaseo/plugin` 0.11.2 SDK exposes `navigation.openBrowser` for HTTP(S) URLs,
+but no API for opening an arbitrary Markdown file in a Paseo file tab. Do not
+describe this view as a native file-tab open or route the path through a browser.
+
 Goal completion requires approval of the exact candidate and fulfillment of the
 configured delivery endpoint. The manager records attributed evidence/receipt
 and closes the Goal only then. `changes_requested` returns bounded affected

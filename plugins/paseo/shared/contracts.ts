@@ -225,6 +225,7 @@ export const reviewSummary = z.object({
   reviewer: z.string(),
   candidate: reviewCandidate,
   covers: z.array(z.string()),
+  covered_refs: z.array(z.string()).default([]),
   summary: z.string(),
   validation: z.unknown(),
 }).passthrough();
@@ -250,6 +251,19 @@ export const reviewListRpc = defineRpc({
   name: "clips.review.list",
   input: z.object({ projectId: z.string() }).strict(),
   output: reviewListData,
+});
+export const reviewOpenResult = z.object({
+  review: reviewSummary.extend({ stale: z.boolean(), stale_reasons: z.array(z.string()) }),
+  requested_ref: z.string().nullable(),
+  path: z.string(),
+  content_identity: z.object({ sha256: z.string() }).passthrough(),
+});
+export const reviewOpenData = reviewOpenResult.extend({ markdown: z.string() });
+export type ReviewOpenData = z.infer<typeof reviewOpenData>;
+export const reviewOpenRpc = defineRpc({
+  name: "clips.review.open",
+  input: z.object({ projectId: z.string(), ref: z.string() }).strict(),
+  output: reviewOpenData,
 });
 export const reviewShowRpc = defineRpc({
   name: "clips.review.show",

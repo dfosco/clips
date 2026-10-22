@@ -10,6 +10,8 @@ import { branchName } from "../shared/work";
 const state = vi.hoisted(() => ({
   projects: [] as any[],
   board: { lanes: [] as any[], goals: [] as any[], warnings: [] },
+  reviews: [] as any[],
+  openedReview: null as any,
   runtime: { workspaces: [] as any[], agents: [] as any[] },
   runtimeError: null as Error | null,
   mutation: undefined as any,
@@ -21,7 +23,8 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@getpaseo/plugin/client", () => ({
   useRpc: (rpc: { name?: string }) => rpc.name === "clips.attachment.read" ? state.readAttachment
-    : rpc.name === "clips.collaboration.set" ? state.updateCollaboration : vi.fn(),
+    : rpc.name === "clips.collaboration.set" ? state.updateCollaboration
+    : rpc.name === "clips.review.open" ? vi.fn(async () => state.openedReview) : vi.fn(),
   useSettings: () => ({ status: "ready", values: {} }),
 }));
 vi.mock("@getpaseo/plugin/client/react-native", () => ({
@@ -54,7 +57,10 @@ vi.mock("react-native", () => ({
   Linking: { openURL: state.openUrl },
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: any) => ({ data: queryKey[0] === "clips.projects" ? { projects: state.projects } : state.board }),
+  useQuery: ({ queryKey }: any) => ({ data: queryKey[0] === "clips.projects" ? { projects: state.projects }
+    : queryKey[0] === "clips.board" ? state.board
+    : queryKey[0] === "clips.review.list" ? { reviews: state.reviews }
+    : queryKey[0] === "clips.review.open" ? state.openedReview : undefined }),
   useQueryClient: () => ({
     invalidateQueries: async ({ queryKey }: any) => { state.invalidations.push(queryKey); },
     setQueryData: (queryKey: any[], value: any) => {
@@ -112,6 +118,8 @@ beforeEach(() => {
     { projectId: "p2", projectIds: ["p2"], label: "Project 2" },
   ];
   state.board = { lanes: [lane], goals: [goal, outside], warnings: [] };
+  state.reviews = [];
+  state.openedReview = null;
   state.runtime = { workspaces: [{ id: "w1", projectId: "p1", name: "Lane work", branch: branchName(lane), status: "ready" }], agents: [] };
   state.mutation = undefined;
   state.runtimeError = null;
@@ -123,6 +131,84 @@ beforeEach(() => {
 });
 
 describe("attachments and collaboration", () => {
+  it("shows Review only for pinned direct or coalesced obligations and opens the selected project's Markdown view", async () => {
+    const review = {
+      id: "rev-11111111-1111-4111-8111-111111111111", ref: "#g001", title: "Change request",
+      status: "awaiting_review", attachment_id: "cr", reviewer: "reviewer",
+      candidate: { base: "base-commit", head: "head-commit", base_ref: "main", head_ref: "feature" },
+      covers: ["#g001"], covered_refs: ["#g001", "#g001#t01"], summary: "Review this candidate.", validation: {},
+    };
+    state.reviews = [review];
+    state.openedReview = {
+      review: { ...review, stale: true, stale_reasons: ["candidate_head_moved"] },
+      requested_ref: "#g001", path: "/project/.lanes/reviews/opened/rev-11111111-1111-4111-8111-111111111111.md",
+      content_identity: { sha256: "hash" },
+      markdown: "# Change request\n\n- Review ID: rev-11111111-1111-4111-8111-111111111111\n\n## Pinned change request\n\nPinned body. [Preview](https://example.com/preview) [Unsafe](javascript:alert(1))",
+    };
+    const screen = await mountScreen({ layout: { compact: true, platform: "web" } });
+    try {
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click();
+      });
+      expect(screen.container.querySelectorAll('button[aria-label="Review"]')).toHaveLength(2);
+
+      await act(async () => {
+        screen.container.querySelectorAll<HTMLButtonElement>('button[aria-label="Review"]')[0].click();
+      });
+      expect(screen.container.querySelector('[aria-label="Review · #g001"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Candidate base: base-commit (main)");
+      expect(screen.container.textContent).toContain("Stale: candidate_head_moved");
+      expect(screen.container.textContent).toContain("File: /project/.lanes/reviews/opened/rev-11111111-1111-4111-8111-111111111111.md");
+      expect(screen.container.textContent).toContain("Pinned body.");
+      expect(screen.container.textContent).not.toContain("Record review decision");
+      expect(screen.container.querySelector('[aria-label="Pinned review Markdown"]')?.getAttribute("data-max-height")).toBe("320");
+      const preview = screen.container.querySelector('[role="link"]');
+      expect(preview?.textContent).toBe("Preview");
+      expect(screen.container.querySelectorAll('[role="link"]')).toHaveLength(1);
+      await act(async () => { (preview as HTMLElement).click(); });
+      expect(state.openUrl).toHaveBeenCalledWith("https://example.com/preview");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("does not offer a Goal review to a Task added after the pinned coverage", async () => {
+    state.board = { lanes: [], goals: [{ ...goal, tasks: [task, { ...task, ref: "#g001#t02", title: "Added later" }] }], warnings: [] };
+    state.reviews = [{ id: "rev-old", ref: "#g001", status: "awaiting_review", covered_refs: ["#g001", "#g001#t01"] }];
+    const screen = await mountScreen();
+    try {
+      await act(async () => {
+        screen.container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click();
+      });
+      expect(screen.container.querySelectorAll('button[aria-label="Review"]')).toHaveLength(2);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps an actionable Lane review visible after focusing the Lane and refreshes its review list", async () => {
+    state.reviews = [{ id: "rev-lane", ref: "#g001", status: "awaiting_review", covered_refs: ["#l001"] }];
+    state.openedReview = {
+      review: { id: "rev-lane", ref: "#g001", status: "awaiting_review", reviewer: "reviewer",
+        candidate: { base: "base", head: "head" }, stale: false, stale_reasons: [] },
+      requested_ref: "#l001", path: "/project/.lanes/reviews/opened/rev-lane.md",
+      content_identity: { sha256: "hash" }, markdown: "## Pinned change request\nLane CR",
+    };
+    const screen = await mountScreen();
+    try {
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click(); });
+      await act(async () => { [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Focus lane")!.click(); });
+      expect(screen.container.querySelector('[aria-label="Review pinned CR for #l001"]')).not.toBeNull();
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Review pinned CR for #l001"]')!.click(); });
+      expect(screen.container.querySelector('[aria-label="Review · #l001"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Lane CR");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh Lanes and Paseo"]')!.click(); });
+      expect(state.invalidations).toContainEqual(["clips.review.list", "p1"]);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("opens Reviews on the selected project, hides board controls, and returns to that project", async () => {
     const screen = await mountScreen();
     try {

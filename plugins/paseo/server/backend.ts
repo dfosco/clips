@@ -9,7 +9,7 @@ import path from "node:path";
 import { execCommand, type PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   attachment, attachmentReadData, collaborationCapability, label, labelUsesData, laneClosureData,
-  reviewDetail, reviewListData, preferences as preferencesSchema,
+  reviewDetail, reviewListData, reviewOpenResult, reviewOpenData, preferences as preferencesSchema,
   type AttachmentReadData, type LabelChange, type AgentConfiguration, type Goal, type Lane,
   type LaneClosureData, type Project, type Task, type Work, type Preferences, type StartMode,
   type AgentRole, type ReviewCandidate, type RoleModelDefaults,
@@ -379,6 +379,40 @@ export async function readProjectReview(
 ) {
   const project = await findProject(paseo, input.projectId);
   return readReviewDetails(paseo, project.root, input.id);
+}
+
+export async function openProjectReview(
+  paseo: Paseo,
+  input: { projectId: string; ref: string },
+) {
+  const project = await findProject(paseo, input.projectId);
+  const cli = await findClips(paseo);
+  let opened;
+  try {
+    const { stdout } = await command(cli.bin, [...cli.prefix, "review", "open", input.ref, "--json"], project.root);
+    opened = reviewOpenResult.parse(JSON.parse(stdout));
+  } catch (error) {
+    throw new Error(`Cannot open the selected project's pinned Lanes review: ${errorText(error)}`);
+  }
+  const requestedReviewId = /^rev-[0-9a-f-]{36}$/i.test(input.ref);
+  if (requestedReviewId ? opened.review.id !== input.ref || opened.requested_ref !== null
+    : opened.requested_ref !== input.ref || ![opened.review.ref, ...opened.review.covered_refs].includes(input.ref)) {
+    throw new Error("Lanes returned a different pinned review than the requested work record or review ID.");
+  }
+  if (!path.isAbsolute(opened.path) || path.extname(opened.path).toLowerCase() !== ".md" ||
+      !opened.path.endsWith(path.join("reviews", "opened", `${opened.review.id}.md`))) {
+    throw new Error("Lanes returned an invalid pinned Markdown export path.");
+  }
+  let markdown: string;
+  try {
+    markdown = fs.readFileSync(opened.path, "utf8");
+  } catch (error) {
+    throw new Error(`Cannot read the exported pinned Markdown file ${opened.path}: ${errorText(error)}`);
+  }
+  if (!markdown.includes(`Review ID: ${opened.review.id}`) || !markdown.includes("## Pinned change request")) {
+    throw new Error("The exported Markdown file does not match the selected review document.");
+  }
+  return reviewOpenData.parse({ ...opened, markdown });
 }
 
 export async function decideProjectReview(
