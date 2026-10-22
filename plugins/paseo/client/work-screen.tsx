@@ -3,17 +3,18 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityIndicator, Linking, Pressable, Text, TextInput, View } from "react-native";
 import {
-  attachmentReadRpc, boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc, roleModelDefaultsRpc, reviewListRpc,
-  type AgentConfiguration, type Attachment, type AttachmentReadData,
+  boardRpc, labelsRpc, closeRpc, preferences, projectsRpc, startRpc, roleModelDefaultsRpc, reviewListRpc,
+  type AgentConfiguration, type Attachment,
   type Goal, type Lane, type LaneClosureData, type LabelChange, type Project, type StartMode, type Work,
 } from "../shared/contracts";
 import { executionFor, executionForManagers, isActiveAgent, type AgentInfo, type Execution } from "../shared/work";
 import { AgentLaunchDialog } from "./agent-configuration";
 import { ReviewInbox } from "./review-inbox";
 import { ReviewDocument } from "./review-document";
+import { AttachmentDocument } from "./attachment-document";
 import { navigateToAgent, useRuntime } from "./runtime";
 import { focusScope, focusedLane, goalGroup, isActive, revealStartedWorkspace, workspaceLane, type LaneFocus, type WorkFilter } from "./lane-focus";
 import { getFocusIntent, getWorkspaceFocusIntent, projectAfterFocusIntent, requestLaneFocus, subscribeFocusIntent } from "./focus-intent";
@@ -120,62 +121,6 @@ function safeExternalUrl(value: unknown, httpsOnly = false): string | null {
   }
 }
 
-function markdownInline(source: string, theme: Theme, onOpenUrl: (url: string) => void) {
-  const nodes: ReactNode[] = [];
-  const pattern = /(\[([^\]]+)\]\(([^)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|\*([^*]+)\*)/g;
-  let cursor = 0;
-  let index = 0;
-  for (const match of source.matchAll(pattern)) {
-    const position = match.index ?? 0;
-    if (position > cursor) nodes.push(source.slice(cursor, position));
-    if (match[2] !== undefined) {
-      const href = safeExternalUrl(match[3]);
-      nodes.push(href
-        ? <Text key={index++} accessibilityRole="link" onPress={() => onOpenUrl(href)}
-            style={{ color: theme.colors.accent, textDecorationLine: "underline" }}>{match[2]}</Text>
-        : <Text key={index++}>{match[2]}</Text>);
-    } else if (match[4] !== undefined) {
-      nodes.push(<Text key={index++} style={{ fontFamily: "monospace" }}>{match[4]}</Text>);
-    } else if (match[5] !== undefined) {
-      nodes.push(<Text key={index++} style={{ fontWeight: "700" }}>{match[5]}</Text>);
-    } else {
-      nodes.push(<Text key={index++} style={{ fontStyle: "italic" }}>{match[6]}</Text>);
-    }
-    cursor = position + match[0].length;
-  }
-  if (cursor < source.length) nodes.push(source.slice(cursor));
-  return nodes;
-}
-
-function MarkdownContent({ source, theme, onOpenUrl }: {
-  source: string;
-  theme: Theme;
-  onOpenUrl: (url: string) => void;
-}) {
-  return (
-    <View style={{
-      gap: 3, maxWidth: 720, padding: 9, borderWidth: 1, borderColor: theme.colors.border,
-      borderRadius: 7, backgroundColor: theme.colors.surface1,
-    }}>
-      {source.split(/\r?\n/).map((line, index) => {
-        const heading = line.match(/^#{1,6}\s+(.+)$/);
-        const list = line.match(/^\s*([-*+]|\d+\.)\s+(.+)$/);
-        const content = heading?.[1] ?? list?.[2] ?? line.replace(/^\s*>\s?/, "");
-        return (
-          <Text key={index} selectable style={{
-            color: theme.colors.foreground,
-            fontSize: heading ? 14 : 12,
-            fontWeight: heading ? "700" : "400",
-            lineHeight: 18,
-          }}>
-            {list ? "• " : ""}{markdownInline(content, theme, onOpenUrl)}
-          </Text>
-        );
-      })}
-    </View>
-  );
-}
-
 function attachmentType(type: Attachment["type"]) {
   return ({ markdown: "Markdown", url: "URL", github_issue: "GitHub issue", github_pr: "GitHub pull request" })[type];
 }
@@ -184,38 +129,15 @@ function attachmentStatus(status: Attachment["status"]) {
   return ({ available: "Available", missing: "Missing", unreadable: "Unreadable", remote: "External", invalid: "Invalid reference" })[status ?? "available"];
 }
 
-function RecordAttachments({ work, projectId, theme, readAttachment, onOpenUrl }: {
+function RecordAttachments({ work, projectId, theme, onOpenMarkdown, onOpenUrl }: {
   work: Work;
   projectId: string;
   theme: Theme;
-  readAttachment: (input: { projectId: string; ref: string; attachmentId: string }) => Promise<AttachmentReadData>;
+  onOpenMarkdown: (attachment: Attachment) => void;
   onOpenUrl: (url: string) => void;
 }) {
-  const [reads, setReads] = useState<Record<string, Attachment | null>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [reading, setReading] = useState<Record<string, boolean>>({});
-  const pendingReads = useRef(new Set<string>());
   const attachments = work.attachments ?? [];
   if (!attachments.length) return null;
-  const readCurrent = async (attachment: Attachment) => {
-    if (pendingReads.current.has(attachment.id)) return;
-    pendingReads.current.add(attachment.id);
-    setReading((previous) => ({ ...previous, [attachment.id]: true }));
-    setReads((previous) => ({ ...previous, [attachment.id]: null }));
-    setErrors((previous) => ({ ...previous, [attachment.id]: "" }));
-    try {
-      const result = await readAttachment({ projectId, ref: work.ref, attachmentId: attachment.id });
-      if (result.ref !== work.ref || result.attachment.id !== attachment.id) {
-        throw new Error("Lanes returned a different record or attachment.");
-      }
-      setReads((previous) => ({ ...previous, [attachment.id]: result.attachment }));
-    } catch (error) {
-      setErrors((previous) => ({ ...previous, [attachment.id]: message(error) }));
-    } finally {
-      pendingReads.current.delete(attachment.id);
-      setReading((previous) => ({ ...previous, [attachment.id]: false }));
-    }
-  };
   return (
     <View accessibilityLabel={`Attachments for ${work.ref}`} style={{ gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}>
       <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "600" }}>Attachments</Text>
@@ -223,9 +145,7 @@ function RecordAttachments({ work, projectId, theme, readAttachment, onOpenUrl }
         const url = attachment.type === "github_issue" || attachment.type === "github_pr"
           ? safeExternalUrl(attachment.url, true)
           : attachment.type === "url" ? safeExternalUrl(attachment.url) : null;
-        const current = reads[attachment.id];
-        const status = current?.status ?? attachment.status;
-        const error = errors[attachment.id];
+        const status = attachment.status;
         return (
           <View key={attachment.id} style={{ gap: 5 }}>
             <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
@@ -246,29 +166,14 @@ function RecordAttachments({ work, projectId, theme, readAttachment, onOpenUrl }
             </View>
             {attachment.identity_error ? <Text style={{ color: theme.colors.statusWarning, fontSize: 12 }}>{attachment.identity_error}</Text> : null}
             {attachment.type === "markdown" ? (
-              <>
-                <Pressable accessibilityRole="button"
-                  accessibilityLabel={`${current ? "Refresh" : "Read"} current Markdown for ${work.ref}: ${attachment.title}`}
-                  accessibilityState={{ disabled: reading[attachment.id] || !attachment.id }}
-                  disabled={reading[attachment.id] || !attachment.id}
-                  onPress={() => { void readCurrent(attachment); }}
+              <Pressable accessibilityRole="button"
+                  accessibilityLabel={`Open current Markdown for ${work.ref}: ${attachment.title}`}
+                  accessibilityState={{ disabled: !attachment.id }}
+                  disabled={!attachment.id}
+                  onPress={() => onOpenMarkdown(attachment)}
                   style={{ alignSelf: "flex-start", paddingVertical: 4, paddingRight: 8 }}>
-                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
-                    {reading[attachment.id] ? "Reading…" : current ? "Refresh current Markdown" : "Read current Markdown"}
-                  </Text>
-                </Pressable>
-                {error ? <Text accessibilityRole="alert" style={{ color: theme.colors.statusDanger, fontSize: 12 }}>
-                  Could not read current Markdown: {error}
-                </Text> : null}
-                {current?.status === "available" && typeof current.content === "string" ? (
-                  <MarkdownContent source={current.content} theme={theme} onOpenUrl={onOpenUrl} />
-                ) : current || status === "missing" || status === "unreadable" || status === "invalid" ? (
-                  <Text accessibilityRole="text" style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
-                    {current?.error || (status === "missing" ? "The attached Markdown file is missing." :
-                      status === "unreadable" ? "The attached Markdown file cannot be read." : "The Markdown reference is invalid.")}
-                  </Text>
-                ) : null}
-              </>
+                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>Read current Markdown</Text>
+              </Pressable>
             ) : null}
           </View>
         );
@@ -282,7 +187,7 @@ function WorkRow({
   reviewable, onReview,
   onToggleClosedGoals, closedGoalsCount = 0, closedGoalsVisible = false,
   busy, theme, compact, onLabels, currentWorkspaceId, workspaceMatchesProject, availableWorkspaces, detailsOnly = false,
-  projectId, attachmentRevision, readAttachment, onOpenUrl,
+  projectId, attachmentRevision, onOpenMarkdown, onOpenUrl,
 }: {
   work: Work;
   level: number;
@@ -309,7 +214,7 @@ function WorkRow({
   detailsOnly?: boolean;
   projectId: string;
   attachmentRevision: string;
-  readAttachment: (input: { projectId: string; ref: string; attachmentId: string }) => Promise<AttachmentReadData>;
+  onOpenMarkdown: (ref: string, attachment: Attachment) => void;
   onOpenUrl: (url: string) => void;
   onLabels: () => void;
 }) {
@@ -466,7 +371,7 @@ function WorkRow({
       </View>
       {work.kind === "goal" ? <RecordContext key={work.ref} work={work} theme={theme} /> : null}
       {work.attachments?.length ? <RecordAttachments key={`${attachmentRevision}:${work.ref}`} work={work} projectId={projectId}
-        theme={theme} readAttachment={readAttachment} onOpenUrl={onOpenUrl} /> : null}
+        theme={theme} onOpenMarkdown={(attachment) => onOpenMarkdown(work.ref, attachment)} onOpenUrl={onOpenUrl} /> : null}
       {managed ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
         Managers: {managerOwners.map((owner) => owner.contact || `${owner.runtime} ${owner.session_id} on ${owner.host}`).join("; ")}
       </Text> : null}
@@ -747,7 +652,6 @@ export function WorkScreen({
   const fetchProjects = useRpc(projectsRpc);
   const fetchBoard = useRpc(boardRpc);
   const fetchReviews = useRpc(reviewListRpc);
-  const fetchAttachment = useRpc(attachmentReadRpc);
   const launch = useRpc(startRpc);
   const getRoleModelDefaults = useRpc(roleModelDefaultsRpc);
   const close = useRpc(closeRpc);
@@ -796,7 +700,17 @@ export function WorkScreen({
   const [launchRequest, setLaunchRequest] = useState<{ ref: string; title: string; workspaceId?: string } | null>(null);
   const [reviewInboxOpen, setReviewInboxOpen] = useState(false);
   const [reviewDocument, setReviewDocument] = useState<{ projectId: string; ref: string } | null>(null);
-  useEffect(() => { setReviewDocument(null); }, [projectId]);
+  const [attachmentDocument, setAttachmentDocument] = useState<{ projectId: string; ref: string; attachment: Attachment } | null>(null);
+  const boardScroll = useRef<any>(null);
+  const boardScrollY = useRef(0);
+  const readerOpen = Boolean(reviewDocument || attachmentDocument);
+  useEffect(() => {
+    setReviewDocument(null);
+    setAttachmentDocument(null);
+  }, [projectId]);
+  useEffect(() => {
+    if (!readerOpen) boardScroll.current?.scrollTo?.({ y: boardScrollY.current, animated: false });
+  }, [readerOpen]);
   const reviewableRefs = useMemo(() => new Set((reviews.data?.reviews ?? [])
     .filter((review) => ["awaiting_review", "changes_requested", "deferred"].includes(review.status))
     .flatMap((review) => [review.ref, ...review.covered_refs])), [reviews.data]);
@@ -948,7 +862,6 @@ export function WorkScreen({
     },
   });
 
-  const readAttachment = (input: { projectId: string; ref: string; attachmentId: string }) => fetchAttachment(input);
   const openAttachmentUrl = async (url: string) => {
     try {
       await Linking.openURL(url);
@@ -1014,7 +927,10 @@ export function WorkScreen({
         }
       } : undefined}
       reviewable={reviewableRefs.has(work.ref)}
-      onReview={() => setReviewDocument({ projectId: projectId!, ref: work.ref })}
+      onReview={() => {
+        setAttachmentDocument(null);
+        setReviewDocument({ projectId: projectId!, ref: work.ref });
+      }}
       onClose={setClosingWork}
       onFocusLane={(lane) => selectFocus(lane.ref)}
       closedGoalsCount={closedGoalOptions?.count}
@@ -1031,7 +947,10 @@ export function WorkScreen({
       detailsOnly={detailsOnly}
       projectId={projectId!}
       attachmentRevision={attachmentRevision}
-      readAttachment={readAttachment}
+      onOpenMarkdown={(ref, attachment) => {
+        setReviewDocument(null);
+        setAttachmentDocument({ projectId: projectId!, ref, attachment });
+      }}
       onOpenUrl={(url) => { void openAttachmentUrl(url); }}
       onLabels={() => setLabelTarget({ hostId: host.id, projectId: projectId!, ref: work.ref })}
     />
@@ -1064,8 +983,13 @@ export function WorkScreen({
     : false;
 
   return (
-    <ScrollView onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}
-      style={{ flex: 1, backgroundColor: theme.colors.surface0 }} contentContainerStyle={{
+    <View style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
+    <ScrollView ref={boardScroll} accessibilityLabel="Lanes work surface"
+      onScroll={(event) => {
+        if (!readerOpen) boardScrollY.current = event.nativeEvent.contentOffset.y;
+      }}
+      scrollEventThrottle={16} onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}
+      style={{ flex: 1, display: readerOpen ? "none" : "flex", backgroundColor: theme.colors.surface0 }} contentContainerStyle={{
       padding: layout.compact ? 14 : 24, gap: 16, paddingBottom: 64,
     }}>
       {!reviewInboxOpen && laneInFocus ? (
@@ -1096,7 +1020,10 @@ export function WorkScreen({
           </Pressable>
           {!reviewInboxOpen && laneInFocus && projectId && reviewableRefs.has(laneInFocus.ref) ? <Pressable
             accessibilityRole="button" accessibilityLabel={`Review pinned CR for ${laneInFocus.ref}`}
-            onPress={() => setReviewDocument({ projectId, ref: laneInFocus.ref })} style={{ padding: 8 }}>
+            onPress={() => {
+              setAttachmentDocument(null);
+              setReviewDocument({ projectId, ref: laneInFocus.ref });
+            }} style={{ padding: 8 }}>
             <Text style={{ color: theme.colors.accent, fontSize: 12 }}>Review</Text>
           </Pressable> : null}
           {!reviewInboxOpen && laneInFocus && projectId ? <Pressable
@@ -1145,7 +1072,10 @@ export function WorkScreen({
         work={laneInFocus}
         projectId={projectId}
         theme={theme}
-        readAttachment={readAttachment}
+        onOpenMarkdown={(attachment) => {
+          setReviewDocument(null);
+          setAttachmentDocument({ projectId, ref: laneInFocus.ref, attachment });
+        }}
         onOpenUrl={(url) => { void openAttachmentUrl(url); }}
       /> : null}
       {projects.isLoading ? <ActivityIndicator color={theme.colors.foregroundMuted} /> : null}
@@ -1368,11 +1298,6 @@ export function WorkScreen({
           <CloseWorkDialog key={closingWork?.ref ?? "none"} work={closingWork} onOpenChange={(open) => {
             if (!open && !closeRecord.isPending) setClosingWork(null);
           }} onConfirm={(request) => closeRecord.mutate(request)} busy={closeRecord.isPending} theme={theme} />
-          {reviewDocument && reviewDocument.projectId === projectId ? <ReviewDocument
-            key={`${host.id}:${reviewDocument.projectId}:${reviewDocument.ref}`}
-            theme={theme} projectId={reviewDocument.projectId} ref={reviewDocument.ref}
-            compact={layout.compact}
-            onClose={() => setReviewDocument(null)} /> : null}
           <AgentLaunchDialog
             key={`${launchRequest?.ref ?? "none"}:${launchRequest?.workspaceId ?? "new"}`}
             open={Boolean(launchRequest)}
@@ -1392,5 +1317,20 @@ export function WorkScreen({
       ) : null}
       </>}
     </ScrollView>
+    {reviewDocument && reviewDocument.projectId === projectId ? <ReviewDocument
+      key={`${host.id}:${reviewDocument.projectId}:${reviewDocument.ref}`}
+      theme={theme} projectId={reviewDocument.projectId} ref={reviewDocument.ref}
+      onClose={() => setReviewDocument(null)} /> : null}
+    {attachmentDocument && attachmentDocument.projectId === projectId ? <AttachmentDocument
+      key={`${host.id}:${attachmentDocument.projectId}:${attachmentDocument.ref}:${attachmentDocument.attachment.id}`}
+      theme={theme} projectId={attachmentDocument.projectId} ref={attachmentDocument.ref}
+      attachment={attachmentDocument.attachment}
+      onOpenUrl={(url) => { void openAttachmentUrl(url); }}
+      onClose={() => setAttachmentDocument(null)}
+      onOpenPinnedReview={reviewableRefs.has(attachmentDocument.ref) ? () => {
+        setAttachmentDocument(null);
+        setReviewDocument({ projectId: attachmentDocument.projectId, ref: attachmentDocument.ref });
+      } : undefined} /> : null}
+    </View>
   );
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, createElement } from "react";
+import { act, createElement, forwardRef, useImperativeHandle } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   mutation: undefined as any,
   invalidations: [] as any[],
   readAttachment: vi.fn(),
+  scrollCalls: [] as any[],
   updateCollaboration: vi.fn(),
   openUrl: vi.fn(),
   toast: vi.fn(),
@@ -34,10 +35,17 @@ vi.mock("@getpaseo/plugin/client/react-native", () => ({
   }),
   TextInput: ({ accessibilityLabel, placeholder }: any) => createElement("input", { "aria-label": accessibilityLabel, placeholder }),
   useToast: () => ({ show: state.toast }),
-  ScrollView: ({ children, accessibilityLabel, style }: any) => createElement("section", {
+  ScrollView: forwardRef(({ children, accessibilityLabel, style, onScroll, scrollEventThrottle }: any, ref: any) => {
+    useImperativeHandle(ref, () => ({ scrollTo: (args: any) => state.scrollCalls.push(args) }));
+    return createElement("section", {
     "aria-label": accessibilityLabel,
     "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
-  }, children),
+    "data-display": style?.display,
+    "data-flex": style?.flex,
+    onScroll: onScroll ? (event: any) => onScroll({ nativeEvent: { contentOffset: { y: event.currentTarget.scrollTop } } }) : undefined,
+    "data-scroll-event-throttle": scrollEventThrottle,
+  }, children);
+  }),
 }));
 vi.mock("react-native", () => ({
   View: ({ children, accessibilityRole, accessibilityLabel, style }: any) => createElement("div", {
@@ -47,8 +55,8 @@ vi.mock("react-native", () => ({
     "data-max-width": style?.maxWidth == null ? undefined : String(style.maxWidth),
     "data-max-height": style?.maxHeight == null ? undefined : String(style.maxHeight),
   }, children),
-  Text: ({ children, accessibilityRole, accessibilityLabel, onPress }: any) =>
-    createElement("span", { role: accessibilityRole, "aria-label": accessibilityLabel, onClick: onPress }, children),
+  Text: ({ children, accessibilityRole, accessibilityLabel, onPress, style }: any) =>
+    createElement("span", { role: accessibilityRole, "aria-label": accessibilityLabel, onClick: onPress, style }, children),
   Pressable: ({ children, accessibilityLabel, accessibilityRole, accessibilityState, disabled, onPress, ["aria-selected"]: ariaSelected }: any) => createElement("button", { "aria-label": accessibilityLabel, "aria-expanded": accessibilityState?.expanded, "aria-selected": ariaSelected, role: accessibilityRole, disabled, onClick: onPress }, children),
   TextInput: ({ accessibilityLabel, value, onChangeText }: any) => createElement("input", {
     "aria-label": accessibilityLabel, value, onInput: (event: any) => onChangeText?.(event.currentTarget.value),
@@ -124,6 +132,7 @@ beforeEach(() => {
   state.mutation = undefined;
   state.runtimeError = null;
   state.invalidations = [];
+  state.scrollCalls = [];
   state.readAttachment.mockReset();
   state.updateCollaboration.mockReset();
   state.openUrl.mockReset();
@@ -131,7 +140,7 @@ beforeEach(() => {
 });
 
 describe("attachments and collaboration", () => {
-  it("shows Review only for pinned direct or coalesced obligations and opens the selected project's Markdown view", async () => {
+  it("opens pinned review as a full view with the CR body primary and restores the work surface on Back", async () => {
     const review = {
       id: "rev-11111111-1111-4111-8111-111111111111", ref: "#g001", title: "Change request",
       status: "awaiting_review", attachment_id: "cr", reviewer: "reviewer",
@@ -143,7 +152,7 @@ describe("attachments and collaboration", () => {
       review: { ...review, stale: true, stale_reasons: ["candidate_head_moved"] },
       requested_ref: "#g001", path: "/project/.lanes/reviews/opened/rev-11111111-1111-4111-8111-111111111111.md",
       content_identity: { sha256: "hash" },
-      markdown: "# Change request\n\n- Review ID: rev-11111111-1111-4111-8111-111111111111\n\n## Pinned change request\n\nPinned body. [Preview](https://example.com/preview) [Unsafe](javascript:alert(1))",
+      markdown: "# Change request\n\n- Review ID: rev-11111111-1111-4111-8111-111111111111\n- Candidate base: base-commit\n\n---\n\n## Pinned change request\n\nPinned body. [Preview](https://example.com/preview) [Unsafe](javascript:alert(1))",
     };
     const screen = await mountScreen({ layout: { compact: true, platform: "web" } });
     try {
@@ -151,22 +160,42 @@ describe("attachments and collaboration", () => {
         screen.container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click();
       });
       expect(screen.container.querySelectorAll('button[aria-label="Review"]')).toHaveLength(2);
+      const boardView = screen.container.querySelector<HTMLElement>('[aria-label="Lanes work surface"]');
+      expect(boardView).not.toBeNull();
+      boardView!.scrollTop = 237;
+      await act(async () => { boardView!.dispatchEvent(new Event("scroll", { bubbles: true })); });
 
       await act(async () => {
         screen.container.querySelectorAll<HTMLButtonElement>('button[aria-label="Review"]')[0].click();
       });
       expect(screen.container.querySelector('[aria-label="Review · #g001"]')).not.toBeNull();
-      expect(screen.container.textContent).toContain("Candidate base: base-commit (main)");
-      expect(screen.container.textContent).toContain("Stale: candidate_head_moved");
-      expect(screen.container.textContent).toContain("File: /project/.lanes/reviews/opened/rev-11111111-1111-4111-8111-111111111111.md");
+      expect(screen.container.querySelector('[role="dialog"]')).toBeNull();
+      expect(boardView!.getAttribute("data-display")).toBe("none");
+      expect(screen.container.textContent).toContain("Pinned CR snapshot · Stale · candidate_head_moved");
+      expect(screen.container.textContent).not.toContain("Review ID: rev-11111111");
+      expect(screen.container.textContent).not.toContain("Candidate base: base-commit");
       expect(screen.container.textContent).toContain("Pinned body.");
+      expect(screen.container.textContent).not.toContain("**Pinned body.");
       expect(screen.container.textContent).not.toContain("Record review decision");
-      expect(screen.container.querySelector('[aria-label="Pinned review Markdown"]')?.getAttribute("data-max-height")).toBe("320");
+      expect(screen.container.querySelector('[aria-label="Pinned review Markdown"]')?.getAttribute("data-flex")).toBe("1");
+      const details = screen.container.querySelector<HTMLButtonElement>('[aria-label="Show review details"]');
+      expect(details).not.toBeNull();
+      expect(screen.container.textContent).not.toContain("File: /project/.lanes/reviews/opened/");
+      await act(async () => { details!.click(); });
+      expect(screen.container.textContent).toContain("Candidate base: base-commit (main)");
+      expect(screen.container.textContent).toContain("Assigned reviewer: reviewer");
+      expect(screen.container.textContent).toContain("File: /project/.lanes/reviews/opened/rev-11111111-1111-4111-8111-111111111111.md");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Hide review details"]')!.click(); });
       const preview = screen.container.querySelector('[role="link"]');
       expect(preview?.textContent).toBe("Preview");
       expect(screen.container.querySelectorAll('[role="link"]')).toHaveLength(1);
       await act(async () => { (preview as HTMLElement).click(); });
       expect(state.openUrl).toHaveBeenCalledWith("https://example.com/preview");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Back to work"]')!.click(); });
+      expect(screen.container.querySelector('[aria-label="Review · #g001"]')).toBeNull();
+      expect(boardView!.getAttribute("data-display")).toBe("flex");
+      expect(screen.container.querySelector('[aria-label="Collapse goal #g001"]')?.getAttribute("aria-expanded")).toBe("true");
+      expect(state.scrollCalls.at(-1)).toEqual({ y: 237, animated: false });
     } finally {
       await screen.unmount();
     }
@@ -233,161 +262,103 @@ describe("attachments and collaboration", () => {
     }
   });
 
-  it("shows scoped attachment metadata, reads current Markdown on demand, and refreshes away stale content", async () => {
-    const live = {
-      ref: "#l001", revision: 4,
-      attachment: {
-        id: "lane-md", type: "markdown", title: "Runbook", status: "available",
-        content: "# Live runbook\n[safe](https://example.com/docs) [unsafe](javascript:alert(1))\n<script>window.pwned=1</script>",
-        content_semantics: "current_file",
-      },
+  it("opens live CR attachment Markdown in a full view and returns to the same focused Lane", async () => {
+    state.reviews = [{ ref: "#l001", id: "rev-lane", status: "awaiting_review", covered_refs: ["#l001"] }];
+    const attachment = { id: "lane-md", type: "markdown", purpose: "cr", title: "Runbook", status: "available" };
+    state.board = { lanes: [{ ...lane, attachments: [attachment] }], goals: [goal, outside], warnings: [] };
+    state.readAttachment.mockResolvedValue({ ref: "#l001", revision: 4, attachment: {
+      ...attachment, content: "# Live runbook\n**Status:** Current attachment body. `runbook` *note*. [Docs](https://example.com/docs)",
+      content_semantics: "current_file",
+    } });
+    state.openedReview = {
+      review: { ref: "#l001", id: "rev-lane", title: "Lane CR", status: "awaiting_review", reviewer: "Daniel",
+        candidate: { base: "base", head: "head" }, stale: false, stale_reasons: [] },
+      requested_ref: "#l001", path: "/project/.lanes/reviews/opened/rev-lane.md", content_identity: { sha256: "hash" },
+      markdown: "# Lane CR\n\n- Review ID: rev-lane\n\n## Pinned change request\n\nPinned snapshot body.",
     };
-    const laneWithAttachment = {
-      ...lane, attachments: [{
-        id: "lane-md", type: "markdown", title: "Runbook", status: "available",
-        content: "stale board projection must not appear",
-      }],
-    };
-    const goalWithAttachments = {
-      ...goal,
-      attachments: [{
-        id: "github-issue", type: "github_issue", title: "Related issue",
-        url: "https://github.com/dfosco/clips/issues/1", status: "remote",
-      }, {
-        id: "unreadable-md", type: "markdown", title: "Private note", status: "unreadable",
-      }],
-      tasks: [{
-        ...task,
-        attachments: [{
-          id: "unsafe-url", type: "url", title: "Unsafe reference",
-          url: "javascript:alert(1)", status: "remote",
-        }, {
-          id: "missing-md", type: "markdown", title: "Missing file", status: "missing",
-        }],
-      }],
-    };
-    state.board = {
-      lanes: [laneWithAttachment], goals: [goalWithAttachments, outside], warnings: [],
-      generatedAt: "first",
-      collaboration: { enabled: false, state: "disabled", scope: "project", automatic_mutation_sync: false },
-    };
-    state.readAttachment.mockImplementation(async ({ ref }: { ref: string }) => ({
-      ...live, ref,
-    }));
     const screen = await mountScreen();
     try {
-      expect(screen.container.querySelector('[aria-label="Attachments for #l001"]')).not.toBeNull();
-      expect(screen.container.textContent).toContain("Related issue");
-      expect(screen.container.querySelector('[role="link"][aria-label="Open Related issue"]')).not.toBeNull();
-      expect(screen.container.textContent).toContain("Unreadable");
-      expect(screen.container.textContent).not.toContain("stale board projection");
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="Expand goal #g001"]')!.click();
-      });
-      expect(screen.container.textContent).toContain("Unsafe link omitted");
-      expect(screen.container.textContent).toContain("The attached Markdown file is missing.");
-
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click();
-      });
-      const focus = [...screen.container.querySelectorAll<HTMLButtonElement>("button")]
-        .find((button) => button.textContent === "Focus lane");
-      expect(focus).toBeDefined();
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click(); });
+      const focus = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Focus lane");
       await act(async () => { focus!.click(); });
       expect(screen.container.querySelector('[aria-label="Attachments for #l001"]')).not.toBeNull();
-      expect(screen.container.textContent).toContain("Runbook");
-
-      const read = screen.container.querySelector<HTMLButtonElement>('[aria-label="Read current Markdown for #l001: Runbook"]')!;
-      await act(async () => { read.click(); });
+      const boardView = screen.container.querySelector<HTMLElement>('[aria-label="Lanes work surface"]')!;
+      boardView.scrollTop = 237;
+      await act(async () => { boardView.dispatchEvent(new Event("scroll", { bubbles: true })); });
+      expect(screen.container.textContent).not.toContain("Current attachment body.");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Open current Markdown for #l001: Runbook"]')!.click(); });
       expect(state.readAttachment).toHaveBeenCalledWith({ projectId: "p1", ref: "#l001", attachmentId: "lane-md" });
-      expect(screen.container.textContent).toContain("Live runbook");
-      expect(screen.container.textContent).not.toContain("stale board projection");
-      expect(screen.container.querySelector("script")).toBeNull();
-      const inlineSafeLink = [...screen.container.querySelectorAll<HTMLElement>('[role="link"]')]
-        .find((element) => element.textContent === "safe");
-      expect(inlineSafeLink).not.toBeNull();
-      expect(screen.container.querySelector('[role="link"][aria-label="unsafe"]')).toBeNull();
-      await act(async () => { inlineSafeLink!.click(); });
+      expect(screen.container.querySelector('[aria-label="Current attachment · #l001 · lane-md"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Current attached Markdown · #l001 · lane-md");
+      expect(screen.container.textContent).toContain("This is the current attachment file.");
+      expect(screen.container.textContent).toContain("Current attachment body.");
+      const boldStatus = [...screen.container.querySelectorAll<HTMLElement>("span")].find((node) => node.textContent === "Status:");
+      expect(boldStatus?.style.fontWeight).toBe("700");
+      expect(screen.container.querySelector('[aria-label="Current attachment Markdown"]')?.getAttribute("data-flex")).toBe("1");
+      const docs = [...screen.container.querySelectorAll<HTMLElement>('[role="link"]')].find((link) => link.textContent === "Docs");
+      expect(docs).not.toBeNull();
+      await act(async () => { docs!.click(); });
       expect(state.openUrl).toHaveBeenCalledWith("https://example.com/docs");
-
-      state.board = {
-        ...state.board, generatedAt: "second",
-        lanes: [{ ...laneWithAttachment, attachments: [{ ...laneWithAttachment.attachments[0], status: "missing", content: null }] }],
-      };
-      live.attachment = { ...live.attachment, status: "missing", content: null, error: "File no longer exists." };
-      await screen.rerender();
-      expect(screen.container.textContent).not.toContain("Live runbook");
-      expect(screen.container.textContent).toContain("Missing");
-      expect(screen.container.querySelector('[aria-label="Read current Markdown for #l001: Runbook"]')).not.toBeNull();
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="Read current Markdown for #l001: Runbook"]')!.click();
-      });
-      expect(screen.container.textContent).toContain("File no longer exists.");
+      boardView.scrollTop = 0;
+      await act(async () => { boardView.dispatchEvent(new Event("scroll", { bubbles: true })); });
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Open pinned Review for #l001"]')!.click(); });
+      expect(screen.container.textContent).toContain("Pinned snapshot body.");
+      expect(screen.container.textContent).not.toContain("Current attachment body.");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Back to work"]')!.click(); });
+      expect(screen.container.querySelector('[aria-label="Attachments for #l001"]')).not.toBeNull();
+      expect(screen.container.textContent).not.toContain("Current attachment body.");
+      expect(screen.container.textContent).toContain("#l001 · Goals and Tasks");
+      expect(state.scrollCalls.at(-1)).toEqual({ y: 237, animated: false });
     } finally {
       await screen.unmount();
     }
   });
 
-  it("keeps an attachment read pending while another attachment resolves", async () => {
-    let resolveA!: (value: any) => void;
-    let resolveB!: (value: any) => void;
-    const firstA = new Promise<any>((resolve) => { resolveA = resolve; });
-    const readB = new Promise<any>((resolve) => { resolveB = resolve; });
-    let aReads = 0;
-    state.readAttachment.mockImplementation(({ attachmentId }: { attachmentId: string }) => {
-      if (attachmentId === "lane-a") {
-        aReads += 1;
-        return aReads === 1 ? firstA : Promise.resolve({
-          ref: "#l001", revision: 3,
-          attachment: { id: "lane-a", type: "markdown", title: "A", status: "available", content: "Latest A content" },
-        });
-      }
-      return readB;
-    });
-    state.board = {
-      lanes: [{
-        ...lane,
-        attachments: [
-          { id: "lane-a", type: "markdown", title: "A", status: "available" },
-          { id: "lane-b", type: "markdown", title: "B", status: "available" },
-        ],
-      }],
-      goals: [goal, outside], warnings: [],
-    };
+  it("shows live Markdown loading and read errors in the full attachment view", async () => {
+    const attachment = { id: "lane-md", type: "markdown", title: "Runbook", status: "available" };
+    state.board = { lanes: [{ ...lane, attachments: [attachment] }], goals: [goal, outside], warnings: [] };
+    let finishRead!: (value: any) => void;
+    state.readAttachment.mockImplementation(() => new Promise((resolve) => { finishRead = resolve; }));
     const screen = await mountScreen();
-    const button = (title: string) => screen.container.querySelector<HTMLButtonElement>(
-      `[aria-label="Read current Markdown for #l001: ${title}"]`,
-    )!;
     try {
-      await act(async () => { button("A").click(); });
-      await act(async () => { button("B").click(); });
-      expect(button("A").disabled).toBe(true);
-      expect(button("B").disabled).toBe(true);
-
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="More actions for lane #l001"]')!.click(); });
+      const focus = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Focus lane");
+      await act(async () => { focus!.click(); });
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Open current Markdown for #l001: Runbook"]')!.click(); });
+      expect(screen.container.querySelector('[aria-label="Current attachment · #l001 · lane-md"]')).not.toBeNull();
+      expect(screen.container.textContent).toContain("Reading current attachment…");
       await act(async () => {
-        resolveB({
-          ref: "#l001", revision: 2,
-          attachment: { id: "lane-b", type: "markdown", title: "B", status: "available", content: "B content" },
-        });
-        await readB;
+        finishRead({ ref: "#l001", revision: 1, attachment: { ...attachment, content: "Loaded document" } });
       });
-      expect(screen.container.textContent).toContain("B content");
-      expect(button("A").disabled).toBe(true);
+      expect(screen.container.textContent).toContain("Loaded document");
+      state.readAttachment.mockRejectedValueOnce(new Error("Access denied"));
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh current attachment"]')!.click(); });
+      expect(screen.container.textContent).toContain("Could not read current Markdown: Access denied");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps live attachment loading, missing, identity errors and project switching scoped", async () => {
+    const attachment = { id: "lane-md", type: "markdown", title: "Runbook", status: "available" };
+    state.board = { lanes: [{ ...lane, attachments: [attachment] }], goals: [goal, outside], warnings: [] };
+    const projectProps: Record<string, unknown> = { preferredProjectId: "p1" };
+    state.readAttachment.mockResolvedValue({ ref: "#l001", revision: 1, attachment: {
+      ...attachment, status: "missing", content: null, error: "File no longer exists.",
+    } });
+    const screen = await mountScreen(projectProps);
+    try {
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Open current Markdown for #l001: Runbook"]')!.click(); });
+      expect(screen.container.textContent).toContain("File no longer exists.");
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh current attachment"]')!.click(); });
       expect(state.readAttachment).toHaveBeenCalledTimes(2);
-
-      await act(async () => {
-        resolveA({
-          ref: "#l001", revision: 1,
-          attachment: { id: "lane-a", type: "markdown", title: "A", status: "available", content: "First A content" },
-        });
-        await firstA;
-      });
-      expect(screen.container.textContent).toContain("First A content");
-      await act(async () => {
-        screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh current Markdown for #l001: A"]')!.click();
-      });
-      expect(screen.container.textContent).toContain("Latest A content");
-      expect(screen.container.textContent).not.toContain("First A content");
+      state.readAttachment.mockResolvedValueOnce({ ref: "#g003", revision: 2, attachment: { ...attachment, content: "wrong record" } });
+      await act(async () => { screen.container.querySelector<HTMLButtonElement>('[aria-label="Refresh current attachment"]')!.click(); });
+      expect(screen.container.textContent).toContain("Could not read current Markdown: Lanes returned a different record or attachment.");
+      projectProps.preferredProjectId = "p2";
+      await screen.rerender();
+      expect(screen.container.querySelector('[aria-label="Current attachment · #l001 · lane-md"]')).toBeNull();
+      expect(screen.container.textContent).toContain("Project 2");
     } finally {
       await screen.unmount();
     }
