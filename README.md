@@ -1,6 +1,6 @@
 <picture>
-  <source media="(prefers-color-scheme: light)" src="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165">
-  <source media="(prefers-color-scheme: dark)" src="https://github.com/user-attachments/assets/609e7caf-ada8-45c5-82b1-be14480f3223">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/609e7caf-ada8-45c5-82b1-be14480f3223">
    <img alt="Lanes logo" src="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165"
 </picture>
 
