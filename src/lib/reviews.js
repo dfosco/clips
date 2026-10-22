@@ -55,6 +55,16 @@ function verifyBranchTip(refName, expectedSha, repoRoot, { requireLocal = false 
   }
 }
 
+function verifyLocalBranchTip(refName, expectedSha, repoRoot) {
+  try {
+    const ref = `refs/heads/${refName}`;
+    const tip = git(repoRoot, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
+    if (tip !== expectedSha) throw new Error('moved');
+  } catch {
+    throw new Error(`Local candidate branch ${refName} no longer points to its pinned commit`);
+  }
+}
+
 function branchForCommit(sha, label, repoRoot) {
   const refs = git(repoRoot, ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes'])
     .split('\n').filter(Boolean).map((line) => {
@@ -103,8 +113,8 @@ function normalizeCandidate(value, repoRoot, { requireHead = false, verifyBranch
   const baseRef = value.base_ref || (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(String(value.base))
     ? String(value.base).replace(/^refs\/heads\//, '') : branchForCommit(base, 'base', repoRoot));
   if (verifyBranches) {
-    verifyBranchTip(baseRef, base, repoRoot);
-    verifyBranchTip(headRef, head, repoRoot, { requireLocal: true });
+    verifyLocalBranchTip(baseRef, base, repoRoot);
+    verifyLocalBranchTip(headRef, head, repoRoot);
   }
   return { base, head, base_ref: requiredText(baseRef, 'candidate.base_ref'), head_ref: requiredText(headRef, 'candidate.head_ref') };
 }
@@ -305,9 +315,9 @@ function staleReasons(review, repoRoot = getRepoRoot()) {
     const head = resolveCommit(review.candidate.head, 'head', repoRoot);
     const currentHead = git(repoRoot, ['rev-parse', '--verify', 'HEAD^{commit}']);
     if (head !== currentHead) reasons.push('candidate_head_moved');
-    try { verifyBranchTip(review.candidate.base_ref, base, repoRoot); }
+    try { verifyLocalBranchTip(review.candidate.base_ref, base, repoRoot); }
     catch { reasons.push('candidate_base_moved'); }
-    try { verifyBranchTip(review.candidate.head_ref, head, repoRoot, { requireLocal: true }); }
+    try { verifyLocalBranchTip(review.candidate.head_ref, head, repoRoot); }
     catch { reasons.push('candidate_head_moved'); }
   } catch { reasons.push('candidate_unavailable'); }
   return [...new Set(reasons)];
@@ -507,6 +517,8 @@ export function materializeReviewPr(id, { confirmed = false, repoRoot = getRepoR
   if (!['draft', 'ready'].includes(config.lane_pr_mode)) {
     throw new Error(`lane_pr_mode '${config.lane_pr_mode}' does not authorize PR materialization; use draft or ready`);
   }
+  verifyBranchTip(current.candidate.base_ref, current.candidate.base, repoRoot, { requireLocal: true });
+  verifyBranchTip(current.candidate.head_ref, current.candidate.head, repoRoot, { requireLocal: true });
   const args = ['pr', 'create', '--title', preview.title, '--body', preview.body,
     '--base', preview.base_ref, '--head', preview.head_ref];
   if (config.lane_pr_mode === 'draft') args.push('--draft');

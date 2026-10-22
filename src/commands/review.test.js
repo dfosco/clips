@@ -288,6 +288,36 @@ describe('durable review requests', () => {
     fails(root, env, 'review', 'decide', review.id, '--file', payloadFile(root, decidePayload(review)));
   });
 
+  it('uses exact local branches for review while retaining tracking-ref checks at PR materialization', () => {
+    const { root, env, base, head } = workspace();
+    const attachment_id = makeGoal(root, env);
+    const headRef = 'feat/lane-review-delivery';
+    const payload = requestPayload({ attachment_id, base, head });
+    payload.candidate.base_ref = 'main';
+    payload.candidate.head_ref = headRef;
+
+    // Model unpushed local work and stale/ambiguous tracking refs without contacting a remote.
+    git(root, 'update-ref', 'refs/remotes/origin/main', base);
+    git(root, 'update-ref', `refs/remotes/origin/${headRef}`, base);
+    git(root, 'update-ref', 'refs/remotes/upstream/main', head);
+
+    const review = request(root, env, payload);
+    expect(review).toMatchObject({ stale: false, candidate: { base_ref: 'main', head_ref: headRef } });
+    expect(run(root, env, 'review', 'show', review.id, '--json')).toMatchObject({ stale: false, status: 'awaiting_review' });
+    const approved = run(root, env, 'review', 'decide', review.id, '--file', payloadFile(root, decidePayload(review)));
+    expect(approved).toMatchObject({ stale: false, status: 'approved' });
+
+    fs.writeFileSync(path.join(root, '.clips', 'clips.config.json'), JSON.stringify({ collaboration: true, lane_pr_mode: 'ready' }));
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const marker = path.join(root, 'gh-called');
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nprintf 'called\\n' > '${marker}'\nprintf 'https://github.com/acme/app/pull/20\\n'\n`);
+    fs.chmodSync(path.join(bin, 'gh'), 0o755);
+    env.PATH = `${bin}:${env.PATH}`;
+    expect(fails(root, env, 'review', 'pr', 'materialize', review.id, '--confirm')).toContain('no longer points to its pinned commit');
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
   it('stales approval when a source commit moves candidate head, not when only workflow labels change', () => {
     const { root, env, base, head } = workspace();
     const attachment_id = makeGoal(root, env);
