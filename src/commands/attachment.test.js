@@ -86,11 +86,11 @@ describe('first-class live attachments', () => {
     fs.writeFileSync(configPath, '{"collaboration":true}\n');
     const collaborationConfig = fs.readFileSync(configPath, 'utf8');
 
-    const input = JSON.stringify({ type: 'markdown', path: 'docs/plan.md', title: 'Plan' });
+    const input = JSON.stringify({ type: 'markdown', path: 'docs/plan.md', title: 'Plan', purpose: 'cr' });
     const lane = run(root, env, 'attachment', 'add', '#l1', input);
     const goal = run(root, env, 'attachment', 'add', '#g1', input);
     const task = run(root, env, 'attachment', 'add', '#g1#t1', JSON.stringify({
-      type: 'markdown', path: 'docs/plan.md', title: 'Plan', expected_revision: 1,
+      type: 'markdown', path: 'docs/plan.md', title: 'Plan', purpose: 'cr', expected_revision: 1,
     }));
     expect(failed(root, env, 'attachment', 'read', '#g1', '/etc/passwd').stderr).toContain('not found');
     const secondTask = run(root, env, 'attachment', 'add', '#g1#t1', JSON.stringify({
@@ -100,18 +100,18 @@ describe('first-class live attachments', () => {
     const taskAttachments = run(root, env, 'attachment', 'list', '#g1#t1');
     expect(taskAttachments.revision).toBe(3);
     expect(taskAttachments.attachments[0]).toMatchObject({
-      id: task.attachment.id, type: 'markdown', path: 'docs/plan.md',
+      id: task.attachment.id, type: 'markdown', path: 'docs/plan.md', purpose: 'cr',
     });
     expect(taskAttachments.attachments).toHaveLength(2);
     expect(run(root, env, 'view', '#g1', '--json').attachments[0]).toMatchObject({
-      id: goal.attachment.id, type: 'markdown', path: 'docs/plan.md',
+      id: goal.attachment.id, type: 'markdown', path: 'docs/plan.md', purpose: 'cr',
     });
     expect(run(root, env, 'goal', 'show', 'g1')).toMatchObject({
       sections: { 'Existing context': 'Keep this note.' },
       extensions: { custom: { keep: true } },
     });
     expect(run(root, env, 'view', '#l1', '--json').attachments[0]).toMatchObject({
-      id: lane.attachment.id, type: 'markdown', path: 'docs/plan.md',
+      id: lane.attachment.id, type: 'markdown', path: 'docs/plan.md', purpose: 'cr',
     });
     expect(run(root, env, 'lane', 'history', '#l1', '--json').at(-1)).toMatchObject({
       event: 'attachment_added', attachment: { id: lane.attachment.id },
@@ -198,14 +198,14 @@ describe('first-class live attachments', () => {
       type: 'github_issue', url: 'https://github.com/acme/app/issues/12',
     }));
     const pull = run(root, env, 'attachment', 'add', '#g1', JSON.stringify({
-      type: 'github_pr', url: 'https://git.example.test/acme/other/pull/12',
+      type: 'github_pr', url: 'https://git.example.test/acme/other/pull/12', purpose: 'adr',
     }));
     run(root, env, 'attachment', 'add', '#g1', JSON.stringify({
       type: 'url', url: 'http://docs.example.test/design',
     }));
     expect(ghe.attachment).toMatchObject({ host: 'git.example.test', repository: 'acme/app', number: 12 });
     expect(github.attachment.host).toBe('github.com');
-    expect(pull.attachment).toMatchObject({ type: 'github_pr', repository: 'acme/other', number: 12 });
+    expect(pull.attachment).toMatchObject({ type: 'github_pr', repository: 'acme/other', number: 12, purpose: 'adr' });
     expect(new Set([ghe.attachment.id, github.attachment.id, pull.attachment.id]).size).toBe(3);
     expect(run(root, env, 'attachment', 'read', '#g1', ghe.attachment.id).attachment).toMatchObject({
       status: 'remote', content: null, content_semantics: 'not_fetched',
@@ -217,6 +217,9 @@ describe('first-class live attachments', () => {
     expect(failed(root, env, 'attachment', 'add', '#g1', JSON.stringify({
       type: 'github_pr', url: 'https://github.com/acme/app/issues/12',
     })).status).not.toBe(0);
+    expect(failed(root, env, 'attachment', 'add', '#g1', JSON.stringify({
+      type: 'url', url: 'https://example.test/cr', purpose: 'decision',
+    })).stderr).toContain('purpose must be cr or adr');
   });
 
   it('projects legacy GitHub issue and PR fields as read-only typed attachments', () => {

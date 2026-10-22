@@ -16,6 +16,7 @@ import { runComponentCommand } from './commands/component.js';
 import { runHistoryCommand } from './commands/history.js';
 import { runLabelCommand } from './commands/label.js';
 import { runAttachmentCommand } from './commands/attachment.js';
+import { runReviewCommand } from './commands/review.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
 import { version } from './version.js';
 import { getRepoRoot, getClipsDir } from './lib/core.js';
@@ -63,6 +64,7 @@ Commands:
   component <action>     Manage persistent system components
   label <action>         Manage project labels and record assignments
   attachment <action>    Attach and read live Markdown, URL, issue, and PR references
+  review <action>        Request, inspect, decide, and materialize CR reviews
   record <action> [args]  Manage optional legacy CR and ADR records
   sync [ref]              Explicitly sync GitHub when collaboration is enabled
   config [key] [value]    View/set configuration; --help lists flags
@@ -118,6 +120,7 @@ const commands = {
   history: runHistoryCommand,
   label: runLabelCommand,
   attachment: runAttachmentCommand,
+  review: runReviewCommand,
   task: runTaskCommand,
   record: runRecordCommand,
   view: runViewCommand,

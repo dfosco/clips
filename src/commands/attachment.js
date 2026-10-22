@@ -153,10 +153,13 @@ Commands:
   detach <record-ref> <attachment-id>          Remove only the association
 
 Attachment JSON types:
-  markdown      { "type": "markdown", "path": "docs/plan.md", "title": "Plan" }
-  url           { "type": "url", "url": "https://example.com/design" }
-  github_issue  { "type": "github_issue", "url": "https://github.com/org/repo/issues/12" }
-  github_pr     { "type": "github_pr", "url": "https://github.com/org/repo/pull/13" }
+  markdown      { "type": "markdown", "path": "docs/plan.md", "title": "Plan", "purpose": "cr" }
+  url           { "type": "url", "url": "https://example.com/design", "purpose": "adr" }
+  github_issue  { "type": "github_issue", "url": "https://github.com/org/repo/issues/12", "purpose": "cr" }
+  github_pr     { "type": "github_pr", "url": "https://github.com/org/repo/pull/13", "purpose": "adr" }
+
+Purpose is optional. Supported values are cr and adr; attachments without a
+purpose retain their existing behavior.
 
 Markdown reads always use the current file. Historical record refs retain reference
 metadata but do not retain document contents. URLs are never fetched. Attachment

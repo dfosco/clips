@@ -64,10 +64,14 @@ function validateStoredAttachment(attachment) {
   if (typeof id !== 'string' || !UUID_ATTACHMENT_ID.test(id)) throw new Error('Corrupt attachment state: invalid attachment ID');
   if (!ATTACHMENT_TYPES.has(type)) throw new Error(`Corrupt attachment state: unsupported attachment type '${type}'`);
   const normalizedTitle = requiredText(title, 'attachment title');
-  const common = { id, type, title: normalizedTitle };
+  if (attachment.purpose !== undefined && !['cr', 'adr'].includes(attachment.purpose)) {
+    throw new Error('Corrupt attachment state: purpose must be cr or adr');
+  }
+  const common = { id, type, title: normalizedTitle,
+    ...(attachment.purpose === undefined ? {} : { purpose: attachment.purpose }) };
 
   if (type === 'markdown') {
-    if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'path'].includes(key))) {
+    if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'path', 'purpose'].includes(key))) {
       throw new Error('Corrupt Markdown attachment state: unsupported fields');
     }
     const fileRef = requiredText(attachment.path, 'attachment path');
@@ -78,13 +82,13 @@ function validateStoredAttachment(attachment) {
   }
 
   if (type === 'url') {
-    if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'url'].includes(key))) {
+    if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'url', 'purpose'].includes(key))) {
       throw new Error('Corrupt URL attachment state: unsupported fields');
     }
     return { ...common, url: safeHttpUrl(attachment.url).toString() };
   }
 
-  if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'url', 'host', 'repository', 'number'].includes(key))) {
+  if (Object.keys(attachment).some((key) => !['id', 'type', 'title', 'url', 'host', 'repository', 'number', 'purpose'].includes(key))) {
     throw new Error(`Corrupt ${type} attachment state: unsupported fields`);
   }
   const identity = githubIdentity(attachment.url, type);
@@ -106,17 +110,22 @@ export function normalizeAttachmentInput(input, { repoRoot }) {
   const allowed = new Set(type === 'markdown' ? ['type', 'title', 'path', 'expected_revision']
     : type === 'url' ? ['type', 'title', 'url', 'expected_revision']
       : ['type', 'title', 'url', 'host', 'repository', 'number', 'expected_revision']);
+  allowed.add('purpose');
   const unsupported = Object.keys(input).filter((key) => !allowed.has(key));
   if (unsupported.length) throw new Error(`Unsupported attachment fields: ${unsupported.join(', ')}`);
   const title = input.title === undefined ? null : requiredText(input.title, 'title');
+  if (input.purpose !== undefined && !['cr', 'adr'].includes(input.purpose)) {
+    throw new Error('purpose must be cr or adr');
+  }
+  const purpose = input.purpose === undefined ? {} : { purpose: input.purpose };
 
   let attachment;
   if (type === 'markdown') {
     const pathRef = normalizeFileReference(input.path, repoRoot);
-    attachment = { type, title: title || path.basename(pathRef), path: pathRef };
+    attachment = { type, title: title || path.basename(pathRef), path: pathRef, ...purpose };
   } else if (type === 'url') {
     const url = safeHttpUrl(input.url).toString();
-    attachment = { type, title: title || url, url };
+    attachment = { type, title: title || url, url, ...purpose };
   } else {
     const identity = githubIdentity(input.url, type);
     if (input.host !== undefined && (typeof input.host !== 'string' || input.host.toLowerCase() !== identity.host)) {
@@ -133,6 +142,7 @@ export function normalizeAttachmentInput(input, { repoRoot }) {
       type,
       title: title || `${identity.repository}#${identity.number}`,
       ...identity,
+      ...purpose,
     };
   }
   return { attachment, expectedRevision };
