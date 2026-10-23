@@ -17,6 +17,7 @@ import { runHistoryCommand } from './commands/history.js';
 import { runLabelCommand } from './commands/label.js';
 import { runAttachmentCommand } from './commands/attachment.js';
 import { runReviewCommand } from './commands/review.js';
+import { runUpgradeCommand } from './commands/upgrade.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
 import { version } from './version.js';
 import { getRepoRoot, getClipsDir } from './lib/core.js';
@@ -65,6 +66,7 @@ Commands:
   label <action>         Manage project labels and record assignments
   attachment <action>    Attach and read live Markdown, URL, issue, and PR references
   review <action>        Request, inspect, decide, and materialize CR reviews
+  upgrade                Update the global npm installation to latest stable
   record <action> [args]  Manage optional legacy CR and ADR records
   sync [ref]              Explicitly sync GitHub when collaboration is enabled
   config [key] [value]    View/set configuration; --help lists flags
@@ -127,6 +129,7 @@ const commands = {
   config: runConfigCommand,
   init: runInitCommand,
   sync: runSyncCommand,
+  upgrade: runUpgradeCommand,
   board: runBoardCommand,
 };
 

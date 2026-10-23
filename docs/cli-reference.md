@@ -719,6 +719,19 @@ refresh project skills. Skills absent from the selected package are removed
 only if unchanged; locally edited files are retained with a warning.
 Project-tracked skill changes remain visible in Git.
 
+### Upgrade the global npm installation
+
+Run `lanes upgrade` with no arguments to install the latest stable
+`@dfosco/lanes` release globally. npm's progress is shown, then the command reads
+the package manifest under `npm root --global` and reports the installed
+version. It does not initialize a repository or change the selected `dev` or
+`prod` mode.
+
+The command refuses to replace a global development link because that would
+silently replace the selected source checkout. If that is intentional, run
+`npm install --global @dfosco/lanes@latest` yourself. Help is read-only:
+`lanes upgrade --help`.
+
 ### Optional GitHub collaboration
 
 The collaboration setting is local configuration. Inspect it and review the

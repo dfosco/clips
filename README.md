@@ -1,9 +1,17 @@
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/41f1d34c-f40c-4c12-8223-bb7da1f33e7e">
+   <img alt="Lanes logo" src="https://github.com/user-attachments/assets/5ca1585f-f565-408d-b57a-c1ec45646165">
+</picture>
+
 # Lanes
 
-Lanes gives AI agents a shared structure of goals, tasks, and clear checks for
+Lanes gives AI agents a shared structure of lanes, goals, tasks, and clear checks for
 what "done" means. Its Lane Manager turns a broad idea into that structure,
 coordinates the agents doing the work, and keeps their results tied to the
 agreed goals.
+
+Lanes are broad workstreams (think epics), Goals are project-wide goals, Tasks are implementation tasks.
 
 ## Install and get started
 
@@ -20,6 +28,10 @@ npm install -g @dfosco/lanes
 
 This installs the published release. Some commands and skills in this repository
 may be newer than that release; `lanes --help` shows the commands you have.
+After installing, run `lanes upgrade` to update the global CLI to the latest
+stable npm release. The command refuses to replace a development-linked
+checkout; use `npm install --global @dfosco/lanes@latest` only when you intend to
+replace that link with the published package.
 
 ### 2. Set up your project
 

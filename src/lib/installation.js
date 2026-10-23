@@ -270,7 +270,7 @@ export function switchInstallation(mode, argv = []) {
 
 export function dispatchProd(argv) {
   // Migration and path discovery must use this runtime, not an older saved CLI.
-  if (['init', 'paths'].includes(argv[0]) || process.env.LANES_SWITCH_INIT === '1' || process.env.CLIPS_SWITCH_INIT === '1') return null;
+  if (['init', 'paths', 'upgrade'].includes(argv[0]) || process.env.LANES_SWITCH_INIT === '1' || process.env.CLIPS_SWITCH_INIT === '1') return null;
   const state = readState();
   if (state.mode !== 'prod') return null;
   try {
