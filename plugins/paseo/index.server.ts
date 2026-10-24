@@ -2,6 +2,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createResourceManager } from "./server/resource-manager";
 import { resourceManagerPreferences, resourceManagerStatusRpc } from "./shared/resource-manager";
+import { resourceChannelRpc, resourceFoldRpc, resourceHandoffRpc } from "./shared/resource-channel";
+import { createResourceFolding } from "./server/resource-folding";
 import {
   agentOptionsRpc, attachmentReadRpc, boardRpc, collaborationRpc, labelUsesRpc, labelsRpc,
   roleModelDefaultsRpc, saveRoleModelDefaultsRpc, reviewListRpc, reviewOpenRpc, reviewShowRpc, reviewDecideRpc, reviewImportRpc,
@@ -21,6 +23,7 @@ export default function contribute(server: PluginServerContext) {
     if (state.status !== "ready") throw new Error(`Resource manager settings are invalid: ${state.error}`);
     return state.values;
   } });
+  const folding = createResourceFolding({ target: (id) => resources.target(id), critical: () => resources.critical() });
   const unsubscribeSettings = resourceSettings.subscribe(() => resources.settingsChanged());
   // SDK 0.11.2 first supplies its subprocess-owned API through a hook or RPC.
   // Sampling starts immediately; notification discovery waits for that context.
@@ -28,13 +31,19 @@ export default function contribute(server: PluginServerContext) {
     server.before("agent.session_open", (_input, { paseo }) => { resources.bind(paseo); }),
     ...(["agent.created", "agent.closed", "agent.turn_started", "agent.turn_ended", "agent.permission_requested",
       "agent.permission_resolved", "agent.archived", "workspace.created", "workspace.archived"] as const)
-      .map((event) => server.on(event, (_event, { paseo }) => { resources.bind(paseo); })),
+      .map((event) => server.on(event, (payload, { paseo }) => {
+        resources.bind(paseo);
+        if (event === "agent.turn_started" && "agent" in payload) folding.turnStarted(payload.agent.id);
+      })),
   ];
   const handle: PluginServerContext["handle"] = (contract, handler) => server.handle(contract, (input, context) => {
     resources.bind(context.paseo);
     return handler(input, context);
   });
   handle(resourceManagerStatusRpc, () => resources.status());
+  handle(resourceChannelRpc, async (input) => ({ ...await resources.channel(input), pendingHandoffs: folding.pending(input.managerId) }));
+  handle(resourceHandoffRpc, (input, { paseo }) => folding.handoff(paseo, input));
+  handle(resourceFoldRpc, (input, { paseo }) => folding.fold(paseo, input));
   handle(projectsRpc, (_input, { paseo }) => projectList(paseo));
   handle(boardRpc, (input, { paseo }) => readProjectBoard(paseo, input.projectId));
   handle(attachmentReadRpc, (input, { paseo }) => readProjectAttachment(paseo, input));
@@ -78,6 +87,7 @@ export default function contribute(server: PluginServerContext) {
     return startWork(paseo, agentDefaults, input);
   });
   return () => {
+    folding.dispose();
     resources.dispose();
     unsubscribeSettings();
     for (const release of releases) release();

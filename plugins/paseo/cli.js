@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import { createPaseoClient } from "@getpaseo/client";
+import { createPaseoApi } from "@getpaseo/client";
+// This exported adapter is also used by Paseo's native CLI; keep the SDK version pinned.
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { FULL_ACCESS_MODE, resolvePermissionMode } from "./shared/permission-modes.ts";
@@ -17,6 +20,18 @@ const help = `Lanes Paseo CLI
 Usage:
   node plugins/paseo/cli.js options --project <path> [--provider <provider[/model]>]
   node plugins/paseo/cli.js start --project <path> --ref <lanes-ref> --provider <provider/model> [options]
+  node plugins/paseo/cli.js resources --manager <agent-id> [--action status|reserve|report|release] [--watch]
+  node plugins/paseo/cli.js handoff --manager <agent-id> --agent <dev-id> --context-file <path> [--reason completed|resource_warning|resource_critical|reassignment]
+  node plugins/paseo/cli.js fold --manager <agent-id> --agent <dev-id> [--handoff-id <uuid>]
+
+Resource channel:
+  --count <N> --request-id <id>  Reserve measured headroom (shared across managers)
+  --reservation <id> --agents <id,id>  Report native agents started against a grant
+  --reservation <id>           Release an unused reservation
+  --watch                      Stream status/inbox updates every 15 seconds
+  --handoff-id <uuid>           Idempotent handoff; fold acknowledges this Goal-attached context
+  Normal folds require a complete handoff and an idle dev. Critical folds close
+  immediately without waiting for context, then attach an incomplete emergency note.
 
 Options:
   --thinking <id>              Provider-supported reasoning level
@@ -44,7 +59,7 @@ function parseArgs(argv) {
   while (argv.length) {
     const flag = argv.shift();
     if (flag === "--help" || flag === "-h") return { command: "help", options };
-    if (flag === "--json" || flag === "--dry-run") {
+    if (flag === "--json" || flag === "--dry-run" || flag === "--watch") {
       options[flag.slice(2)] = true;
       continue;
     }
@@ -423,18 +438,63 @@ function print(value, json) {
   process.stdout.write(`${value}\n`);
 }
 
+/** The authenticated plugin channel is available even while a manager is busy. */
+export async function resourceCommand(driver, command, options) {
+  if (!options.manager?.trim()) fail(`${command} requires --manager <observed-agent-id>.`);
+  if (options["dry-run"]) fail("Resource commands do not support --dry-run; use resources --action status for a read-only observation.");
+  if (options.watch && command !== "resources") fail("--watch supports resource status only.");
+  let method, input;
+  if (command === "resources") {
+    const action = options.action || "status";
+    if (options.watch && action !== "status") fail("--watch supports resource status only.");
+    method = "clips.resources.channel";
+    input = {
+      managerId: options.manager, action,
+      ...(options.count === undefined ? {} : { count: Number(options.count) }),
+      ...(options["request-id"] ? { requestId: options["request-id"] } : {}),
+      ...(options.reservation ? { reservationId: options.reservation } : {}),
+      ...(options.agents ? { agentIds: options.agents.split(",").map((id) => id.trim()) } : {}),
+    };
+  } else {
+    if (!options.agent?.trim()) fail(`${command} requires --agent <observed-dev-id>.`);
+    input = { managerId: options.manager, agentId: options.agent,
+      ...(options["handoff-id"] ? { handoffId: options["handoff-id"] } : {}) };
+    if (command === "handoff") {
+      if (!options["context-file"]) fail("handoff requires --context-file containing the developer's latest context.");
+      const context = readFileSync(path.resolve(options["context-file"]), "utf8");
+      if (!context.trim() || context.length > 64 * 1024) fail("Handoff context must contain 1–65,536 characters.");
+      input = { ...input, context, reason: options.reason || "completed" };
+      method = "clips.resources.handoff";
+    } else method = "clips.resources.fold";
+  }
+  return driver.invokePluginRpc("clips-workspaces", method, input);
+}
+
 async function main() {
   const { command, options } = parseArgs(process.argv.slice(2));
   if (command === "help" || options.help) {
     process.stdout.write(help);
     return;
   }
-  if (!["options", "start"].includes(command)) fail(`Unknown command ${command}.\n\n${help}`);
+  if (!["options", "start", "resources", "handoff", "fold"].includes(command)) fail(`Unknown command ${command}.\n\n${help}`);
   const root = path.resolve(options.project ?? process.cwd());
   const url = options.url || process.env.PASEO_WS_URL || "ws://127.0.0.1:6767/ws";
-  const client = createPaseoClient({ url, ...(process.env.PASEO_PASSWORD ? { password: process.env.PASEO_PASSWORD } : {}) });
-  await client.connect();
+  const driver = new DaemonClient({ url, clientId: `lanes-cli-${randomUUID()}`, clientType: "cli",
+    ...(process.env.PASEO_PASSWORD ? { password: process.env.PASEO_PASSWORD } : {}),
+    reconnect: { enabled: false }, connectTimeoutMs: 10000 });
+  const client = createPaseoApi(driver);
+  await driver.connect();
   try {
+    if (["resources", "handoff", "fold"].includes(command)) {
+      let previous;
+      do {
+        const result = await resourceCommand(driver, command, options);
+        const serialized = JSON.stringify(result);
+        if (serialized !== previous) { print(result, true); previous = serialized; }
+        if (!options.watch) return;
+        await new Promise((resolve) => setTimeout(resolve, 15000));
+      } while (true);
+    }
     if (command === "options") {
       const result = await providerOptions(client, root, options.provider ?? "", options.thinking);
       print(result, true);
@@ -447,7 +507,8 @@ async function main() {
     }
     print(options.json ? result : `Started agent ${result.agentId} for ${result.ref} in workspace ${result.workspaceId}.`, options.json);
   } finally {
-    await client.close();
+    client.dispose();
+    await driver.close();
   }
 }
 

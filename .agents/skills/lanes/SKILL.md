@@ -9,7 +9,7 @@ description: >-
   optional Paseo work-record/execution association, and GitHub synchronization.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.22.1"
+  version: "2026.10.24.1"
 ---
 
 # Lanes
@@ -56,15 +56,17 @@ at a plan, created records or launch preview when implementation is authorized.
 Honor the manager's initial mode choice; after authorization, ask only for
 material missing product authority, not routine continuation permission.
 
-Before delegation, Lane Manager reads `lanes config lane_max_active_agents`
-from the Lane's project and announces its effective worker budget. The project
-default is 5 concurrently active workers per Lane, excluding the manager.
-`lanes config --lane-max-active-agents N` stores a positive-integer project
-default; an explicit user override can apply to one Lane. Existing, starting,
-reused and permitted nested workers share that budget. Completion or confirmed
-idle frees capacity; reductions do not terminate workers, and unknown activity
-is not proof of a free slot. This is manager dispatch policy, not native runtime
-enforcement. See Lane Manager for accounting and capability limits.
+Before delegation and at planning boundaries, Lane Manager reads fresh
+resource-manager capacity and keeps two-way contact for grants, launches,
+handoffs, folds and failures. Fresh enabled live capacity supersedes the stored
+`lane_max_active_agents` value; its default of 5 workers per Lane, excluding the
+manager, is only a fallback when resource management is unavailable, stale or
+disabled. `lanes config --lane-max-active-agents N` configures that fallback.
+Explicit user ceilings and native quotas always apply, including in cloud
+environments. Count starting, running, idle and finished-but-unclosed workers and
+permitted nested helpers until native session/process closure is verified.
+Unknown state is not free capacity. See Lane Manager for accounting and the
+shared [folding procedure](references/delivery.md#bounded-worker-assignments-and-retirement).
 
 Assess each involved Goal's complete Task set against its scope and criteria.
 Record useful coverage/dependency reasoning in the Goal plan or named sections.
@@ -114,7 +116,7 @@ Before dispatch, the manager also reads the effective bounded-assignment,
 validation, commit and PR preferences and defines the return and acceptance
 gates. Follow the shared
 [bounded delivery and publication gate procedure](references/delivery.md#bounded-delivery-validation-and-publication-gates)
-for finite per-session Task assignments, durable final context, host retirement,
+for finite per-session Task assignments, Goal-attached context, native folding,
 candidate-specific evidence, failure disposition, truthful closure and the
 external authorization boundary. These settings describe policy; they do not
 create a native scheduler, human approval, or publication authority.
@@ -450,7 +452,7 @@ notes, risk descriptions, migration details, or project-specific relationships.
 
 Use the shared
 [delivery gate procedure](references/delivery.md#bounded-delivery-validation-and-publication-gates)
-when coordinating Task/Goal acceptance, worker retirement, local commits or PR
+when coordinating Task/Goal acceptance, worker folding, local commits or PR
 endpoints. The Lane Manager owns shared Lanes records and cross-Task integration
 oversight by default; assigned devs resolve conflicts and execute their own
 integration, checks and commits. Workers return evidence and proposed updates.
@@ -464,6 +466,15 @@ candidate plus its delivery endpoint. `changes_requested` requires bounded
 affected rework and a new request; `deferred` leaves an explicit user wait.
 Acceptance must match the exact candidate checked, and any material source
 change requires reassessment of affected evidence.
+
+Always fold a finished developer promptly, even while human Goal review is
+pending. Normally send latest context to the manager, persist it as a durable
+attachment on each respective Goal with `lanes handoff record`, acknowledge it,
+then close the native agent/sub-agent/tab and its owned process and verify
+readback. An idle or interrupted session is not folded. Critical resource
+pressure requires immediate closure without waiting for context, acknowledgment,
+attachment or checkpoint; preserve available context and mark interrupted work
+incomplete afterward. Preserve source, worktrees and transcripts.
 
 Treat host identity, Lane claims, management roles, and previous session
 associations as advisory metadata, not prerequisites for authorized work. The
@@ -548,8 +559,9 @@ explicit release or authorized handover. Claims live under `LANES_HOME` or
 
 Keep execution state in task status, owner, and blocker information; keep
 cross-task coordination in the goal plan and cross-goal strategic context in the
-Lane. Use an existing squad log or session
-handoff for transient context. Do not require a separate execution-note artifact.
+Lane. Use an existing squad log or session handoff for transient context; no
+separate execution-note artifact is needed. Native folding does require the
+durable Goal attachment, with the critical close-first exception above.
 On resume, reconcile those records with current source, workers, and user input.
 
 ## Preserve optional and legacy workflows

@@ -168,6 +168,8 @@ ${instructions}
 
 ${executionGuidance}
 
+Keep a two-way resource-manager channel open. Use fresh measured capacity and reservations before dispatch; the configured five-dev limit applies only when resource management is unavailable, stale or disabled. Explicit user ceilings and native quotas still apply. Always fold a finished dev promptly: deliver its latest context to its Lane Manager and attach it to every respective Goal, acknowledge the handoff, then close its native agent/sub-agent/tab and owned runtime process. In Paseo, archive performs the fold; stop and detach do not. Verify native closure before freeing capacity. Do not keep a finished dev alive for human review or hypothetical follow-up. Under critical resource pressure, archive selected devs immediately without waiting for context or a checkpoint; attach available context as an incomplete emergency handoff after closure.
+
 Follow the Lanes skill's shared Paseo integration procedure for work-record updates and actual session/project/workspace binding readback when Paseo is available. Keep owner, status, blockers, results and acceptance evidence current through supported commands. An ordinary Goal/Task dev agent does not need Lane Manager role or a Lane management claim to contribute. Without Paseo, continue authorized local Lanes work and report runtime association as unavailable.
 
 The worktree shares the repository's Lanes store through the common Git directory. Preserve workflow record history; distinguish completed implementation from accepted work. Summarize changed files, checks, and unresolved issues. Do not create GitHub Issues or assume Lanes status means a Paseo agent is running.`;

@@ -1,4 +1,43 @@
-# Clips
+# Lanes
+
+## 2.2.0
+
+### Resource management and developer folding
+
+- Add a host resource manager to the Paseo plugin with available-memory and CPU
+  measurements, configurable sustained warning/critical/recovery thresholds,
+  deduplicated manager notices and a Resources settings panel.
+- Keep a two-way channel with observed Lane Managers. Managers can watch current
+  capacity, reserve shared host headroom, report native launches and release
+  unused reservations. Reservations expire, avoid double grants across managers,
+  and become invalid when measurements or associations are stale or unsafe.
+- Use measured resource capacity when the resource manager is available.
+  `lane_max_active_agents` remains a configurable fallback (default five) only
+  when the resource manager is unavailable, stale or disabled. Explicit user
+  ceilings and native harness quotas still apply, including in the cloud.
+- Add `lanes handoff record` to persist developer context as an immutable Markdown
+  attachment on the corresponding Goal. Task references attach to their parent
+  Goal; namespaces, worktrees, exact retries and failed writes are preserved.
+- Add Paseo `resources`, `handoff` and `fold` commands. Normal folds require the
+  manager to acknowledge the latest attached context and wait for the dev's
+  checkpoint. Native activity, reassignment and pending context writes invalidate
+  stale handoffs. Critical pressure closes the dev immediately, then records
+  available context as an explicitly incomplete emergency handoff.
+- Define folding consistently across all harnesses: close the native agent or
+  sub-agent, its tab and its owned runtime process. Paseo uses archive plus native
+  readback; stop, detach, idle status and Task closure do not release capacity.
+- Always fold finished developers promptly after their normal handoff, even while
+  human Goal review is pending. Preserve worktrees, source, transcripts and work
+  records; interrupted work does not become accepted completion.
+- Retain archived-but-still-live Paseo runtimes when provider shutdown fails so
+  they stay visible, counted and retryable. Critical instructions can reach busy
+  managers without waiting for an idle turn.
+
+### Packaging
+
+- Prepare `@dfosco/lanes` 2.2.0 and the bundled private Paseo plugin 0.2.0.
+- Repair the plugin dependency lockfile for reproducible `npm ci` installations.
+- Refresh packaged Lane Manager, Lane Dev and Lanes skills and release guidance.
 
 ## 2.0.0
 

@@ -261,10 +261,9 @@ workspace as proof no work is running on another host.
 
 ## Resource management
 
-The resource manager runs once in the plugin's daemon-side process, including
-when the Lanes screen is closed. It is enabled by default. Configure or disable
-it in **Lanes settings → Resources**; settings apply to this Paseo host and are
-independent of model defaults and each Lane's worker budget.
+The resource manager runs once in the plugin's daemon process, including when
+Lanes is closed. It is enabled by default. Configure it in **Lanes settings →
+Resources**. Settings apply to this host independently of model defaults.
 
 | Setting | Default |
 |---|---|
@@ -275,90 +274,160 @@ independent of model defaults and each Lane's worker budget.
 | Memory / CPU recovery | Below 80% / 80% used |
 | Repeated notice cooldown | 120 seconds per manager |
 | Old idle priority | At least 5 minutes since the native agent's last update |
+| Memory allowance per additional dev | 1,024 MiB |
+| CPU allowance per additional dev | 10% of total host CPU |
+| Launch reservation | 120 seconds |
 
-Memory uses Linux `MemAvailable`, macOS's query-only `memory_pressure -Q`
-kernel availability percentage, or Windows available physical memory. Linux
-reclaimable cache is included in available memory. CPU is measured from changes
-in host CPU counters; its first observation is unknown. Missing or unsupported
-measurements stay **Unknown** and cannot trigger pressure or claim recovery.
-These are machine-level observations; they do not estimate individual agent
-costs or account for container-specific CPU/memory quotas.
+Memory uses Linux `MemAvailable`, macOS's query-only `memory_pressure -Q`, or
+Windows available physical memory. CPU uses changes in host CPU counters; its
+first observation is unknown. Unsupported measurements stay **Unknown**.
+Measurements are host-wide; they do not attribute resource use to individual
+agents or account for container-specific quotas. Per-dev allowances are tunable
+admission estimates, not measured per-process costs or enforced resource limits.
 
-Warning and critical pressure need consecutive samples, so short spikes do not
-produce cleanup requests. A critical signal remains latched until its resource
-stays below the lower recovery threshold. Escalation can bypass the repeated
-notice cooldown. Resource sampling continues during cooldown; directory/CLI
-discovery is limited to at most once every 30 seconds under stable pressure
-(or the sample interval when longer), with immediate eligibility on a measured
-pressure transition. Checks do not overlap.
+Warning/critical notices require sustained pressure; lower recovery thresholds
+avoid flapping. Critical escalation bypasses the repeated-notice cooldown. A
+fresh measurement at a critical threshold also permits immediate emergency
+folding without waiting for the advisory streak. Directory discovery runs every
+30 seconds (or the sample interval when longer) during both healthy and pressured
+operation, and refreshes on pressure transitions and launch reports. Sampling and
+discovery do not overlap themselves.
 
-### What Lane Managers receive
+### The manager capacity channel
 
-The plugin reads the central `lanes lane manager list --all --json` projection
-and reconciles it with the current daemon's agent/workspace directory and
-project boards. It also supports verified legacy claims and labeled managers.
-Canonical registrations can associate a local manager with several projects;
-the manager's own workspace need not be in each managed repository. A stopped
-association is respected. Missing, archived, closed, conflicting, and remote
-sessions are excluded. Registrations and claims alone never prove liveness.
+The plugin reconciles central `lanes lane manager list --all --json`
+registrations, verified legacy claims and coherent labels with current native
+agents, workspaces and project boards. Explicit registrations support central or
+cross-project managers. Stored associations alone never establish liveness.
+Remote, stopped, ambiguous and closed managers are excluded. Dev attribution
+requires coherent `lanes.ref/projectId/kind` or `clips.ref/projectId/kind` labels,
+actual workspace identity, and exact Goal/Task membership. An archive marker
+without confirmed native closure keeps a dev visible and counted for retry.
 
-Dev candidates must have coherent `lanes.ref/projectId/kind` or
-`clips.ref/projectId/kind` labels that agree with their actual workspace project
-and exact Goal/Task membership. Conflicting or incomplete labels are excluded.
-Sharing a workspace, branch name, or title does not make an agent a Lane Dev.
-Live developers on historical closed records are still eligible candidates.
-Managers are protected from being suggested as devs, and a manager receives one
-combined request for its relevant Lanes.
+Every observed manager has a bidirectional channel, including while it is busy.
+Healthy capacity changes and pressure instructions are sent to eligible managers;
+status/watch reads also expose fresh numerical headroom, reservations and the
+manager's handoff inbox without sending an interrupting chat message.
 
-The request asks the manager to:
+```sh
+node plugins/paseo/cli.js resources --manager <native-manager-id> --action status
+node plugins/paseo/cli.js resources --manager <native-manager-id> --watch
+node plugins/paseo/cli.js resources --manager <native-manager-id> \
+  --action reserve --count 3 --request-id <unique-batch-id>
+node plugins/paseo/cli.js resources --manager <native-manager-id> \
+  --action report --reservation <returned-id> --agents <dev-id-1,dev-id-2>
+node plugins/paseo/cli.js resources --manager <native-manager-id> \
+  --action release --reservation <returned-id>
+```
 
-1. Pause new dev dispatch while resources remain constrained.
-2. Review old idle devs first, then other idle devs. Age and status are hints;
-   verify a durable handoff and absence of ongoing writes before retirement.
-3. If more capacity is needed, ask current developers to checkpoint and hand
-   back their refs, exact candidate, changed paths, checks, decisions, blockers,
-   and remaining work, then retire them at a safe boundary.
-4. Use supported non-destructive close/archive actions, preserve source,
-   worktrees, transcripts and association history, and verify native readback.
-   Process retirement does not close or accept a Goal or Task.
+The watch prints status every 15 seconds. Use the installed plugin's absolute
+CLI path when outside its checkout. The existing `--url`, `PASEO_WS_URL` and
+`PASEO_PASSWORD` connection options apply. The pinned SDK's exported
+`internal/daemon-client` adapter supplies plugin RPC transport, as it does for
+Paseo's native CLI; the public `createPaseoApi` supplies native actions.
 
-The plugin sends requests to managers; it never directly stops or archives
-agents. Pending human review does not require keeping an otherwise idle worker
-alive. Shared managers are asked to coordinate. A recovery notice goes only to
-previously advised managers that are still observed and associated; it allows
-them to reassess already-authorized work within their existing budget.
+Additional capacity is the smaller of available memory headroom divided by the
+memory allowance and CPU headroom divided by the CPU allowance, minus all
+outstanding host reservations. Headroom stops at the warning thresholds. Unknown
+metrics or pressure grant zero; an available manager with zero capacity is not a
+reason to use the fallback. Observations expire after the larger of 60 seconds
+and three sample intervals. Incomplete discovery, disabled monitoring and stale
+observations explicitly return `available: false`.
+
+Reserve before launching, use only the granted count while `valid` is true, and
+report the exact observed native IDs after launch. `count` is the original grant;
+`agentIds` identifies reported starts. Recheck status before each launch. Reuse a
+request ID only for the same request; retries never issue a second grant. Reported
+capacity stays held until a newer sample and directory observation account for
+those agents. Expired grants cannot launch; accounting holds persist until fresh
+observations cross expiry. Release returns only unused slots. Managers share one
+synchronous ledger, so they cannot independently reserve the same headroom.
+
+Fresh live capacity replaces the stored `lane_max_active_agents` limit. That
+setting's default of five applies only when resource management is unavailable,
+stale or disabled. Explicit user ceilings and native quotas always apply. Idle
+and finished-but-unclosed sessions still occupy capacity. Reservations and the
+inbox are plugin-process caches: after reload, reread native state and acquire a
+new grant; prior reservation IDs are not permission to launch.
+
+### Context-preserving folds
+
+**Always fold finished devs promptly**, even while their Goals await human
+review. Normally a dev returns its latest context as its final work action; the
+manager reads and acknowledges the Goal attachment before shutdown.
+
+```sh
+node plugins/paseo/cli.js handoff --manager <native-manager-id> \
+  --agent <native-dev-id> --context-file /absolute/latest-context.md \
+  --reason completed --handoff-id <unique-uuid>
+node plugins/paseo/cli.js resources --manager <native-manager-id> --action status
+node plugins/paseo/cli.js fold --manager <native-manager-id> \
+  --agent <native-dev-id> --handoff-id <returned-uuid>
+```
+
+The handoff goes through `lanes handoff record`, which writes immutable Markdown
+in the shared repository store and attaches it to the exact namespaced Goal.
+Task assignments attach to their parent Goal. Include refs/revisions, the
+worktree and candidate, changes, checks, decisions, blockers, unfinished work and
+external effects. Multiple assigned Goals each need their own attachment. The
+channel's `pendingHandoffs` includes context and attachment receipts so the actual
+manager can read them before acknowledging the ID. Artifacts survive plugin
+reload; restore an inbox entry with the same context and ID only after verifying
+that it remains current. Further work requires a new handoff.
+
+Normal folding requires an idle dev and its latest complete receipt. New turns,
+changed assignments, changed idle-session state, and context writes still in
+flight invalidate old acknowledgments. The handoff's own turn may finish before
+archiving. Treat submitting context as the final work action, and submit a new
+handoff after further substantive work. Handoff IDs support exact retries, not
+updates. The core command is also available on other harnesses:
+
+```sh
+lanes handoff record '#g001#t01' --file handoff.json
+```
+
+**Critical pressure closes first.** The manager can run `fold` without a handoff
+ID; the plugin confirms current attribution and invokes native archive without
+waiting for context, acknowledgment, a checkpoint or a file write. After closure
+it attaches the last available context or an emergency note with
+`reason: resource_critical` and `incomplete: true`. A failed attachment is reported
+for recovery; it does not delay or undo the native shutdown. Unfinished Tasks
+remain unfinished. Preserve any late developer context with the core handoff
+command and inspect the retained worktree/transcript before resuming.
+
+Paseo archive closes the provider runtime and prunes the agent's tabs. Stop only
+cancels a turn; detach only removes parent linkage. The plugin reads back
+`archivedAt` plus `status: closed` before reporting a successful fold. If archive
+fails, it still checks native state: a runtime closed before a later archive
+error can retain its emergency context; a still-live or unknown runtime remains
+unconfirmed and counted. The SDK archive path can retry an archived-but-live
+runtime. No source, worktree, transcript, Goal or Task is deleted by folding.
 
 ### Delivery and lifecycle limits
 
-Before each send, the plugin refreshes the manager and requires an idle,
-unarchived, available session with no active turn or pending input and unchanged
-workspace/identity labels. Busy managers are deferred to later checks. Sends use
-explicit `activeTurnBehavior: "steer"`, with no retry using the interrupting
-default. Paseo 0.11.2 has no atomic send-if-idle or queue-if-busy operation:
-a manager can become busy between refresh and send, and providers without
-steering support can replace that intervening turn. Messages therefore ask
-managers to recheck current resources and session state before acting.
+Ordinary notices require a freshly observed idle, unarchived manager with no
+pending input and unchanged workspace/identity. Critical notices can reach a
+running manager immediately. Sends explicitly request `activeTurnBehavior:
+"steer"`; providers without steering support can interrupt the current turn,
+which is intentional for critical relief. The SDK has no atomic send-if-idle or
+close-if-unchanged operation, so a native state change can race the final
+readback/action. Managers must recheck assignments and resources before acting.
+Process exit behavior is provider-owned; the plugin verifies the native lifecycle
+acknowledgment rather than claiming independent OS proof for every descendant.
 
-Cooldown is reserved before sending because a timed-out request may already
-have arrived. Failures remain visible in Resources and do not prevent other
-managers from being notified. Invalid settings fail closed; the monitor does
-not silently enable default policy. Disabling monitoring or unloading the
-plugin cancels pending future sends and releases timers, hooks and settings
-listeners; an already submitted send cannot be recalled.
+Cooldown is reserved before send because a timed-out request may already have
+arrived. One failed manager does not stop other notices. Invalid settings fail
+closed. Disabling monitoring or unloading the plugin cancels future advice;
+already submitted native actions cannot be recalled. Normal completion folding
+still applies when monitoring is disabled; use core handoff plus native archive
+if the plugin channel itself is unavailable.
 
-The 0.11.2 SDK supplies its daemon API on lifecycle hooks or RPC invocation.
-Sampling starts on plugin activation, and notification discovery begins after
-the first such callback. After a reload on a completely quiet host, open Lanes
-or wait for native agent activity to bind that context. The Resources panel
-reports **Waiting for Paseo connection** until it is available. Monitoring does
-not create a replacement manager or an extra daemon connection.
-
-The separate host settings document is `resource-manager`; the read-only
-`clips.resource-manager.status` RPC returns its monitor state, latest sample,
-pressure reasons, successfully notified manager count for the current episode,
-deferred-manager count, last notice time, and latest error. Disabling the
-monitor stops further advice; managers should still recheck actual resources
-before resuming any paused dispatch.
+The SDK first supplies its daemon API through a hook or RPC. Sampling starts at
+activation; open Lanes, call the resource CLI, or wait for native activity to bind
+a quiet reloaded host. The Resources panel reports this waiting state. Monitoring
+does not create a replacement manager. Host settings use `resource-manager`;
+`clips.resource-manager.status` exposes diagnostics, while `clips.resources.channel`,
+`clips.resources.handoff` and `clips.resources.fold` implement coordination.
 
 ## Development
 

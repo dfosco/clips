@@ -10,6 +10,7 @@ const lane = { projectId: "p1", projectLabel: "Project", laneRef: "#l001", laneT
 const target = (): ResourceTarget => ({
   managerId: "manager", managerWorkspaceId: "manager-workspace", managerLabels: labels, lanes: [lane],
   candidates: [{ ...lane, agentId: "dev", workspaceId: "dev-workspace", ref: "#g001#t01", status: "idle",
+    projectRoot: "/repo", goalRef: "#g001", labels: { "lanes.ref": "#g001#t01", "lanes.kind": "task", "lanes.projectId": "p1" },
     disposition: "old_idle", updatedAt: "2026-10-24T10:00:00Z", needsInput: false }],
 });
 const idle = (): PaseoAgent => ({
@@ -52,6 +53,69 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-24T12:
 afterEach(() => { for (const controller of controllers.splice(0)) controller.dispose(); vi.useRealTimers(); });
 
 describe("daemon resource coordination", () => {
+  it("keeps a numerical channel open while healthy and reserves shared headroom without a five-dev cap", async () => {
+    const f = fixture(); await f.step(0.2, 0.1);
+    const status = await f.monitor.channel({ managerId: "manager", action: "status" });
+    expect(status).toMatchObject({ available: true, pressure: "normal", managerActiveDevCount: 1, additionalDevCapacity: 8 });
+    const reserved = await f.monitor.channel({ managerId: "manager", action: "reserve", count: 7, requestId: "batch-1" });
+    expect(reserved).toMatchObject({ additionalDevCapacity: 1, managerReservedCount: 7,
+      reservations: [{ count: 7, valid: true }] });
+    expect(f.send).toHaveBeenCalledWith(expect.stringContaining("capacity channel update"), expect.anything());
+    expect(f.sample).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows busy managers to poll the channel without sending an interrupting prompt", async () => {
+    const f = fixture();
+    f.refresh.mockResolvedValue({ agent: { ...idle(), status: "running" }, project: null });
+    await f.step(0.2, 0.1);
+    expect((await f.monitor.channel({ managerId: "manager", action: "status" })).available).toBe(true);
+    expect(f.send).not.toHaveBeenCalled();
+    f.refresh.mockResolvedValue({ agent: { ...idle(), status: "closed" }, project: null });
+    await expect(f.monitor.channel({ managerId: "manager", action: "status" })).rejects.toThrow("no longer matches");
+  });
+
+  it("marks the live channel unavailable when disabled and prevents grants under unknown metrics", async () => {
+    const f = fixture(); await f.step(null, null);
+    expect(await f.monitor.channel({ managerId: "manager", action: "status" })).toMatchObject({ available: true, additionalDevCapacity: 0 });
+    f.config.enabled = false; await f.step();
+    expect(await f.monitor.channel({ managerId: "manager", action: "status" })).toMatchObject({ available: false, additionalDevCapacity: 0 });
+  });
+
+  it("permits immediate critical folding from a fresh critical measurement without waiting for advisory streaks", async () => {
+    const f = fixture(); await f.step(0.97);
+    expect(f.monitor.status().pressure).toBe("normal");
+    expect(f.monitor.critical()).toBe(true);
+    vi.setSystemTime(Date.now() + 60001);
+    expect(f.monitor.critical()).toBe(false);
+  });
+
+  it("does not use a previous critical observation after settings become unavailable or change", async () => {
+    const f = fixture(); await f.step(0.99);
+    expect(f.monitor.critical()).toBe(true);
+    f.readSettings.mockRejectedValueOnce(new Error("settings unavailable")); await f.step(0.99);
+    expect(f.monitor.critical()).toBe(false);
+    await f.step(0.99); expect(f.monitor.critical()).toBe(true);
+    f.monitor.settingsChanged(); expect(f.monitor.critical()).toBe(false);
+  });
+
+  it("refreshes the native directory before accepting a started-agent report", async () => {
+    const f = fixture(); await f.step(0.2, 0.1);
+    const reserved = await f.monitor.channel({ managerId: "manager", action: "reserve", count: 1, requestId: "launch" });
+    const dev = { ...target().candidates[0], agentId: "new-dev" };
+    f.discover.mockResolvedValue({ targets: [{ ...target(), candidates: [dev] }], warnings: [] });
+    const reported = await f.monitor.channel({ managerId: "manager", action: "report", reservationId: reserved.reservations[0].id, agentIds: ["new-dev"] });
+    expect(reported.reservations[0].agentIds).toEqual(["new-dev"]);
+    expect(f.discover).toHaveBeenCalledTimes(2);
+  });
+
+  it("invalidates cached associations when the observed host identity changes inside a sample window", async () => {
+    const f = fixture(); await f.step(0.2, 0.1);
+    f.discover.mockResolvedValue({ targets: [], warnings: [] });
+    f.monitor.bind(f.api, "new-host");
+    await expect(f.monitor.channel({ managerId: "manager", action: "reserve", requestId: "old-route", count: 1 })).rejects.toThrow("No observed Lane Manager");
+    expect(f.discover).toHaveBeenLastCalledWith(f.api, expect.objectContaining({ hostId: "new-host" }));
+  });
+
   it("waits for sustained pressure, tells the existing manager, and never retires a session itself", async () => {
     const f = fixture();
     await f.step(); await f.step();
@@ -71,7 +135,7 @@ describe("daemon resource coordination", () => {
     await f.step();
     for (let index = 0; index < 10; index += 1) { f.monitor.bind(f.api); await f.monitor.check(); }
     expect(f.sample).toHaveBeenCalledTimes(1);
-    expect(f.discover).not.toHaveBeenCalled();
+    expect(f.discover).toHaveBeenCalledTimes(1);
   });
 
   it("throttles reminders but escalates after sustained critical pressure", async () => {
@@ -96,6 +160,14 @@ describe("daemon resource coordination", () => {
     f.refresh.mockResolvedValue({ agent: idle(), project: null });
     await f.step(); await f.step();
     expect(f.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers critical instructions to a running manager without waiting for an idle turn", async () => {
+    const f = fixture();
+    f.refresh.mockResolvedValue({ agent: { ...idle(), status: "running", activeTurn: { turnId: "busy", startedAt: null } }, project: null });
+    await f.step(0.99); await f.step(0.99); await f.step(0.99);
+    expect(f.send).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("CRITICAL host pressure"),
+      { messageId: expect.any(String), activeTurnBehavior: "steer" });
   });
 
   it("rechecks identity and availability after discovery instead of sending from a stale listing", async () => {
@@ -180,7 +252,7 @@ describe("daemon resource coordination", () => {
     expect(f.send).toHaveBeenCalledTimes(2);
   });
 
-  it("clears fixed sampling/settings errors without needing pressure-triggered discovery", async () => {
+  it("clears fixed sampling/settings errors while keeping healthy capacity discovery active", async () => {
     const f = fixture();
     f.sample.mockRejectedValueOnce(new Error("sample lost")); await f.step(0.7);
     expect(f.monitor.status().lastError).toBe("sample lost");
@@ -190,7 +262,7 @@ describe("daemon resource coordination", () => {
     expect(f.monitor.status().lastError).toBe("settings unavailable");
     await f.step(0.7);
     expect(f.monitor.status()).toMatchObject({ state: "monitoring", lastError: null });
-    expect(f.discover).not.toHaveBeenCalled();
+    expect(f.discover).toHaveBeenCalledTimes(2);
   });
 
   it("isolates one manager's failure and keeps the other manager's request", async () => {
@@ -246,6 +318,7 @@ describe("daemon resource coordination", () => {
 
   it("does not overlap ticks or send after disposal during directory discovery", async () => {
     const f = fixture(); await f.step(); await f.step();
+    f.discover.mockClear();
     let resolve!: (value: Awaited<ReturnType<typeof f.discover>>) => void;
     f.discover.mockImplementationOnce(() => new Promise((complete) => { resolve = complete; }));
     const pending = f.step();
@@ -276,6 +349,14 @@ describe("daemon resource coordination", () => {
 });
 
 describe("manager message safety", () => {
+  it("requires Goal-attached normal context but explicitly bypasses that wait at critical pressure", () => {
+    const config = resourceManagerSettings.parse({});
+    const warning = resourceNotice(target(), snapshot(), "warning", ["memory"], config);
+    expect(warning).toContain("attach it to the respective Goal before folding");
+    const critical = resourceNotice(target(), snapshot(0.99), "critical", ["memory"], config);
+    expect(critical).toContain("Do not wait for fresh context, acknowledgement, a checkpoint, or a Goal attachment");
+    expect(critical).toContain("agent/sub-agent, its tab and its owned runtime process");
+  });
   it.each([
     { status: "running" }, { status: "initializing" }, { status: "closed" }, { status: "error" },
     { archivedAt: "now" }, { providerUnavailable: true }, { activeTurn: { id: "turn" } },

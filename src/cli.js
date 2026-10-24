@@ -16,6 +16,7 @@ import { runComponentCommand } from './commands/component.js';
 import { runHistoryCommand } from './commands/history.js';
 import { runLabelCommand } from './commands/label.js';
 import { runAttachmentCommand } from './commands/attachment.js';
+import { runHandoffCommand } from './commands/handoff.js';
 import { runReviewCommand } from './commands/review.js';
 import { runUpgradeCommand } from './commands/upgrade.js';
 import { switchInstallation, dispatchProd } from './lib/installation.js';
@@ -65,6 +66,7 @@ Commands:
   component <action>     Manage persistent system components
   label <action>         Manage project labels and record assignments
   attachment <action>    Attach and read live Markdown, URL, issue, and PR references
+  handoff record <ref>   Preserve developer context on its Goal before folding
   review <action>        Request, inspect, decide, and materialize CR reviews
   upgrade                Update the global npm installation to latest stable
   record <action> [args]  Manage optional legacy CR and ADR records
@@ -122,6 +124,7 @@ const commands = {
   history: runHistoryCommand,
   label: runLabelCommand,
   attachment: runAttachmentCommand,
+  handoff: runHandoffCommand,
   review: runReviewCommand,
   task: runTaskCommand,
   record: runRecordCommand,

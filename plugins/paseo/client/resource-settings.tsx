@@ -29,6 +29,9 @@ const thresholdFields: Field[] = [
   { key: "cpuRecoveryPercent", label: "CPU recovery (%)" },
 ];
 const timingFields: Field[] = [
+  { key: "devMemoryMb", label: "Memory allowance per dev (MiB)", hint: "Capacity estimate, not a per-process memory limit." },
+  { key: "devCpuPercent", label: "CPU allowance per dev (%)", hint: "Host CPU headroom reserved for each additional dev." },
+  { key: "reservationSeconds", label: "Launch reservation (seconds)", hint: "30–900 seconds to start and report a reserved dev." },
   { key: "sampleIntervalSeconds", label: "Sample interval (seconds)", hint: "5–300 seconds between observations." },
   { key: "consecutiveSamples", label: "Consecutive samples", hint: "2–20 matching observations before pressure changes." },
   { key: "notificationCooldownSeconds", label: "Notice cooldown (seconds)", hint: "30–3,600 seconds between repeated manager notices." },
@@ -152,7 +155,7 @@ export function ResourceSettings({ theme, hostId }: { theme: Theme; hostId: stri
     <SettingsSection title="Resource manager">
       <SettingsCard>
         <SettingsSwitch label="Manage resource pressure" value={values.enabled} disabled={busy}
-          hint="Ask Lane Managers to retire old idle developers first, then safely hand off current work when needed. Applies to this Paseo host."
+          hint="Coordinate live capacity and fold developers under pressure. Critical folds close immediately; normal folds preserve context first. Applies to this host."
           onValueChange={(enabled) => {
             setError(null);
             setDraft((current) => ({
@@ -175,7 +178,7 @@ export function ResourceSettings({ theme, hostId }: { theme: Theme; hostId: stri
         </Text>
         {fields(thresholdFields)}
         <SettingsAction label="Timing" actionLabel={showTiming ? "Hide timing" : "Show timing"}
-          hint="Sampling, notice frequency, and which idle sessions are considered old."
+          hint="Sampling, notice frequency, per-dev capacity estimates, reservations, and idle age."
           onPress={() => setShowTiming((shown) => !shown)} />
         {showTiming ? fields(timingFields) : null}
         {stale ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>

@@ -13,6 +13,9 @@ export type ResourceLane = {
   laneTitle: string;
 };
 export type ResourceCandidate = ResourceLane & {
+  projectRoot: string;
+  goalRef: string;
+  labels: Record<string, string>;
   agentId: string;
   workspaceId: string;
   ref: string;
@@ -259,9 +262,9 @@ export function routeResourceTargets(
     }
   }
 
-  const candidateRecords = new Map<string, Map<string, { kind: "goal" | "task"; lane: ResourceLane }>>();
+  const candidateRecords = new Map<string, Map<string, { kind: "goal" | "task"; goalRef: string; lane: ResourceLane }>>();
   for (const project of projects.values()) {
-    const entries: { ref: string; kind: "goal" | "task"; lane: ResourceLane }[] = [];
+    const entries: { ref: string; kind: "goal" | "task"; goalRef: string; lane: ResourceLane }[] = [];
     const goals = uniqueBy(project.board.goals, (goal) => goal.ref, `Goal in ${project.projectLabel}`, warnings);
     for (const goal of goals.values()) {
       const membership = project.board.lanes.filter((lane) => lane.goalRefs.includes(goal.ref)).map((lane) => lane.ref);
@@ -274,13 +277,13 @@ export function routeResourceTargets(
       }
       const lane = laneInfo(project, refs[0]);
       if (!lane) continue;
-      entries.push({ ref: goal.ref, kind: "goal", lane });
-      for (const task of goal.tasks) entries.push({ ref: task.ref, kind: "task", lane });
+      entries.push({ ref: goal.ref, kind: "goal", goalRef: goal.ref, lane });
+      for (const task of goal.tasks) entries.push({ ref: task.ref, kind: "task", goalRef: goal.ref, lane });
     }
     candidateRecords.set(project.root, uniqueBy(entries, (entry) => entry.ref, `work reference in ${project.projectLabel}`, warnings));
   }
   for (const agent of agents.values()) {
-    if (!agent.workspaceId || agent.archivedAt || agent.providerUnavailable || agent.status === "closed" ||
+    if (!agent.workspaceId || agent.providerUnavailable || agent.status === "closed" ||
         !["idle", "running", "initializing", "error"].includes(agent.status) || managerIds.has(agent.id)) continue;
     const attribution = bindings.get(agent.id)!;
     if (attribution.conflict || !attribution.binding || attribution.binding.kind === "lane") continue;
@@ -292,12 +295,13 @@ export function routeResourceTargets(
       agent.attentionReason !== "finished" && agent.attentionReason !== "error");
     const timestamp = agent.updatedAt ? Date.parse(agent.updatedAt) : NaN;
     const updatedAt = Number.isFinite(timestamp) ? agent.updatedAt! : null;
-    const idle = agent.status === "idle" && !agent.activeTurn && !needsInput;
+    const idle = !agent.archivedAt && agent.status === "idle" && !agent.activeTurn && !needsInput;
     const disposition: ResourceCandidate["disposition"] = idle
       ? updatedAt && options.now - timestamp >= options.idleAgeSeconds * 1_000 ? "old_idle" : "idle"
       : "current";
     const candidate: ResourceCandidate = {
       ...record.lane, agentId: agent.id, workspaceId: agent.workspaceId,
+      projectRoot: project.root, goalRef: record.goalRef, labels: { ...agent.labels },
       ref: attribution.binding.ref, status: agent.status, disposition, updatedAt, needsInput,
     };
     for (const target of targets.values()) {
@@ -334,7 +338,9 @@ async function listAgents(paseo: Paseo): Promise<ResourceAgentObservation[]> {
   let cursor: string | undefined;
   const cursors = new Set<string>();
   for (let index = 0; index < MAX_PAGES; index++) {
-    const result = await paseo.agents.list({ filter: { includeArchived: false }, page: { limit: 200, cursor } });
+    // An archive marker can precede a failed provider shutdown. Keep such live
+    // runtimes visible and counted; only confirmed closed devs release a slot.
+    const result = await paseo.agents.list({ filter: { includeArchived: true }, page: { limit: 200, cursor } });
     for (const { agent } of result.entries) entries.push({ ...agent, workspaceId: agent.workspaceId || null, labels: agent.labels ?? {} });
     if (!result.pageInfo.hasMore) return entries;
     cursor = result.pageInfo.nextCursor ?? undefined;

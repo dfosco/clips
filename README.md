@@ -156,24 +156,28 @@ the independent work.
 
 ### Keep useful work moving in parallel
 
-Lane Manager coordinates as many agents as can usefully work in parallel,
-within the Lane's worker budget and your tools and resource limits. It follows
-dependencies, shares decisions, and adjusts the work as results or blockers come in.
-
-Finished or idle workers free room for more work. Lowering a limit does not
-terminate workers already running; the manager waits before starting more.
-To change the project default for its Lanes, run:
+Lane Manager stays in two-way contact with the resource manager, using its live
+capacity to reserve launches and report running sessions, handoffs and closures.
+Explicit user ceilings and host quotas always apply. The stored five-worker
+default is only a fallback when resource management is unavailable, stale or
+disabled; it is not an extra ceiling on live capacity. To change that fallback:
 
 ```bash
 lanes config --lane-max-active-agents 3
 ```
 
-The manager applies this limit when dispatching work. It is not an operating-system
-process limit. See [worker-budget details](docs/cli-reference.md#lane-worker-budget)
-for readback and overrides.
+Every finished developer is promptly **folded**: its native agent, sub-agent or
+tab is closed together with its owned runtime process. Idle sessions still use
+resources and do not free capacity. Before a normal fold, the manager receives
+the latest context and preserves it as an attachment on each respective Goal.
+Critical resource pressure closes workers immediately, then preserves available
+context and records interrupted work as incomplete. Code, worktrees and
+transcripts are retained. See [worker-budget details](docs/cli-reference.md#lane-worker-budget)
+and [folding and handoffs](docs/cli-reference.md#developer-handoffs-and-folding).
 
-Delivery defaults bound each Lane Dev assignment to **3 Tasks**. The worker retires
-when its assigned Tasks finish, even if it used fewer than three. Validation
+Delivery defaults bound each Lane Dev assignment to **3 Tasks**. The worker folds
+when its assigned Tasks finish, even if it used fewer than three. Human Goal
+review and possible future follow-up do not keep finished workers open. Validation
 defaults to `human` (`human` or `agent`); commit handling defaults to
 `after_validation` (`after_validation` or `manual`); pull request handling
 defaults to `none` (`none`, `prepare`, `draft`, or `ready`). These are workflow

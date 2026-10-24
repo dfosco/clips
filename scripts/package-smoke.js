@@ -188,17 +188,35 @@ async function verifyPackage() {
   for (const [scenario, pattern] of [
     ['configuration readback', /lanes config lane_max_active_agents/],
     ['documented setter', /lanes config --lane-max-active-agents 3/],
-    ['five concurrent workers excluding manager', /5 concurrent active workers per Lane[\s\S]*excluding the Lane Manager/],
-    ['announcement before dispatch', /Announce the effective budget before dispatch/],
-    ['active and in-flight accounting', /active and starting workers, including reused or resumed sessions[\s\S]*Reserve capacity before launch or resumption/],
-    ['confirmed idle and completion release', /Confirmed idle or completed workers free capacity/],
-    ['non-terminating reductions', /Reducing the budget below current activity does not terminate workers/],
-    ['nested capacity and unknown activity', /Unknown activity is not free capacity[\s\S]*budget includes nested helpers/],
-    ['policy rather than native enforcement', /configuration-backed dispatch policy, not native SDK enforcement/],
-    ['no budget-exhaustion fallback bypass', /A full budget is not an absent primitive/],
+    ['five-worker fallback excluding manager', /5 workers per Lane[\s\S]*excluding its manager[\s\S]*only when the resource manager is unavailable, stale or disabled/],
+    ['live capacity replaces fallback', /Fresh enabled resource-manager capacity replaces that fallback[\s\S]*not take the minimum with five/],
+    ['two-way resource coordination', /Keep two-way contact with the resource manager throughout execution[\s\S]*report actual sessions, handoffs, folds and failures/],
+    ['announcement before dispatch', /Announce the effective allocation, its source and any explicit ceiling before dispatch/],
+    ['all open workers consume capacity until native closure', /starting, running, idle and finished-but-unclosed developer[\s\S]*including permitted nested helpers[\s\S]*until native closure and runtime termination are verified/],
+    ['reserve and reconcile launches', /Reserve before launch[\s\S]*reconcile ambiguous launches before releasing a reservation/],
+    ['unknown or idle state is not freed capacity', /Unknown activity is not free capacity; neither a finished result nor idle status frees a slot/],
+    ['prompt completed-worker folding', /Always fold finished developers promptly after the normal Goal-attached handoff[\s\S]*do not retain them for hypothetical follow-up or human review/],
+    ['non-terminating fallback configuration', /Changing the stored fallback does not itself terminate sessions/],
+    ['policy rather than native enforcement', /Lanes configuration is not a native process limiter or distributed scheduler/],
+    ['no cloud fallback bypass', /Cloud execution never implies unlimited capacity and does not waive the fallback/],
+    ['no budget-exhaustion fallback bypass', /A full budget is not an absent delegation primitive/],
   ]) {
     assert.match(managerPolicy, pattern, `packaged worker-budget policy must cover: ${scenario}`);
   }
+  assert.doesNotMatch(managerPolicy, /Confirmed idle or completed workers free capacity|skip only the stored project cap/i,
+    'packaged worker-budget policy retains superseded idle-capacity or cloud-bypass rules');
+  const deliveryPolicy = fs.readFileSync(
+    path.join(fileURLToPath(skillLibrary.skills['skill:lanes']), 'references', 'delivery.md'), 'utf8',
+  ).replace(/\s+/g, ' ');
+  for (const [scenario, pattern] of [
+    ['native session and process closure on every harness', /close the native agent\/sub-agent\/session or tab and terminate its owned runtime process on every harness/],
+    ['Goal-attached latest context before normal closure', /Persist that context as a durable attachment on \*\*each respective Goal\*\* before closing[\s\S]*lanes handoff record[\s\S]*read and acknowledge the latest attached context[\s\S]*immediately close the native worker and its owned process/],
+    ['verified closure before recovered capacity', /Keep capacity occupied until closure is verified/],
+    ['immediate critical closure without a handoff gate', /critical resource condition, close immediately[\s\S]*Do not wait for a developer response, manager acknowledgment, fresh context, attachment write, checkpoint, or quiescence/],
+    ['critical context preservation after closure', /after closure persist it on the respective Goals[\s\S]*reason: resource_critical[\s\S]*incomplete: true/],
+    ['human review never keeps a finished worker open', /pending Goal review never keeps it open/],
+    ['preserve user work and history', /Preserve source, worktrees, transcripts and association history/],
+  ]) assert.match(deliveryPolicy, pattern, `packaged folding policy must cover: ${scenario}`);
   if (skillsOnly) {
     console.log(`Verified ${manifest.id}: packaged skills, references, and six harness-policy scenarios`);
     return;

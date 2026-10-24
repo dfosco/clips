@@ -63,7 +63,7 @@ describe("resource advisory routing", () => {
       agent("old"),
       agent("unrelated", { labels: {} }),
       agent("closed", { status: "closed" }),
-      agent("archived", { archivedAt: at(20) }),
+      agent("archived", { archivedAt: at(20), status: "closed" }),
     ] }), options);
     expect(result.targets).toHaveLength(1);
     expect(result.targets[0]).toMatchObject({
@@ -80,6 +80,11 @@ describe("resource advisory routing", () => {
   it("retains observed managers with no remaining dev agents so recovery can be delivered", () => {
     const result = routeResourceTargets(observation({ agents: [manager()] }), options);
     expect(result.targets).toMatchObject([{ managerId: "manager", candidates: [] }]);
+  });
+
+  it("keeps archived-but-still-live dev runtimes counted after an incomplete provider shutdown", () => {
+    const result = routeResourceTargets(observation({ agents: [manager(), agent("unconfirmed", { archivedAt: at(20) })] }), options);
+    expect(result.targets[0].candidates).toMatchObject([{ agentId: "unconfirmed", disposition: "current" }]);
   });
 
   it("accepts each label family and matching dual labels, rejecting incomplete and conflicting attribution", () => {
@@ -288,7 +293,7 @@ describe("resource target discovery adapter", () => {
     paseo.agents.list.mockResolvedValueOnce({ entries: [{ agent: agent("dev") }], pageInfo: { hasMore: false } });
     const result = await discoverResourceTargets(paseo as any, options);
     expect(result.targets[0].candidates.map((candidate) => candidate.agentId)).toEqual(["dev"]);
-    expect(paseo.agents.list).toHaveBeenLastCalledWith({ filter: { includeArchived: false }, page: { limit: 200, cursor: "agents-two" } });
+    expect(paseo.agents.list).toHaveBeenLastCalledWith({ filter: { includeArchived: true }, page: { limit: 200, cursor: "agents-two" } });
     expect(paseo.workspaces.list).toHaveBeenLastCalledWith({ page: { limit: 200, cursor: "workspaces-two" } });
     expect(vi.mocked(execCommand).mock.calls.filter(([, args]) => args.includes("manager"))).toHaveLength(1);
     expect(vi.mocked(localProjects)).toHaveBeenCalledTimes(1);

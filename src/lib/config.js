@@ -21,7 +21,7 @@ export const DEFAULT_CONFIG = {
   tasks_as_issues: false,       // if true, tasks are also created as separate GitHub Issues (sub-issues)
   agent_dir: null,              // agent directory name (e.g. '.agents', '.claude', '.github'); auto-detected if null
   project_id: null,             // stable project identifier; repository name when unset
-  lane_max_active_agents: 5,    // concurrent workers per Lane, excluding its manager
+  lane_max_active_agents: 5,    // per-Lane fallback when live resource management is unavailable; excludes manager
   lane_dev_max_tasks: 3,         // maximum Tasks assigned to one Lane Dev session
   lane_validation_mode: 'human',
   lane_commit_mode: 'after_validation',
