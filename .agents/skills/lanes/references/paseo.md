@@ -16,7 +16,8 @@ task-coverage, authorization, and management-claim policies.
 - **Activity and navigation:** the plugin reads the selected Paseo host's
   workspace/agent directory. An `in_progress` Goal can have no running agent;
   an idle, failed, or input-blocked session is different from active execution.
-  A stopped agent is not evidence that its Task is complete or accepted.
+  Idle or finished-but-unclosed agents still occupy resources. A stopped agent
+  is not evidence that its Task is complete, accepted or natively closed.
 - **Association:** an observed session/workspace is attached to an exact work
   record by native Paseo labels. Titles and Lanes `owner` prose do not make
   that link. A Task binding is not an automatic binding to its parent Goal.
@@ -126,9 +127,10 @@ which sessions it may choose; this procedure does not grant it child creation.
 ## Direct steering, reuse, and limitations
 
 A user may steer the current dev agent directly. Keep its Task/Goal records
-and binding aligned with the new agreed outcome. Reuse after the previous work
-is complete or explicitly transferred; do not steal another owner's session
-or silently relabel an unrelated active outcome. A single `lanes.ref` cannot
+and binding aligned with the agreed outcome. Continue the same session only
+within its still-active bounded assignment. Fold it promptly when finished;
+do not retain it idle for possible new work. Do not steal another owner's
+session or silently relabel an unrelated active outcome. A single `lanes.ref` cannot
 represent several simultaneous Goals. Use separate authorized owners or actual
 supported multi-record association; do not claim nonexistent aggregation.
 
@@ -144,8 +146,9 @@ computer-use and external-message authorization rules.
 ## Configure a new session only when needed
 
 Current dev agents do not need a new session merely to update assigned work.
-When an authorized handoff needs a new top-level owner, reuse a suitable one
-first. Discover configured profiles and their notes. Materialize the requested
+Continue a suitable top-level owner within its current bounded assignment;
+new work after completion needs a fresh authorized owner. Discover configured
+profiles and their notes. Materialize the requested
 provider/model, permission mode, thinking and feature values; if no profile fits,
 discover live capabilities and report the fallback rather than guessing values.
 Workspace choice follows the request/settings, not a universal isolation default.
@@ -208,6 +211,82 @@ even in another workspace, so are not substitutes for a top-level-owner launch.
 Dev owners follow Lanes' Task-level parallel execution guidance when assigning
 their own sub-agents within their role and authority; those workers do not
 replace the verified top-level owner or imply a new Lane management claim.
+
+## Resource coordination and folding
+
+Keep the manager's resource channel current throughout the Lane. From the
+installed full Lanes checkout, use the observed native manager identity:
+
+```sh
+node plugins/paseo/cli.js resources --manager '<observed-manager-id>' --action status
+node plugins/paseo/cli.js resources --manager '<observed-manager-id>' --action status --watch
+node plugins/paseo/cli.js resources --manager '<observed-manager-id>' \
+  --action reserve --count 1 --request-id '<request-UUID>'
+```
+
+Keep one `--watch` stream for the manager to receive status/inbox updates every
+15 seconds; use the harness's supported long-running-process interface and
+stop that stream when the manager ends. Also read fresh status at planning
+boundaries and before every dispatch. Reserve
+before launch, honor the returned grant, then report actual created agent IDs
+against the returned reservation. Reuse request IDs on retries, and reconcile
+ambiguous launches before another attempt. Release an unused reservation or
+report actual verified closures; do not release capacity merely because a
+worker is idle or has returned a result.
+
+```sh
+node plugins/paseo/cli.js resources --manager '<observed-manager-id>' \
+  --action report --reservation '<issued-reservation-id>' --agents '<observed-dev-id>'
+node plugins/paseo/cli.js resources --manager '<observed-manager-id>' \
+  --action release --reservation '<unused-reservation-id>'
+```
+
+Fresh enabled resource-manager capacity replaces `lane_max_active_agents`.
+Use its stored default of 5 only when the manager is unavailable, stale or
+disabled. Explicit user ceilings and native quotas still apply. Keep reporting
+launches, handoffs, folds and failures so the resource manager can update grants;
+do not treat a one-time status read as an ongoing allocation.
+
+Always fold a developer promptly after its bounded assignment is finished,
+including during pending human Goal review. For normal completion or warning
+pressure, send its latest context through the handoff command. This persists
+Goal-attached context and makes it available to the manager's channel:
+
+```sh
+node plugins/paseo/cli.js handoff --manager '<observed-manager-id>' \
+  --agent '<observed-dev-id>' --context-file /absolute/handoff-context.md \
+  --reason completed --handoff-id '<handoff-UUID>'
+```
+
+Use `resource_warning` or `reassignment` for those normal handoff reasons.
+Read `channel.pendingHandoffs` through `resources --action status`, including
+the latest context and each respective Goal attachment. Acknowledge the read
+handoff by supplying its ID to the fold action; do not close first or merely
+assume the manager received a chat message. Normal folds also require fresh
+native idle state after the developer settles its writes and other effects:
+
+```sh
+node plugins/paseo/cli.js fold --manager '<observed-manager-id>' \
+  --agent '<observed-dev-id>' --handoff-id '<acknowledged-handoff-UUID>'
+```
+
+When the live resource condition is **critical**, use `fold` immediately without
+a handoff ID. Do not wait for context, acknowledgment, attachment, checkpoint or
+quiescence. The emergency path closes first and preserves already available
+context on the respective Goals afterward, marking interrupted work incomplete.
+Keep closure or persistence failures visible; they do not imply acceptance.
+
+Paseo's native archive operation closes the provider runtime and removes its
+agent tabs while retaining history. Verify the refreshed closed/archived state.
+Detaching only removes a parent association, and stopping a turn is not a fold.
+Provider subprocess/descendant guarantees vary: report missing process evidence
+instead of claiming that every detached child process was terminated. Preserve
+source, worktrees and transcripts. Other harnesses use their discovered native
+close operation under the same [normal and critical folding policy](delivery.md#bounded-worker-assignments-and-retirement).
+
+If this installed version lacks the resource channel, use the documented
+fallback capacity and core `lanes handoff record` before supported native
+closure. Do not invent commands or claim an unavailable live service.
 
 ## When Paseo is absent
 

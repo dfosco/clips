@@ -124,54 +124,95 @@ returned evidence against that request. This is agent policy, not a native sched
 
 ## Lane worker budget
 
-The project setting `lane_max_active_agents` defaults to **5 concurrently active
-workers per Lane**, excluding the Lane Manager. Each Lane gets its own budget;
-this is neither a project-wide worker pool nor a lifetime creation quota.
-It is a ceiling, not a requirement to launch five workers.
+Lane Manager keeps two-way contact with the live resource manager: read fresh
+capacity at planning boundaries and before dispatch, reserve grants, and report
+actual launches, handoffs, folds and failures. Fresh enabled resource-manager
+capacity replaces the stored `lane_max_active_agents` value. That value is
+**only the fallback when the resource manager is unavailable, stale or disabled**,
+not an extra ceiling on live grants. Explicit user ceilings and native host
+quotas apply in both cases, on local and cloud harnesses.
 
-After project setup, use the supported configuration interface:
+The fallback defaults to **5 workers per Lane**, excluding the Lane Manager.
+Each Lane has its own fallback; it is not a project-wide pool or lifetime quota.
+Read or change it with:
 
 ```bash
-lanes config lane_max_active_agents          # Read the numeric value; absent means 5
-lanes config --lane-max-active-agents 3       # Store the project default for its Lanes
-lanes config lane_max_active_agents 3        # Equivalent existing key/value syntax
+lanes config lane_max_active_agents          # Read the fallback; absent means 5
+lanes config --lane-max-active-agents 3       # Store the per-Lane fallback
+lanes config lane_max_active_agents 3        # Equivalent key/value syntax
 lanes config --help
 ```
 
-The flag takes one value, separated by a space. Values must be positive safe
-integers written as decimal digits. Invalid values or flag forms fail without
-writing configuration. Invalid stored limits fail readback instead of becoming
-unlimited; a valid setter can repair that field. Malformed configuration is not
-overwritten by a limit update. Existing unrelated settings are preserved.
+Values must be positive safe integers written as decimal digits. Invalid values
+or flag forms fail without writing configuration. Invalid stored limits fail
+readback instead of becoming unlimited; a valid setter can repair that field.
+Malformed configuration is not overwritten by a limit update. Unrelated
+settings are preserved.
 
-Before dispatch, Lane Manager reads the setting from the Lane's canonical
-project and announces the effective budget and how to override it. An explicit
-user instruction such as "use two workers for this Lane" overrides that Lane,
-not the project's stored default. The manager preserves this decision in
-existing Lane context; there is no separate per-Lane configuration flag.
-Stricter user or host resource limits still apply.
+Announce the effective allocation and its source before dispatch. An explicit
+instruction such as "use at most two workers for this Lane" remains a ceiling
+without changing the stored project fallback. Reserve before launch and count
+starting, running, idle and finished-but-unclosed sessions, including permitted
+nested helpers. Release capacity only after native session/process closure is
+verified. Unknown or ambiguous activity is not free capacity. Always fold
+finished developers promptly; do not keep idle sessions for future work or
+pending human review. When capacity is full, keep new work pending.
 
-Active, starting and reused/resumed workers consume capacity. The manager
-reserves a slot before dispatch, counts any permitted nested helpers in the same
-budget, and does not treat unknown activity as free capacity. Confirmed idle or
-completed workers free slots; reactivating an idle worker needs capacity again.
-Lowering the budget never implicitly terminates existing workers. Defer new
-launches or resumptions until capacity returns.
+The CLI validates configuration; the resource manager and harness provide actual
+capacity and closure. **Lanes configuration alone is not an OS process limit or
+cross-session scheduler.** A stored fallback change does not itself terminate
+workers. Copilot still uses direct children without nested workers; other
+harnesses retain their supported delegation paths. Cloud metadata does not
+create an unlimited-capacity exception. A harness with no delegation primitive
+uses the existing linear fallback; a full budget does not make an available
+primitive disappear.
 
-The CLI validates and persists the configuration value. **Lane Manager applies
-the concurrency policy through the host's native tools; Lanes does not enforce
-a native process limit or provide a cross-session scheduler.** Copilot still
-uses direct children without nested workers. Other hosts retain their own
-delegation paths. A harness with no delegation primitive uses the existing
-linear fallback and creates no worker slots; a full budget does not make an
-available primitive disappear.
+## Developer handoffs and folding
 
-The manager may skip this stored project cap only when reliable native metadata
-for its current session explicitly confirms cloud execution. It does not change
-the stored numeric value. Local, unknown, or ambiguous environments keep the
-configured cap. An explicit user ceiling for the Lane and native host quotas
-or resource limits still apply. Do not infer cloud from a hostname, SSH,
-container, environment variable, remote repository or workspace path.
+A fold closes the actual native agent/sub-agent/session or tab **and its owned
+runtime process**, while preserving source, worktrees, transcripts and history.
+A completed Task, idle session, detached child, hidden tab or interrupted turn
+is not a fold. Verify native closure and runtime effects before releasing
+capacity; report missing host capabilities rather than inventing a successful
+close.
+
+Always fold a developer promptly when its bounded assignment ends. For normal
+completion, reassignment or warning-level resource pressure, get its latest
+context to the manager, persist it on each respective Goal, have the manager
+read and acknowledge the attachment, then close. Human Goal review and
+hypothetical follow-up never justify keeping finished developers open.
+
+```bash
+lanes handoff record '#g1#t1' --file handoff.json
+lanes handoff record '#g1' --stdin
+```
+
+`handoff.json` contains `context`, the observed `agent_id` and `manager_id`, and
+`reason`: `completed` (default), `resource_warning`, `resource_critical`, or `reassignment`.
+Optional fields are `incomplete` and `handoff_id` (a UUID for idempotent retries).
+A Task ref resolves to its parent Goal. The command writes immutable Markdown
+and attaches it to that Goal; read back the returned attachment before normal
+closure. Repeat with a distinct ID for each Goal covered by a worker; changed
+context also needs a new ID. Keep exact request refs and revisions,
+artifact/changed paths, checks/results, decisions, blockers and remaining work,
+and active side effects in the context. This local command does not deliver the
+context to a manager, close a session, accept work or grant human approval;
+manager acknowledgment and closure use the host's actual communication/runtime
+interfaces.
+
+**Critical resource pressure closes immediately**, without waiting for fresh
+context, manager acknowledgment, attachment, checkpoint or quiescence. Retain
+already available context; after closure, attach it using
+`reason: resource_critical` and `incomplete: true`, recording interrupted work,
+unresolved effects and any closure/persistence failures. If no context was
+available, this reason with `incomplete: true` permits an empty `context`; the
+command creates an explicit missing-context emergency note. The emergency path
+changes the order, not the obligation to preserve available context.
+
+The [packaged Paseo procedure](../.agents/skills/lanes/references/paseo.md#resource-coordination-and-folding)
+describes its resource channel and verified archive path. On other harnesses,
+use discovered native close operations with the same normal/critical policy;
+do not assume a stop command closes a session or process.
 
 ## Delivery configuration
 

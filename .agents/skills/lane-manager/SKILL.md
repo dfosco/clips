@@ -11,7 +11,7 @@ description: >-
   attention, intake, PR preparation and proposed routing belong to lane-radar.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.22.1"
+  version: "2026.10.24.1"
 ---
 
 # Lane Manager
@@ -461,102 +461,82 @@ PR boundaries.
 
 ## Read and announce the Lane worker budget
 
-Before dispatching work for each Lane, read its canonical project's configuration:
+Keep two-way contact with the resource manager throughout execution. Read fresh
+capacity at each planning boundary and before dispatch; reserve granted capacity
+before launching; report actual sessions, handoffs, folds and failures. Observe
+updated pressure and allocations rather than treating the first reading as a
+permanent budget. Use the [Paseo channel](../lanes/references/paseo.md#resource-coordination-and-folding)
+there; discover supported equivalents on other harnesses.
+
+Read the canonical project's fallback as well:
 
 ```bash
 lanes config lane_max_active_agents
-```
-
-The numeric project default is **5 concurrent active workers per Lane**,
-excluding the Lane Manager. This is a maximum, not a target worker count or a
-lifetime creation quota. Change the stored project default with:
-
-```bash
 lanes config --lane-max-active-agents 3
 ```
 
-An explicit user override can select a positive-integer budget for one Lane
-without changing other Lanes. Preserve that override and its authority in
-existing Lane context, such as its description; do not overwrite unrelated
-content or invent a new CLI field. Otherwise use the configured project default.
-Respect stricter host or user resource limits. Read the correct project's
-configuration, not an unrelated repository where the manager happens to run.
+The stored positive-integer default is **5 workers per Lane**, excluding its
+manager. Apply it only when the resource manager is unavailable, stale or
+disabled. Fresh enabled resource-manager capacity replaces that fallback; do
+not take the minimum with five or enforce the stored value as an additional
+cap. Preserve explicit user ceilings and native quotas in either case. An
+explicit user instruction such as "at most two workers for this Lane" remains
+a ceiling even if the live manager could grant more. Record that authority in
+existing Lane context without mutating unrelated configuration.
 
-Concurrent worker capacity does not bound lifetime session reuse. Each Lane Dev
-session receives one finite assignment of persisted Tasks, defaulting to one and
-never exceeding the effective `lane_dev_max_tasks` total for that Lane. Retire
-the assignment when its batch ends, even below the cap; count prior Tasks from
-known history and associations if the session is reassigned. Allow only finite
-rework against the same contract. Read the shared
-[bounded assignment and retirement procedure](../lanes/references/delivery.md#bounded-worker-assignments-and-retirement)
-before dispatch and require its final-context checklist before closing an idle
-host session.
+Announce the effective allocation, its source and any explicit ceiling before
+dispatch, and update the announcement when those facts change. A capacity grant
+is a maximum, not a target worker count or lifetime creation quota. Cloud
+execution never implies unlimited capacity and does not waive the fallback
+when live resource management is unavailable.
 
-Announce the effective budget before dispatch, including any tighter constraint
-and how to override it. For example: "This Lane can use up to 3 concurrent
-workers, excluding me. Tell me to change this Lane's budget, or use
-`lanes config --lane-max-active-agents N` to change the project default."
-An existing announcement can stand until its budget or scope changes.
-
-Count actual active and starting workers, including reused or resumed sessions,
-against the same Lane budget. Reserve capacity before launch or resumption so
-an in-flight launch already occupies a slot. Deduplicate actual worker identities;
-the same active worker continuing work for the Lane does not consume another
-slot. Recheck native state before dispatch, not just titles, recorded owners or
-old session associations. Unknown activity is not free capacity: retain a
-known reservation until readback establishes whether that worker is active,
-confirmed idle, completed or absent. Do not fabricate counts or replacement workers.
-
-When full, keep Tasks pending or continue through workers already active on the
-Lane. Confirmed idle or completed workers free capacity; assigning new work to an
-idle worker reserves a slot again. Replacements are allowed as work finishes,
-so total lifetime creations can exceed the concurrent limit. A failed or
-ambiguous launch needs reconciliation before its reservation is released.
-Reducing the budget below current activity does not terminate workers. Defer
-additional launches or resumptions until activity is below the new limit.
-
-The budget includes nested helpers wherever that host permits them. A dev owner
-already consumes a worker slot; its helpers cannot bypass the Lane's remaining
-capacity. Carry the effective budget and allocations in handoffs and coordinate
-capacity with existing collaborators. Copilot still prohibits nested dev workers;
-Paseo and generic native sub-agents retain their own topology rules.
-
-This is a configuration-backed dispatch policy, not native SDK enforcement, a
-process limiter, a scheduler, an ownership claim or a distributed lock. Native
-tools supply real activity; Lanes validates the configured value, not live
-worker counts. If an available config read fails or returns an invalid value,
-report the problem and do not dispatch additional workers on a guessed budget.
-On an older CLI known not to support this setting, disclose that limitation and
-use the policy default of 5 or an explicit user override; do not claim a persisted
-readback or silently upgrade. With no delegation primitive, linear work creates
-no worker slots. A full budget is not an absent primitive and does not authorize
-the manager to bypass delegation by coding inline.
-
-An optional cloud exception applies only when reliable native metadata for the
-current manager session explicitly confirms that it is cloud-hosted. Do not
-infer cloud from a hostname, repository remote, SSH connection, container,
-environment variable, host ID or workspace path. If the host does not expose
-an unambiguous current-session cloud indicator, treat the environment as
-unknown and keep the configured cap. When cloud is confirmed, skip only the
-stored project cap without changing its positive numeric value; announce that
-no project-defined cap is applied. A specific user ceiling for this Lane and
-native host quotas or resource limits still apply. Unknown activity, ready-work
-requirements and safe dispatch rules remain unchanged.
-
-| Situation | Effective project-cap policy | Other limits |
+| Situation | Effective capacity source | Other limits |
 |---|---|---|
-| Current manager metadata explicitly confirms cloud | Do not apply the configured project cap; leave its stored value unchanged | Keep explicit user ceilings and native quotas |
-| Metadata says local, is absent, or is ambiguous | Apply the configured positive-integer cap | Keep explicit user ceilings and native quotas |
-| Cloud is confirmed and the user set a ceiling for this Lane | Skip only the project cap | Enforce the user's Lane ceiling and native quotas |
+| Resource manager is enabled, available and fresh | Use its live grants; do not also cap at the stored value | Keep explicit user ceilings and native quotas |
+| Resource manager is unavailable, stale or disabled | Apply the configured fallback, default 5 workers per Lane | Keep explicit user ceilings and native quotas |
+| Current session is cloud-hosted | Use the same live-manager-or-fallback precedence | Keep explicit user ceilings and native quotas |
+
+Count every actual starting, running, idle and finished-but-unclosed developer,
+including permitted nested helpers, until native closure and runtime termination
+are verified. Reserve before launch, deduplicate observed identities, and
+reconcile ambiguous launches before releasing a reservation. Unknown activity
+is not free capacity; neither a finished result nor idle status frees a slot.
+Read native state instead of inferring it from titles, work status or old
+associations. Never claim more capacity than the manager granted.
+
+When capacity is full, keep new Tasks pending. Always fold finished developers
+promptly after the normal Goal-attached handoff; do not retain them for
+hypothetical follow-up or human review. Under resource pressure, fold old idle
+sessions first, then current developers as requested. Normal folding obtains
+latest context, persists and acknowledges each Goal attachment, then closes the
+native session/tab and owned process. Critical pressure closes immediately,
+without waiting for context, acknowledgment, attachment or checkpoint; preserve
+available context and record incomplete work afterward. Follow the complete
+[folding procedure](../lanes/references/delivery.md#bounded-worker-assignments-and-retirement).
+
+A finite developer assignment normally contains one Task and may not exceed
+`lane_dev_max_tasks`. Do not keep a completed session open merely because that
+allowance has room. New work receives a fresh bounded assignment through the
+supported host path. Changing the stored fallback does not itself terminate
+sessions, but live fold requests and normal completion still require closure.
+
+Lanes configuration is not a native process limiter or distributed scheduler.
+Use the actual resource-manager and host interfaces for grants and closure. If
+fallback readback fails or is invalid while fallback is needed, report it and
+do not dispatch on a guessed budget. An older CLI known not to support the
+setting may use a disclosed default of 5 or an explicit user ceiling. A full
+budget is not an absent delegation primitive and does not authorize bypassing
+required delegation with inline manager coding. Copilot keeps direct children;
+Paseo and other harnesses retain their own topology rules.
 
 ## Hand off and continue execution
 
 Only after the selected mode permits execution, select the current harness path
 below and complete the persisted-contract/readback sequence before dispatch.
-Reuse a suitable native execution owner
-or invoke the supported delegation primitive; use linear execution if no such
-primitive exists. Keep the same complete contract in either case, not isolated
-microsteps:
+Continue a native owner only within its still-active bounded assignment; fold
+finished owners and invoke the supported delegation primitive for new work. Use
+linear execution if no such primitive exists. Keep the same complete contract
+in either case, not isolated microsteps:
 
 - Exact repository/workspace and Lane/Goal/Task refs; source basis when needed.
 - Read-back request revision pins and the chosen delivery mode.
@@ -630,8 +610,9 @@ send messages directly. This rule is specific to Copilot, not Paseo.
 
 The Lane Manager calls native `create_session` itself with the intended project,
 workspace and complete Task-scoped kickoff, `coordinate_with_creator: true`,
-and without `detached: true`. Reuse an existing suitable direct child when
-possible. Honor the user's workspace and RAM limits; do not create a worktree
+and without `detached: true`. Continue a suitable direct child only within its
+still-active bounded assignment; fold it promptly when that assignment ends.
+Honor the user's workspace and RAM limits; do not create a worktree
 or extra session just for a role, identity, proof or validator quota.
 
 Use `get_session` and session listings to check the actual session ID, repository,
@@ -646,7 +627,9 @@ worker blockers/results and relevant user corrections. Preserve this contact
 throughout execution, not merely at launch. Native user messages to the child
 remain authoritative steering; return changes affecting shared scope to the
 manager. Read actual session state rather than claiming delivery equals
-execution. Keep the coordinated child available until handoff is complete.
+execution. Complete the normal Goal-attached handoff, then promptly close the
+child and its owned runtime. Critical resource pressure requires immediate
+closure without waiting for that handoff; preserve available context afterward.
 
 Task parallelism does not authorize nested App dev sessions or unsteerable
 substitute workers. A dev owner proposes Task IDs, dependencies and non-conflicting
@@ -717,7 +700,11 @@ parentage fields, Paseo top-level agents, persistent sessions or a visible
 steering surface. Carry the complete Task contract and recover actual results
 through supported completion/readback tools. Keep manager contact when the
 harness supports messaging; report one-shot or communication limitations
-without treating them as a reason to skip available delegation.
+without treating them as a reason to skip available delegation. Fold completed
+sub-agents through the discovered native close operation and verify their owned
+runtime has ended; returning a result or interrupting a turn is insufficient.
+Apply the normal Goal-attached handoff and critical close-first exception on
+these harnesses too.
 Inspect the actual model/effort catalog, help or launch schema before selecting
 values. Apply the preference and fallback order above, and distinguish the
 requested values, launch parameters and any effective values exposed by
@@ -840,8 +827,9 @@ An approved exact candidate plus a fulfilled configured delivery endpoint lets
 the manager record attributed evidence or a receipt and close the Goal. A
 `changes_requested` decision leads to bounded rework for affected scope and a
 new candidate review. A `deferred` decision is an explicit user wait, not a
-reason to keep building indefinitely. After confirmed handoff, pending human
-review does not prevent retiring idle developers.
+reason to keep building indefinitely. Always fold finished developers promptly
+after their Goal-attached handoff; pending human review never keeps them open.
+A critical resource fold closes first and records available context afterward.
 
 A review request is not acceptance and does not change a Goal lifecycle status.
 

@@ -1,4 +1,4 @@
-# Bounded delivery and review gates
+# Bounded delivery, validation and publication gates
 
 Use these rules for Lane Dev assignments and handoffs. Project preferences are
 read with `lanes config lane_dev_max_tasks`, `lane_validation_mode`,
@@ -7,21 +7,75 @@ read with `lanes config lane_dev_max_tasks`, `lane_validation_mode`,
 scheduling, confer acceptance authority, prove host capability, or authorize
 external actions.
 
-## Bounded assignments and retirement
+## Bounded worker assignments and retirement
 
 Assign a finite batch of persisted Tasks, normally one. Do not exceed the
 configured per-session Task cap, count known earlier assignments, and return the
 batch when its defined work is done even below the cap. Allow only bounded
-rework against the same contract. Do not reuse a session to evade a host quota.
+rework against the same contract while that assignment is active. Always fold a
+finished developer promptly; do not leave it idle for possible follow-up work,
+human Goal review, or a remaining numerical Task allowance.
 
-Before handoff, return exact refs and request revisions, final artifact identity
-and changed paths, criterion-level checks and results, commands/environment,
-decisions, failures, blockers, remaining inputs, and any active writes or
-external effects. Preserve recoverable work. The manager reviews the evidence
-and confirms the handoff is stable before using a discovered, supported,
-authorized non-destructive archive/close action. Read back the host state.
-Preserve source, worktrees, transcripts and association history. A human review
-wait does not require keeping an idle worker alive.
+**Fold means close the native agent/sub-agent/session or tab and terminate its
+owned runtime process on every harness.** Marking a Task complete, returning a
+result, idling, detaching, hiding a tab, or merely interrupting a turn does not
+fold it. Use discovered native closure operations and verify their actual
+session/process effects. Archive qualifies only when that host closes the
+runtime too. Preserve source, worktrees, transcripts and association history.
+Do not target an unrelated process or infer process termination from a UI badge.
+
+For normal completion, reassignment, or a noncritical resource fold:
+
+1. Get the developer's latest context to its actual manager: exact Goal/Task
+   refs and revisions, artifact and changed paths, criterion-level checks and
+   results, commands/environment, decisions, blockers/remaining work, and any
+   active writes or external effects. Settle those effects before normal closure.
+2. Persist that context as a durable attachment on **each respective Goal**
+   before closing. The designated writer uses
+   `lanes handoff record <goal-or-task-ref> --file handoff.json`; a Task ref
+   attaches to its parent Goal. The payload contains `context`, observed
+   `agent_id` and `manager_id`, and `reason` (`completed` by default, `resource_warning`,
+   `resource_critical`, or `reassignment`), with optional `incomplete` and a
+   UUID `handoff_id`. Reuse it only for an exact retry; use a new ID for changed
+   context or a different Goal. Read back the returned attachment. Never invent
+   identities or substitute an unpersisted chat message for this handoff.
+3. Have the manager read and acknowledge the latest attached context, then
+   immediately close the native worker and its owned process. Confirm closure
+   through native readback and report it to the resource manager. Keep capacity
+   occupied until closure is verified; failures remain visible and retryable.
+
+For a **critical resource condition, close immediately**. Do not wait for a
+developer response, manager acknowledgment, fresh context, attachment write,
+checkpoint, or quiescence. Use already known exact session identity, preserve
+available context, and after closure persist it on the respective Goals with
+`reason: resource_critical` and `incomplete: true`. Record interrupted work,
+unresolved effects, and any persistence/closure failures; emergency closure is
+not acceptance. This exception changes the order, not the obligation to retain
+available context or preserve source and worktrees.
+
+When a host cannot close the actual runtime or expose the required readback,
+report the missing capability and actual state. Do not claim a fold or recovered
+capacity. Use the host's existing tools; do not invent an API. A standalone dev
+without a manager preserves the same Goal-attached context through the supported
+attachment interface and returns it to the user without fabricating a manager.
+
+## Resource capacity and manager contact
+
+Maintain two-way contact with the live resource manager throughout the Lane:
+read fresh capacity before dispatch and at planning boundaries, reserve grants
+before launching, and report actual launches, handoffs, folds and failures. Count
+starting, running, idle and finished-but-unclosed workers, including permitted
+nested helpers. Unknown state is not free capacity. Respect updated allocations;
+fold completed/old workers first under ordinary pressure and current workers
+when requested, using the normal or critical procedure above.
+
+Use fresh, enabled resource-manager capacity instead of the stored
+`lane_max_active_agents` value. That setting (default **5** per Lane, excluding
+the manager) is only the fallback when the resource manager is unavailable,
+stale or disabled; it is not an extra cap on live grants. Explicit user ceilings
+and native quotas always apply. Cloud execution does not waive either live
+capacity or the fallback. See [Paseo resource coordination](paseo.md#resource-coordination-and-folding)
+for its concrete channel; other harnesses must discover their native equivalent.
 
 ## Validation, acceptance, and user review
 
@@ -63,8 +117,8 @@ and closes the Goal only then. `changes_requested` returns bounded affected
 work to a dev and requires a new candidate-bound review request. `deferred` leaves
 an explicit user wait with its next owner and action; do not continue unrelated
 or endless work. Deferral is not final: the assigned reviewer may later record a
-new decision against the same still-current candidate. A pending Goal review
-does not keep an idle dev assigned after its handoff has been confirmed.
+new decision against the same still-current candidate. Fold the finished dev
+promptly after its Goal-attached handoff; pending Goal review never keeps it open.
 
 `lane_validation_mode=agent` is an explicit opt-out only where no named human
 gate applies. Manager analysis and agent Task acceptance do not replace the
@@ -150,6 +204,7 @@ records a decision on the existing pinned review, not a second approval surface.
 The manager owns shared Lanes records and cross-Task coordination and integration
 oversight. Assigned devs resolve technical conflicts and execute their own
 integration, checks and authorized commits. Workers return evidence and proposed
-record updates unless assigned as their writer. A completed worker can be retired
-while the Goal's human review remains pending, once its handoff has been reviewed
-and confirmed stable.
+record updates unless assigned as their writer. A completed worker must be folded
+promptly after its Goal-attached handoff, even while the Goal's human review
+remains pending. A critical resource fold closes first and records available
+context afterward.

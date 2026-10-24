@@ -8,7 +8,7 @@ description: >-
   This is the developer role, not the Lane Manager or a recurring monitor.
 metadata:
   author: Daniel Fosco
-  version: "2026.10.22.1"
+  version: "2026.10.24.1"
 ---
 
 # Lane Dev
@@ -229,12 +229,14 @@ that manager; it creates any direct sibling via native `create_session` with
 coordination enabled. Keep your technical implementation in this session.
 
 A manager-assigned developer occupies one slot in its Lane's concurrent worker
-budget. Honor the effective allocation communicated by the manager, including
-stricter user resource limits; the project default is 5 workers, not five per
-developer. Do not evade the budget with nested helpers or treat unknown activity
-as free capacity. Return capacity questions to the manager rather than creating
-workers. A standalone Lane Dev still plans and builds in its own session;
-this policy does not require it to acquire a manager or launch a team.
+budget until its native session and owned process are closed. Honor the live
+resource-manager allocation and explicit user ceilings/native quotas. The stored
+`lane_max_active_agents` default of 5 per Lane is only a fallback when resource
+management is unavailable, stale or disabled, never an extra cap on live grants.
+Keep two-way manager contact for capacity updates, launches, handoffs and folds;
+idle or finished-but-unclosed helpers still consume resources. Do not evade the
+budget with nested helpers or treat unknown activity as free capacity. A
+standalone Lane Dev still works in its own session without acquiring a manager.
 
 For a manager-assigned session, verify native `creator_session_id` and
 `coordinating_creator_session_id` through
@@ -253,17 +255,24 @@ scope or appoint yourself another writer to shared Lanes state.
 Treat the manager's Task batch as finite. The default is one explicit Task; a
 few may be assigned together only when they form a bounded, reviewable request.
 Respect the effective `lane_dev_max_tasks` total for this session in the Lane,
-including earlier assignments visible in known history. Finish or hand back the
-batch when its return condition is met, even below the cap. Do not turn rework
-into open-ended session reuse or evade a host lifetime quota. Before retirement,
-return the final context described in the shared
+including earlier assignments visible in known history. Always fold promptly
+when the bounded assignment is finished, even below the cap or while human Goal
+review is pending. Do not keep an idle session for hypothetical follow-up. Folding
+means closing the native agent/sub-agent/tab **and its owned process** on any
+harness, not just returning a result, marking a Task complete or interrupting.
+For a normal fold, return latest context to the actual manager using the shared
 [bounded assignment procedure](../lanes/references/delivery.md#bounded-worker-assignments-and-retirement):
 request refs/revisions, exact artifact and changed paths, criterion-level checks
 and results, commands/environment, decisions, blockers/remaining inputs, and
-whether writes or external effects remain active. Preserve recoverable work and
-let the manager review and confirm quiescence before it uses a supported,
-authorized host retirement action. Do not claim a stop/archive succeeded without
-native readback.
+whether writes or external effects remain active. Have the designated writer
+persist that context on each respective Goal with `lanes handoff record`, then
+have the manager read/acknowledge it before closing and verifying native state.
+Preserve source, worktrees and transcripts. A **critical resource condition
+requires immediate closure** without waiting for context, acknowledgment,
+attachment, checkpoint or quiescence; preserve already available context and
+record interrupted work as incomplete afterward. Do not claim a successful fold
+or freed capacity without native session/process readback. Report unsupported
+closure capabilities instead of inventing an action.
 
 Keep the work contract complete, whether requested directly or handed off:
 
@@ -374,8 +383,9 @@ Keep task status, owners, blockers, results, and evidence current; keep cross-ta
 coordination in the goal plan and cross-goal strategic context in the Lane. Use an existing squad log or host handoff for
 transient execution context. Preserve only the context needed to resume:
 selected refs, remaining work, material decisions, owners, evidence, blockers,
-in-flight effects, and the next useful action. No separate execution-note
-artifact is required.
+in-flight effects, and the next useful action. Ordinary transient coordination
+needs no separate execution-note artifact. Folding requires the durable
+Goal-attached handoff described above, with the critical close-first exception.
 
 On resume, reconcile newer user instructions with current records, source,
 ownership, and external results. Reuse valid work. Resolve uncertain side effects
@@ -394,9 +404,11 @@ routine implementation choices. Preserve pending work without marking it
 complete or promising automatic resumption.
 
 Use native scheduling only when future execution is authorized and supported.
-On cancellation or a resource cutoff, stop admitting work, notify affected
-collaborators, and settle or safely stop in-flight actions within authority. Preserve results
-and unresolved effects; interrupted work is not accepted completion.
+On cancellation or noncritical resource pressure, stop admitting work and follow
+the normal context-preserving fold procedure. On critical resource pressure,
+close the actual native worker and owned runtime immediately; do not wait for
+handoff or checkpoint. Preserve available context and unresolved effects after
+closure; interrupted work is not accepted completion.
 
 ## Complete the scoped work
 

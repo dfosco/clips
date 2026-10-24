@@ -94,7 +94,7 @@ function showHelp() {
   lanes config <model-key> --unset         Remove a project model override
   lanes config --user <model-key> [value]  Read or set a user model preference
   lanes config --user <model-key> --unset  Remove a user model override
-  lanes config --lane-max-active-agents <N>  Set the project default per Lane
+  lanes config --lane-max-active-agents <N>  Set the per-Lane resource fallback
 
 Model preferences resolve project > user > built-in. Built-in values are
 gpt-6.1-sol/high for Lane Managers and gpt-6-luna/high for Lane Devs.
@@ -105,9 +105,12 @@ Keys: lane_manager_model, lane_manager_reasoning_effort, lane_dev_model,
 lane_dev_reasoning_effort.
 
 Delivery preferences:
-lane_dev_max_tasks defaults to 3 Tasks per Lane Dev assignment. A worker's
-assignment ends and it retires when its assigned Tasks are complete, even when
-the cap has not been reached. lane_validation_mode defaults to human and may be
+lane_dev_max_tasks defaults to 3 Tasks per Lane Dev assignment. A worker folds
+promptly when its assigned Tasks finish, even below the cap or while Goal review
+is pending. Folding closes its native session/tab and owned process. Normal folds
+require latest context attached to each Goal and acknowledged by the manager;
+critical resource folds close immediately and preserve available context after.
+lane_validation_mode defaults to human and may be
 agent. Human validation is the default for Goal review; agent mode is an explicit
 opt-out only where no named human gate applies. lane_commit_mode defaults to
 after_validation and may be manual.
@@ -119,13 +122,16 @@ leaves an explicit commit handoff for the designated coordinator.
 Read and set delivery preferences with lanes config <key> [value]. Invalid
 values and malformed stored delivery settings fail visibly and remain on disk.
 
-lane_max_active_agents defaults to 5 concurrent active workers, excluding
-the Lane Manager. N must be a positive safe integer (decimal digits).
+lane_max_active_agents defaults to 5 workers per Lane, excluding its manager.
+It is only the fallback when resource management is unavailable, stale or disabled.
+Fresh live capacity supersedes it; explicit user ceilings and native quotas remain.
+N must be a positive safe integer (decimal digits).
 Read back the numeric value: lanes config lane_max_active_agents
 
-Lane Manager applies this budget through dispatch policy, not a native
-process limit. An explicit user override can apply to one Lane. Reducing
-the budget does not terminate workers; defer new dispatch until capacity returns.`);
+Lane Manager maintains two-way resource-manager contact and reports actual closure.
+Idle and finished-but-unclosed sessions still occupy capacity; unknown is not free.
+The fallback is dispatch policy, not a native process limit. Changing its stored
+value does not itself terminate workers. Cloud execution does not bypass it.`);
 }
 
 function showConfigKey(key) {

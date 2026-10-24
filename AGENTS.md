@@ -87,14 +87,16 @@ manager implements and
 verifies authorized Tasks linearly in dependency/dispatch order. This fallback
 does not bypass denied authorization or missing tool/file access.
 
-Lane Manager reads `lanes config lane_max_active_agents` and announces the
-effective budget before dispatch. The project default is 5 concurrent active
-workers per Lane, excluding its manager; configure it with
-`lanes config --lane-max-active-agents N`. Explicit user overrides can apply to
-one Lane, and tighter resource limits still apply. Count existing/starting/reused
-workers and any permitted nested helpers. Unknown activity is not free capacity;
-completion or confirmed idle frees a slot. Reductions never implicitly terminate
-workers. This is dispatch policy, not a native scheduler or ownership gate.
+Lane Manager keeps two-way contact with the resource manager: read fresh capacity
+at planning boundaries and before dispatch, reserve launches, and report observed
+launches, handoffs, closures and failures. Fresh enabled resource-manager capacity
+supersedes `lane_max_active_agents`; its stored default of 5 workers per Lane,
+excluding the manager, is only a fallback when resource management is unavailable,
+stale or disabled. Configure that fallback with
+`lanes config --lane-max-active-agents N`. Explicit user ceilings and native quotas
+always apply. Count starting, running, idle and finished-but-unclosed sessions and
+permitted nested helpers until native closure is verified. Unknown state is not
+free capacity. Changing a stored fallback does not itself terminate workers.
 
 For new sessions, read the Lane's effective values with `lanes config <key>`
 for `lane_manager_model`, `lane_manager_reasoning_effort`, `lane_dev_model`,
@@ -108,12 +110,10 @@ effective values. The
 [Lane Manager model policy](.agents/skills/lane-manager/SKILL.md#resolve-model-preferences-and-fallbacks)
 covers host-specific discovery and ambiguous launches.
 
-An optional cloud exception skips the stored project worker cap only when
-explicit native metadata for the current manager session confirms cloud
-execution. Hostname, SSH, container, environment variable, repository remote,
-host ID, or workspace path alone is not proof. Unknown or local execution keeps
-the configured cap. Cloud does not remove an explicit per-Lane user ceiling or
-native host quotas; do not mutate the stored numeric value.
+Use the same capacity precedence on local and cloud harnesses. Cloud execution
+does not imply unlimited capacity or bypass the fallback when the resource
+manager is unavailable. Never infer a capacity grant from a hostname, SSH,
+container, environment variable, repository remote or workspace path.
 
 When a Lane Manager delegates work in GitHub Copilot App, its dev execution
 sessions are direct children, never grandchildren behind an intermediary
@@ -165,9 +165,17 @@ commits its scoped changes before manager analysis and user validation. The
 default human gate is a Goal-attached CR for the exact committed candidate; a
 user may coalesce covered Goals in a Lane CR without duplicate approval. The
 manager mediates competing technical approaches and records agreed decisions;
-the dev owns implementation and routine conflict resolution. An idle worker can
-be retired after the manager confirms a durable handoff, even while Goal review
-is pending. See the packaged [delivery procedure](.agents/skills/lanes/references/delivery.md).
+the dev owns implementation and routine conflict resolution. Always fold a dev
+promptly when its bounded assignment ends, without waiting for human Goal review
+or retaining it idle for possible follow-up. Folding closes its native
+agent/sub-agent/tab and owned runtime process on any harness; idle, Task completion
+and turn interruption do not count. Normally send latest context to its manager,
+persist it on each respective Goal with `lanes handoff record`, acknowledge it,
+then close and verify native state. Under critical resource pressure, close
+immediately without waiting for context, acknowledgment, attachment or checkpoint;
+retain available context and record incomplete work afterward. Preserve code,
+worktrees and transcripts. See the packaged
+[delivery procedure](.agents/skills/lanes/references/delivery.md).
 
 ## Storage and ownership
 

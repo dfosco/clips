@@ -19,6 +19,9 @@ describe('Lane Manager human review handoff contract', () => {
     expect(normalizedRule).toContain('approved exact candidate');
     expect(normalizedRule).toContain('`changes_requested`');
     expect(normalizedRule).toContain('`deferred`');
-    expect(normalizedRule).toContain('pending human review does not prevent retiring idle developers');
+    expect(normalizedRule).toContain('Always fold finished developers promptly');
+    expect(normalizedRule).toContain('after their Goal-attached handoff');
+    expect(normalizedRule).toContain('pending human review never keeps them open');
+    expect(normalizedRule).toContain('A critical resource fold closes first');
   });
 });

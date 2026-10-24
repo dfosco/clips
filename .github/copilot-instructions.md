@@ -1,4 +1,20 @@
+# Lane worker lifecycle
 
+Follow AGENTS.md and the packaged Lanes delivery procedure. Always fold a dev
+promptly when its bounded assignment is finished, including while human Goal
+review is pending. Folding closes the native agent/sub-agent/session or tab and
+its owned runtime process; idle, Task completion and turn interruption do not
+count. Normally get latest context to the manager, persist it on each respective
+Goal with `lanes handoff record`, acknowledge it, then close and verify native
+state. Under critical resource pressure, close immediately without waiting for
+context, acknowledgment, attachment or checkpoint; preserve available context and
+record incomplete work afterward. Preserve source, worktrees and transcripts.
+
+Maintain two-way resource-manager contact for fresh capacity, grants, launches,
+handoffs and verified folds. Live capacity supersedes the stored five-worker
+fallback, which applies only when the manager is unavailable, stale or disabled.
+Explicit user ceilings and native quotas remain, including in cloud environments.
+Idle/finished-but-unclosed workers still consume capacity; unknown is not free.
 
 ## Auto-generated signatures
 <!-- Updated by gen-context.js -->

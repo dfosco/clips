@@ -113,8 +113,11 @@ describe('documented role decisions (not live model compliance)', () => {
     expect(compact(delivery)).toContain('may coalesce selected Goal reviews into one Lane CR');
     expect(compact(delivery)).toContain('not duplicate Goal and Lane approvals');
     expect(compact(delivery)).toContain('A generic waiting label is not a review request');
-    expect(compact(delivery)).toContain('confirms the handoff is stable before using');
-    expect(compact(delivery)).toContain('A human review wait does not require keeping an idle worker alive');
+    expect(compact(delivery)).toContain('Always fold a finished developer promptly');
+    expect(compact(delivery)).toContain('persist it on the respective Goals');
+    expect(compact(delivery)).toContain('read and acknowledge the latest attached context');
+    expect(compact(delivery)).toContain('immediately close the native worker and its owned process');
+    expect(compact(delivery)).toContain('pending Goal review never keeps it open');
     expect(compact(delivery)).toContain('Attaching a CR alone does not request review');
     expect(compact(delivery)).toContain('ADR approval settles a decision and does not accept');
     expect(compact(delivery)).toContain('review pr import <id> --event <PullRequestReview-GraphQL-node-ID> --json');
@@ -158,15 +161,34 @@ describe('documented role decisions (not live model compliance)', () => {
       ['Native launch capability or credentials are missing or denied', 'Report the actual blocker; model fallback does not replace the capability', 'Stop affected dispatch'],
     ]);
 
-    const cloud = compact(section(skills['lane-manager'], 'Read and announce the Lane worker budget'));
-    expect(cloud).toContain('reliable native metadata for the current manager session explicitly confirms');
-    expect(cloud).toContain('Do not infer cloud from a hostname, repository remote, SSH connection, container');
-    expect(cloud).toContain('skip only the stored project cap without changing its positive numeric value');
+    const capacity = compact(section(skills['lane-manager'], 'Read and announce the Lane worker budget'));
+    expect(capacity).toContain('Fresh enabled resource-manager capacity replaces that fallback');
+    expect(capacity).toContain('do not take the minimum with five');
+    expect(capacity).toContain('neither a finished result nor idle status frees a slot');
+    expect(capacity).toContain('Cloud execution never implies unlimited capacity');
     expect(decisions(skills['lane-manager'], 'Read and announce the Lane worker budget')).toEqual([
-      ['Current manager metadata explicitly confirms cloud', 'Do not apply the configured project cap; leave its stored value unchanged', 'Keep explicit user ceilings and native quotas'],
-      ['Metadata says local, is absent, or is ambiguous', 'Apply the configured positive-integer cap', 'Keep explicit user ceilings and native quotas'],
-      ['Cloud is confirmed and the user set a ceiling for this Lane', 'Skip only the project cap', "Enforce the user's Lane ceiling and native quotas"],
+      ['Resource manager is enabled, available and fresh', 'Use its live grants; do not also cap at the stored value', 'Keep explicit user ceilings and native quotas'],
+      ['Resource manager is unavailable, stale or disabled', 'Apply the configured fallback, default 5 workers per Lane', 'Keep explicit user ceilings and native quotas'],
+      ['Current session is cloud-hosted', 'Use the same live-manager-or-fallback precedence', 'Keep explicit user ceilings and native quotas'],
     ]);
+  });
+
+  it('requires native folding on every harness with Goal-attached context and a critical close-first exception', () => {
+    const delivery = compact(fs.readFileSync(path.resolve('.agents/skills/lanes/references/delivery.md'), 'utf8'));
+    expect(delivery).toContain('close the native agent/sub-agent/session or tab and terminate its owned runtime process on every harness');
+    expect(delivery).toContain('Marking a Task complete, returning a result, idling, detaching, hiding a tab, or merely interrupting a turn does not fold it');
+    expect(delivery).toContain('each respective Goal');
+    expect(delivery).toContain('lanes handoff record <goal-or-task-ref> --file handoff.json');
+    expect(delivery).toContain('Keep capacity occupied until closure is verified');
+    expect(delivery).toContain('critical resource condition, close immediately');
+    expect(delivery).toContain('Do not wait for a developer response, manager acknowledgment, fresh context, attachment write, checkpoint, or quiescence');
+    expect(delivery).toContain('`reason: resource_critical` and `incomplete: true`');
+    expect(delivery).toContain('Preserve source, worktrees, transcripts and association history');
+    for (const text of [agentGuidance, skills.lanes, skills['lane-manager'], skills['lane-dev'], workContracts, cliReference]) {
+      expect(compact(text)).toMatch(/fold.*promptly|promptly.*fold/i);
+      expect(compact(text)).toMatch(/critical.*(immediate|closes first|closes \*\*first\*\*)/i);
+      expect(compact(text)).not.toMatch(/(?:Confirmed idle|completed workers) free (?:slots|capacity)/i);
+    }
   });
 
   it('uses each host’s discovered model and launch surfaces without inventing fields', () => {
